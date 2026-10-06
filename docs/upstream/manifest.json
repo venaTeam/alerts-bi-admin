@@ -1,17 +1,17 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "e61f4d87dd985c1f9b3a379a6844f2bac7cccd01",
+  "revision": "75fa93bef16628faf66e795ec80ea821986101cb",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
-    "docs/upstream/alerts_bi_design.md": "98f50de1abc2aa133400119787e81b8cbe46760bd013469af7a77d1461256aa7",
+    "docs/upstream/alerts_bi_design.md": "de3e3c9da9ebe3ee1cd7bfb44f2303d2ac08e817ff8fa78e24fcf21c1ddac306",
     "docs/upstream/alerts_bi_flow.md": "e57594d670dad4d49830461c681f766cf33af050142ab1841a467ecf23aab105",
     "docs/upstream/alerts_bi_implementation_plan.md": "1499dcdadcaab420d851593fabb87bdd9cbe944f95a97c3be884ab93f34c16f6",
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",
     "docs/upstream/openshift-deployment.md": "9e68683ba85eb20fcc51c956fb39003d1d3f6cd9d2c2bffc30c349b6f0cce168",
     "docs/upstream/outputs.md": "a19cbbc848d204a999e615d7950ad972a9b693778917e9e23853839d5b989ece",
-    "docs/upstream/repository-separation-plan.md": "77ff312a589ffcb598088cf148c3e40ba3e3d60b7e15b8d677f78737e6fa8aba",
-    "docs/upstream/source-map.md": "ece96666197091c8e17d4c1b8297b5861e4c31cf34c3543fbd39991d119cfc60",
+    "docs/upstream/repository-separation-plan.md": "b3d592f71f0d82333c7baee88ae9acbdbf999e0b64f5bd776bba95b7bfea6f13",
+    "docs/upstream/source-map.md": "e292bc051fffd6798e14cbb8d97ed87de5ecc515f0f9ab43b1a12fa34f0fed73",
     "docs/upstream/superpowers/plans/2026-10-01-team-summary.md": "d618655c5445f235fed2647e8fe2d4699adb9de489b0045669d951114ff18b51",
     "docs/upstream/superpowers/specs/2026-10-01-team-summary-design.md": "42d187ce45fe3f25a2021c10b1f946b6cd40c7ae4a1982f47c5cb97cc424add9",
     "docs/upstream/team_alert_status.md": "8a11d1d1cbb398549803458b4faaffba96374d2b88e61e88a8f2c05d045371b2",
@@ -22,6 +22,7 @@
     "docs/upstream/contracts/sql-views.json": "fade8ce892101a663e275286ec25cf0f2f240a0153c3aac5b4bc83781bc1c32c",
     "docs/upstream/contracts/teams.schema.json": "9250f20f06262e3f75a122d660b08b3a4fa8554789aba98e0f55e8b8eed89e52",
     "docs/upstream/contracts/trigger-openapi.json": "73b076565d55aa67df36e2115550b4e848ebf459d523cf71706ef2935c5053b1",
-    "docs/decisions/001-repository-separation.md": "208d2d2a8683d91d41c30de0a0b2c019de21340ef324058fc54b4c480f745744"
+    "docs/decisions/001-repository-separation.md": "208d2d2a8683d91d41c30de0a0b2c019de21340ef324058fc54b4c480f745744",
+    "docs/decisions/002-flat-application-source.md": "6c96813e818816e0f1967c3137a962849e19c6b05a5e13aa63714dd65d8b8b99"
   }
 }

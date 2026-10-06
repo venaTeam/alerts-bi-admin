@@ -19,6 +19,8 @@ Authenticated operator actions and completed-run review; consumes shared and ope
 
 ### Project invariants
 
+- Application code lives directly in src. Use relative imports within the app and src imports for local tests/scripts. Setuptools maps src to the service namespace in installed packages; preserve that namespace and independent builds.
+
 - Before answering a repository question or doing repository work, read the canonical design in full. Read the runtime flow and implementation blueprint in full for architecture, implementation or integration. If the design cannot be read, stop and report the blocker.
 - Design > approved flow > implementation blueprint > code. Read outputs.md before changing exports, report rendering or API contracts. Read both alerting guides completely for rule, scoring, prompt or alert-quality work.
 - Use the pinned docs/upstream snapshot when this repository is cloned alone. It is an immutable input: propose product changes in alerts-bi-design and refresh the recorded revision/hashes. Do not silently edit snapshots or reinterpret approved behavior.

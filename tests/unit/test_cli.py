@@ -3,8 +3,7 @@
 import argparse
 
 import pytest
-
-from alerts_bi_admin.cli import _operator, build_parser
+from src.cli import _operator, build_parser
 
 
 @pytest.mark.parametrize(

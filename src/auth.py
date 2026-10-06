@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 from starlette.requests import Request
 
-from alerts_bi_admin.config import AdminSettings
+from .config import AdminSettings
 
 __all__ = ["csrf_token", "identity", "same_site", "valid_csrf"]
 

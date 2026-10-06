@@ -1051,7 +1051,7 @@ The existing SQL database/login and `portal_*` publication boundaries remain unc
 Consumer readiness compiles its required read columns and returns a redacted 503 for
 missing schema; portal performs this check only through its allowed views.
 Runs owns revisions 001–008 and their byte-identical SQL and revision files; a minimal
-legacy `src.db.ledger` import bridge preserves historical revisions. No new migration,
+legacy `src.db.ledger` import bridge in `compat/src` preserves historical revisions. No new migration,
 database split, service API, analysis behavior or deployment is approved by this move.
 Registry values stay in runs and are supplied to admin as a deployment artifact. Design
 owns the schema and guides; packaged copies and application documentation snapshots are
@@ -1064,3 +1064,11 @@ The [separation plan](repository-separation-plan.md) records the detailed bounda
 choices. Actual tested commits and limitations belong in `releases/`, separately from
 this product specification. Historical document commands refer to the original single
 repository; current operating commands are in each application's README.
+
+**Source layout revised 2026-10-06 by the product owner.** Application code lives
+directly in each app repository's `src/` directory, without another service-named
+directory beneath it. Relative application imports allow local checks against `src`.
+Setuptools maps that source directory to the distinct installed `alerts_bi_runs`,
+`alerts_bi_portal`, or `alerts_bi_admin` namespace, so coordinated tests can install
+all three distributions without a module collision. Entry-point names, shared-library
+namespaces, immutable migrations/resources, and analysis versions remain unchanged.

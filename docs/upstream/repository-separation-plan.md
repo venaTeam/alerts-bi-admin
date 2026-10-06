@@ -58,7 +58,7 @@ alerts-bi-workspace/                   no .git here
     pyproject.toml
     uv.lock
     Dockerfile
-    src/alerts_bi_runs/
+    src/
     packages/
       shared/                          separately built alerts-bi-shared wheel
       operations/                      separately built alerts-bi-operations wheel
@@ -75,7 +75,7 @@ alerts-bi-workspace/                   no .git here
     pyproject.toml
     uv.lock
     Dockerfile
-    src/alerts_bi_portal/
+    src/
     tests/
     docs/
   alerts-bi-admin/
@@ -86,7 +86,7 @@ alerts-bi-workspace/                   no .git here
     pyproject.toml
     uv.lock
     Dockerfile
-    src/alerts_bi_admin/
+    src/
     tests/
     docs/
 ```

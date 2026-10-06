@@ -25,10 +25,10 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from starlette.concurrency import run_in_threadpool
 
-from alerts_bi_admin import pages, queries, summary
-from alerts_bi_admin.auth import csrf_token, identity, same_site, valid_csrf
-from alerts_bi_admin.config import AdminSettings
-from alerts_bi_admin.readiness import check_schema
+from . import pages, queries, summary
+from .auth import csrf_token, identity, same_site, valid_csrf
+from .config import AdminSettings
+from .readiness import check_schema
 
 __all__ = ["SECURITY_HEADERS", "build_admin"]
 

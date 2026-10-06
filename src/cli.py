@@ -11,7 +11,7 @@ from alerts_bi_shared.db.connection import connect
 from alerts_bi_shared.logging_setup import log, redact_error
 from alerts_bi_shared.timefmt import iso_instant
 
-from alerts_bi_admin.config import AdminConfig, load_config
+from .config import AdminConfig, load_config
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -226,8 +226,8 @@ def _command_registry(args: argparse.Namespace, config: AdminConfig) -> int:
 def _command_admin(args: argparse.Namespace, config: AdminConfig) -> int:
     import uvicorn
 
-    from alerts_bi_admin.app import build_admin
-    from alerts_bi_admin.config import load_admin_settings
+    from .app import build_admin
+    from .config import load_admin_settings
 
     settings = load_admin_settings(
         config,

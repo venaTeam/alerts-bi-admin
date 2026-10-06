@@ -44,7 +44,7 @@ from alerts_bi_shared.ui.html import h
 from alerts_bi_shared.ui.summary_view import render_summary_sections
 from alerts_bi_shared.window import WINDOW_DAYS
 
-from alerts_bi_admin import pages
+from . import pages
 
 __all__ = [
     "PAGE_SIZE",

@@ -22,11 +22,15 @@ alerts-bi-shared = {path = "vendor/alerts_bi_shared-0.1.0-py3-none-any.whl"}
 alerts-bi-operations = {path = "vendor/alerts_bi_operations-0.1.0-py3-none-any.whl"}
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=80,<81"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/alerts_bi_admin"]
+[tool.setuptools]
+packages = ["alerts_bi_admin"]
+package-dir = {"alerts_bi_admin" = "src"}
+
+[tool.setuptools.package-data]
+alerts_bi_admin = ["py.typed"]
 
 [tool.ruff]
 line-length = 100
@@ -49,4 +53,4 @@ disallow_any_explicit = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = ["error::DeprecationWarning:alerts_bi_admin.*"]
+filterwarnings = ["error::DeprecationWarning:alerts_bi_admin.*", "error::DeprecationWarning:src.*"]

@@ -8,10 +8,9 @@ from unittest.mock import Mock
 import pytest
 from alerts_bi_shared.db.connection import Database
 from fastapi.testclient import TestClient
-
-from alerts_bi_admin import app
-from alerts_bi_admin.config import AdminSettings, load_config
-from alerts_bi_admin.readiness import REQUIRED_COLUMNS
+from src import app
+from src.config import AdminSettings, load_config
+from src.readiness import REQUIRED_COLUMNS
 
 
 def client_for(monkeypatch: pytest.MonkeyPatch, db: Mock) -> TestClient:

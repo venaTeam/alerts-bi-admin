@@ -9,8 +9,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import pytest
-
-from alerts_bi_admin.summary import (
+from src.summary import (
     AdminSummary,
     Publication,
     WorklistFilter,

@@ -1,0 +1,4 @@
+include uv.lock README.md AGENTS.md CLAUDE.md .env.example Dockerfile
+recursive-include docs *.md *.json
+recursive-exclude * __pycache__ *.pyc
+recursive-include vendor *.whl

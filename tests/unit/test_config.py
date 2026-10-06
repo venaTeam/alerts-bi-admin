@@ -4,8 +4,7 @@ import ast
 from pathlib import Path
 
 import pytest
-
-from alerts_bi_admin.config import load_admin_settings, load_config
+from src.config import load_admin_settings, load_config
 
 
 def test_admin_needs_no_pipeline_configuration(
@@ -37,7 +36,7 @@ def test_database_and_registry_overrides_are_preserved(monkeypatch: pytest.Monke
 
 
 def test_admin_imports_no_pipeline_or_portal() -> None:
-    sources = Path(__file__).resolve().parents[2] / "src" / "alerts_bi_admin"
+    sources = Path(__file__).resolve().parents[2] / "src"
     forbidden = ("alerts_bi_runs", "alerts_bi_portal", "elasticsearch", "openai")
     modules = list(sources.rglob("*.py"))
     assert modules

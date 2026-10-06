@@ -5,9 +5,8 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 import pytest
-
-from alerts_bi_admin.auth import csrf_token, valid_csrf
-from alerts_bi_admin.config import AdminSettings, load_config
+from src.auth import csrf_token, valid_csrf
+from src.config import AdminSettings, load_config
 
 SECRET = "k" * 40
 TODAY = date(2026, 9, 24)
