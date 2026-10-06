@@ -1,0 +1,22 @@
+{
+  "source_commit": "c518eeaeb5a3ecb35b5348828300454379e7d535",
+  "schema_head": "008_measurement_basis",
+  "files": {
+    "001_initial_schema.sql": "7c4f43ce0aa698bcf82b1694143fe9dd5f68a35430c1a8461c7296f958dde41a",
+    "002_review_portal.sql": "593539fb7f5e3b458f107b79e348ee62a5d74841a220be97e0bd01fcbae012c6",
+    "003_weekly_schedule.sql": "ff86a3e91c2c673d496a27f5f378d303ea549f2ddf12e42ae52f4b800e1b70e7",
+    "004_llm_review_audit.sql": "5ee9567d19fada7ba282a15b2da9da1afe610ae9635bf91f850ee4cbf17671a7",
+    "005_team_summary.sql": "c2460bdd323ef1a06e903703d0790f4da39a9b04771176aaa8520203c75146fd",
+    "006_r6_episodes.sql": "a5a54305d3fe5e1cda6a0d78dbbb7b098785328a37b92d13d8e8a1652ffe29b7",
+    "007_portal_daily.sql": "324d7ed4c4dc7dc8adf6ca0df33ad70f035bfda458639be976aafd0052512b1a",
+    "008_measurement_basis.sql": "d93bed0f964cad6e2a7a62a2e458c2c748c2a848a47fe5891b92c35c1c3815c3",
+    "versions/001_initial_schema.py": "ec597bf634ec7948ca6499b7e1006886af0f1cec81293b855e43dc008f75dbdc",
+    "versions/002_review_portal.py": "2625dd571cb0c11e00bc1110da7502b4ad2699d3448f61b0849d62373f8a0e11",
+    "versions/003_weekly_schedule.py": "a8a4c0e163a8c061557d0a3ede9049826091a13af0139e7800e11e71cfbfcb1e",
+    "versions/004_llm_review_audit.py": "e4586280444e08ca18d78ffc82a1ca0872a0414ec33daa9a202e0f0f6156be51",
+    "versions/005_team_summary.py": "26ba91b86257fdaf23b938cc43e4aa46aef2addb8a3bc558df16326716d341d1",
+    "versions/006_r6_episodes.py": "4ad68accfd8c04efe3a13beaea6ff49cdd4ebe11ec87dde553bc0f9902eda761",
+    "versions/007_portal_daily.py": "8b6f4e0c50ef1442eab8399aeb3d2336ab296ccbd65adebeeaa0443ec3658dfb",
+    "versions/008_measurement_basis.py": "c88c2e073e9a110df863bba3590311e765fd574b05256425bcf40ee110785f93"
+  }
+}

@@ -1,0 +1,52 @@
+[project]
+name = "alerts-bi-admin"
+version = "0.1.0"
+description = "Alerts BI operator app for publication and human decisions"
+requires-python = ">=3.12"
+readme = "README.md"
+dependencies = [
+    "alerts-bi-shared==0.1.0",
+    "alerts-bi-operations==0.1.0",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.32,<1",
+]
+
+[project.scripts]
+alerts-bi-admin = "alerts_bi_admin.cli:run_cli"
+
+[dependency-groups]
+dev = ["pytest>=8.3,<9", "ruff>=0.8,<0.13", "mypy>=1.13,<2", "httpx>=0.27,<1"]
+
+[tool.uv.sources]
+alerts-bi-shared = {path = "vendor/alerts_bi_shared-0.1.0-py3-none-any.whl"}
+alerts-bi-operations = {path = "vendor/alerts_bi_operations-0.1.0-py3-none-any.whl"}
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alerts_bi_admin"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src", "tests"]
+strict = true
+warn_unreachable = true
+disallow_any_explicit = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:alerts_bi_admin.*"]

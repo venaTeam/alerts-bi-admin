@@ -1,0 +1,3 @@
+# Preserve exact resource, migration and contract bytes on every platform.
+* -text
+*.whl binary
