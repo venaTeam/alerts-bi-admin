@@ -1,5 +1,7 @@
 # Deploying Alerts BI to OpenShift
 
+> Superseded topology (2026-10-08): use `unified-console-deployment.md` for the unified operator service. Do not deploy the unauthenticated trigger Deployment/Service in this historical guide. Portal, database and weekly-job guidance still applies.
+
 **Last updated:** 2026-09-24
 
 **Status: proposed, not proven.** Nothing here has been exercised on a cluster. Kubernetes

@@ -1,4 +1,4 @@
-"""Operator CLI and independent admin listener; no analysis pipeline imports."""
+"""Operator CLI and unified admin listener; analysis uses the packaged runs runtime."""
 
 from __future__ import annotations
 

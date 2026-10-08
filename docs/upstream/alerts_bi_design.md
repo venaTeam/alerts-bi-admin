@@ -1,7 +1,19 @@
 # Alerts BI — Design Document
 
-**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12); LLM review upgrade and evaluation tooling (section 7.13); team summary, R6 and `unseen` (section 7.14)
-**Last updated:** 2026-10-06
+## Accepted consolidation — 2026-10-08
+
+The user approved implementing the team-centered unified operator mock and, on 2026-10-08, explicitly requested delivery in `alerts-bi-admin`. This amendment supersedes the separate unauthenticated trigger and admin web-service boundaries in sections 7.9, 7.12 and 7.16, the original repository-separation decision, and the earlier placement of the console in the runs repository. `alerts-bi-admin serve` owns the authenticated operator console and its run API. Its editable UI source lives in the admin repository. A pinned, immutable `alerts-bi-runs-runtime` wheel supplies existing analysis/API/config adapters in-process; no sibling checkout or separate trigger listener is required. The engine code is exported from a recorded runs Git revision without scoring, prompt or migration changes. Admin may import these packaged adapters, superseding its earlier no-runs-import boundary. The runtime and full runs distributions share a Python namespace and must use separate environments. Runs retains engine, migration, registry and weekly-job ownership. Portal remains a separate read-only service.
+
+The approved mock has three workspace navigation items: Teams, Schedule and Decisions; there is no separate Runs item. Opening a team shows its run history above a selected run with Overview, Findings, Decisions and Activity tabs. Overview uses compact, separate v1/v2 cards and a review-focus panel. Run details and versions expand to retain the detailed summary, complete-day charts, filtered SQL work list, panel SQL and four approved exports. Findings uses a selectable list beside one evidence and human-decision panel. The global Decisions page spans teams and runs; its links open the exact finding, including across pages. The run Decisions tab stays scoped to that run. Schedule shows real weekly review outcomes with links to team runs. Activity shows run/publication history and the team's schedule log. New run, Publish review, Withdraw review and Record decision use accessible modal dialogs. Analysis completion and publication state are separate. This visual clarification, accepted 2026-10-08, corrects the implementation to match the user's mock rather than replacing its navigation or exposing all features on one page.
+
+New run is scoped to the selected registered team, takes a UTC window end and live/fake/off model mode, and invokes the existing synchronous execution/persistence/reporting path under the existing process gate. Its window is exactly the preceding 168 hours. UI and JSON triggers share the gate. Manual completion does not publish. Existing publish/replace/gap, withdraw-with-reason and published-run decision rules remain authoritative. Actions return to the selected team/run; an explicit cross-team run selection is refused. No migration, scoring, prompt, deterministic identifier or output-content changes are authorized by this consolidation.
+
+All console and API routes require the proxy identity (or an explicitly supplied local `--dev-user`). The listener refuses non-loopback addresses and requires `ADMIN_SECRET` of at least 32 characters. Browser writes use same-site CSRF forms; JSON `POST /runs` requires `X-CSRF-Token` obtained from authenticated `GET /csrf`. No unauthenticated trigger Service remains in the deployment topology. Existing request/response payloads and export routes are retained behind authentication; the old API factory is a compatibility/test harness, not a deployment entry point. Default port is 8200; `ADMIN_*` configuration is retained, with `ADMIN_OUT_DIR` for writable execution output and existing `SQL_*`, `ES_*` and `LLM_*` runtime settings. One replica and one worker preserve the existing process-local gate guarantee.
+
+The implementation remains server-rendered with a content-addressed stylesheet and a small same-origin script for accessible dialogs, team selection, UTC-window previews and trigger feedback. Empty teams, failed runs, refusal messages, keyboard-accessible forms and narrow viewports are required states. Infrastructure rollout is a separate authorized action; see `unified-console-deployment.md`.
+
+**Status:** MVP design settled and implemented; implementation language changed to Python (section 7.7); read-only review portal added (section 7.10); automatic weekly reviews (section 7.11); operator admin app (section 7.12); LLM review upgrade and evaluation tooling (section 7.13); team summary, R6 and `unseen` (section 7.14); the portal's team week split into tabs (section 7.10, amended 2026-10-04)
+**Last updated:** 2026-10-08
 
 ---
 
@@ -750,7 +762,7 @@ Four states are kept distinct and never inferred from one another:
 * A **`needs_review`** finding states the specific decision a person has to make.
 * **v2 readiness gaps** are shown in their own section, apart from quality.
 
-`key_field` and rule ids sit in a collapsed technical area. The portal never queries Elasticsearch. It reads the stored representative document through database views that extract only the fields above. All alert text is HTML-escaped, and a link is rendered only for an absolute `http(s)` URL.
+`key_field` sits in a collapsed technical area; rule ids are not shown at all (amended 2026-10-04, below). The portal never queries Elasticsearch. It reads the stored representative document through database views that extract only the fields above. All alert text is HTML-escaped, and a link is rendered only for an absolute `http(s)` URL.
 
 **Human decisions are a separate, append-only record.** A decision attaches to one finding on one exact identity (`alert_schema`, `application`, `key_field`, finding id), is made against a published week, and is never updated or deleted: a later decision is a new row, and readers see the whole history. It never alters `quality_state` or the stored model verdict. Because it is keyed on the exact identity, it does not carry over to the new v2 key minted when a team enriches an alert (section 3.7).
 
@@ -761,6 +773,14 @@ Four states are kept distinct and never inferred from one another:
 * **The operator surface** is the admin web app of section 7.12, and the command line with the same SQL credential: `publish`, `unpublish`, `publications`, `decide` and `decisions`. The unauthenticated run endpoint of section 7.9 stays on its own loopback listener and is never mounted on the portal.
 
 Scope is otherwise unchanged. A run still names one team, `run_at` is still captured once, and the scorecard and the three CSV exports are unchanged. Nothing here ranks teams against each other: the directory lists teams alphabetically.
+
+**Amended 2026-10-04 (product owner): the team week in tabs.** One long page had become hard to read, so a team's published week is split into seven tabs, each its own GET address under `/teams/{team}/weeks/{week}`: **Overview** (the week's own address: each schema's alerts, events and review outcome, the key findings, the phase and the loudest alert), **Fix list** (`/fix`: what to change, grouped as fix or delete, advisory and get v2 ready, then the paginated alert list with its filters; the alert page opens from it), **Volume** (`/volume`: the loudest alerts and their firing patterns), **Dashboards** (`/dashboards`: hidden and `unseen` alerts), **Migration** (`/migration`: phases, what is left in v1, phase-2 readiness and the critical alerts without a runbook), **History** (`/history`: the weekly charts and the list of published weeks) and **Slides** (`/slides`: the presentation frames of section 7.14). Every rule of this section still holds on every tab.
+
+* **Problems are named, never numbered.** The portal shows a problem in plain words ("No rule link", "Generic message") and never a rule id; ids travel only in the query strings of filter links. The key-finding sentences, shared with the admin app, follow the same rule.
+* **Copy is short.** A label, a number and one sentence to fix; no explanatory paragraphs. An empty section is one line.
+* **The week menu is a list of links,** because there is no script to submit a select; it keeps the open tab. Each schema's card is named by its schema name alone.
+* **Two widgets are not on the portal's tabs:** the per-application table and the phase-1 estimate. They stay on the admin summary, and the presentation slides keep both. The estimate's bounds in section 7.14 are unchanged.
+* Links from before the tabs (`/teams/{team}?rule=R1` and the other work-list parameters) redirect to the Fix list with their filters; a bad filter value is still refused.
 
 ### 7.11 Automatic weekly reviews
 
@@ -892,7 +912,7 @@ The proposed gates and remaining policy decisions remain in `llm_review_upgrade_
 gains `GET /teams/{team_id}/summary` for any completed run, internals included. The reader
 portal (section 7.10) gains a Summary section on the team week page for published weeks,
 under every portal rule: weekly totals, no per-day rate, no run id or version, no script. Its presentation slides add one within-week view, the day-by-day distinct and rule-flagged distinct alerts of the one selected published week, labelled "by UTC day" (section 7.10, amended 2026-10-01).
-Both are rendered from the same pure building blocks (`src/insights`). The summary shows,
+Both are rendered from the same pure building blocks (`src/insights`). **Amended 2026-10-04:** the portal spreads them over the tabs of section 7.10 instead of one Summary section, without the per-application table and without the estimate outside the slides. The summary shows,
 for one run: volume and rule-flagged tiles per schema, model coverage, phase, why alerts
 were flagged by rule, templated key findings, noisy alerts by application, how often alerts
 fire, the biggest single source, the per-rule table with what to change, hidden and
@@ -1072,3 +1092,39 @@ Setuptools maps that source directory to the distinct installed `alerts_bi_runs`
 `alerts_bi_portal`, or `alerts_bi_admin` namespace, so coordinated tests can install
 all three distributions without a module collision. Entry-point names, shared-library
 namespaces, immutable migrations/resources, and analysis versions remain unchanged.
+
+## Global portal application filter — 2026-10-08
+
+The product owner requested a multi-application selector on team pages and clarified that
+it applies across every tab. Place it above the tab navigation. List application values
+from this team's published alerts across its available weeks. Select several values,
+apply them together, remove individual selected values, or use **Show all** to restore the
+team view. A GET form and repeated `apps` query parameters keep the selection bookmarkable
+without scripts. `scope=selected` with no `apps` is an empty selection, not all applications.
+Unknown or absent values match no alerts; they never broaden the selection.
+
+Preserve the selection through Overview, Fix list, Volume, Dashboards, Migration, History,
+Slides, week navigation, alert detail/back links, local Fix list filters and pagination.
+Changing application selection resets pagination while retaining the local filters.
+Filter alerts, findings, weekly counts, weekly history and migration estimates consistently;
+keep v1 and v2 separate. Application options are not narrowed by other filters.
+
+Implementation treatment for existing stored data: weekly identity/event totals and
+per-rule matched events are available from `portal_alerts`; daily application buckets and
+the union of rule-flagged event matches are not. Do not infer daily points from first/last
+timestamps, add overlapping rule counts, or treat every event of an unseen identity as
+unseen. Show **Application breakdown unavailable** (or **event share unavailable**) where
+these metrics cannot be calculated, retaining accurate affected-alert counts. This change
+does not extend future run storage or change the SQL contract. The published team phase,
+team readiness percentage and review note remain whole-team context, explicitly labeled
+while filtering; readiness alert lists and remaining-work estimates use selected alerts.
+Slides identify the application selection in their footer and label team context.
+
+All existing read-only, network, publication-isolation, escaping and CSP guarantees apply.
+The default with no filter retains the current complete-team behavior.
+
+**Dropdown interaction, requested 2026-10-08:** the application and week selectors close
+when the reader clicks outside the open dropdown. Opening either selector closes the
+other; Escape also dismisses it. Interacting with application checkboxes keeps that
+dropdown open until Apply or dismissal. Use native automatic HTML popovers so the portal
+continues to work without scripts and retains its existing CSP and GET-only forms.

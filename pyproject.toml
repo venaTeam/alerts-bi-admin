@@ -5,8 +5,9 @@ description = "Alerts BI operator app for publication and human decisions"
 requires-python = ">=3.12"
 readme = "README.md"
 dependencies = [
-    "alerts-bi-shared==0.1.0",
-    "alerts-bi-operations==0.1.0",
+    "alerts-bi-runs-runtime==0.1.0+admin.20261008",
+    "alerts-bi-shared==0.1.2",
+    "alerts-bi-operations==0.1.2",
     "fastapi>=0.115,<1",
     "uvicorn>=0.32,<1",
 ]
@@ -18,8 +19,9 @@ alerts-bi-admin = "alerts_bi_admin.cli:run_cli"
 dev = ["pytest>=8.3,<9", "ruff>=0.8,<0.13", "mypy>=1.13,<2", "httpx>=0.27,<1"]
 
 [tool.uv.sources]
-alerts-bi-shared = {path = "vendor/alerts_bi_shared-0.1.0-py3-none-any.whl"}
-alerts-bi-operations = {path = "vendor/alerts_bi_operations-0.1.0-py3-none-any.whl"}
+alerts-bi-runs-runtime = {path = "vendor/alerts_bi_runs_runtime-0.1.0+admin.20261008-py3-none-any.whl"}
+alerts-bi-shared = {path = "vendor/alerts_bi_shared-0.1.2-py3-none-any.whl"}
+alerts-bi-operations = {path = "vendor/alerts_bi_operations-0.1.2-py3-none-any.whl"}
 
 [build-system]
 requires = ["setuptools>=80,<81"]
@@ -53,4 +55,5 @@ disallow_any_explicit = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["integration: requires the disposable alerts_bi_test SQL database and local Elasticsearch mock"]
 filterwarnings = ["error::DeprecationWarning:alerts_bi_admin.*", "error::DeprecationWarning:src.*"]

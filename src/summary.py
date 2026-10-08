@@ -927,3 +927,72 @@ def summary_page(user: str, summary: AdminSummary, *, shared: str) -> str:
         f"{_worklist_html(summary)}"
     )
     return pages.layout(f"Summary · {inputs.display_name}", user, body)
+
+
+def detailed_content(summary: AdminSummary) -> str:
+    """Existing summary features inside the team's selected-run workspace."""
+    team_id, run_id = summary.inputs.team_id, str(summary.run["run_id"])
+    base = f"/runs/{quote(run_id, safe='')}"
+    downloads = "".join(
+        f'<a class="button" href="{h(base)}/{name}">{label}</a>'
+        for name, label in (
+            ("scorecard.html", "Scorecard"),
+            ("daily_metrics.csv", "Daily metrics CSV"),
+            ("rule_counts.csv", "Rule counts CSV"),
+            ("alert_worklist.csv", "Work list CSV"),
+        )
+    )
+    return (
+        f'{_strip(summary.run)}<p class="sub">v1 operators: {h(", ".join(summary.entry.v1_operators) or "none")} · '
+        f"v2 operator: {h(summary.entry.v2_operator or 'none')} · {len(summary.entry.panels)} panels</p>"
+        f'<div class="links">{downloads}</div>{shared_sections(summary)}'
+        '<section id="days"><div class="section-h"><h2>Day by day</h2><p class="sub">Complete UTC days only; partial first and last days are excluded.</p></div>'
+        f"{day_by_day(summary.daily, summary_url(team_id, run_id))}</section>"
+        '<section class="card block" id="panels"><h2>Panel SQL</h2><p class="sub">Frozen at run time. Marked clauses show applied or unmeasured team suppression.</p>'
+        f"{_panels(summary)}</section>{_worklist_html(summary)}"
+    )
+
+
+def overview_content(summary: AdminSummary) -> str:
+    """Compact approved overview; retain advanced reports beneath a disclosure."""
+    cards = []
+    for schema, label in (("v1", "Original schema"), ("v2", "New schema")):
+        totals = summary.inputs.schemas[schema]
+        measures = "".join(
+            f'<div class="abi-measure"><span>{text}</span><strong>{totals.states.get(state, 0):,}</strong></div>'
+            for state, text in (
+                ("rule_flagged", "Rule flagged"),
+                ("llm_flagged", "Model advisory"),
+                ("needs_review", "Needs review"),
+                ("assessed_good", "Assessed good"),
+                ("unassessed", "Unassessed"),
+            )
+        )
+        if schema == "v2":
+            measures += f'<div class="abi-small abi-muted abi-mt">Readiness gaps: {totals.readiness_gaps:,} · tracked separately from quality</div>'
+        cards.append(
+            f'<section class="abi-panel abi-panel-pad abi-schema {schema}"><div class="abi-row abi-between"><h2>{schema}</h2>{pages.badge(label, schema)}</div><div class="abi-metrics"><div><div class="abi-big">{totals.distinct_alerts:,}</div><div class="abi-small abi-muted">distinct alerts this week</div></div><div><div class="abi-big">{totals.events:,}</div><div class="abi-small abi-muted">events this week</div></div></div>{measures}</section>'
+        )
+    findings = summarize(summary.inputs).key_findings[:3]
+    focus = "".join(f"<li><strong>{h(f.title)}</strong> {h(f.body)}</li>" for f in findings)
+    if not focus:
+        focus = "<li>No review focus identified from the stored analysis.</li>"
+    run = summary.run
+    versions = "".join(
+        f"<div><dt>{label}</dt><dd>{h(value or '—')}</dd></div>"
+        for label, value in (
+            ("Run ID", run["run_id"]),
+            ("Ruleset", run.get("ruleset_version")),
+            ("Prompt", run.get("prompt_version")),
+            ("Model", run.get("model_version")),
+            ("Window start", format_instant(run["window_start"])),
+            ("Window end", format_instant(run["window_end"])),
+        )
+    )
+    filtered = summary.filters != WorklistFilter()
+    return (
+        '<div class="abi-small abi-muted">Weekly totals · v1 and v2 shown separately</div>'
+        f'<div class="abi-overview">{"".join(cards)}</div><section class="abi-panel abi-panel-pad"><h3>Review focus</h3><ul class="abi-review-list">{focus}</ul><a class="abi-btn" href="{h(pages.team_url(summary.inputs.team_id, str(run["run_id"]), "findings"))}#selected-run">Inspect findings {pages.icon("arrow")}</a></section>'
+        f'<details class="abi-panel abi-panel-pad"{" open" if filtered else ""}><summary>Run details and versions</summary><dl class="abi-dl">{versions}</dl>'
+        f'<details class="abi-mt"{" open" if filtered else ""}><summary>Detailed analysis, charts and exports</summary><div class="abi-legacy">{detailed_content(summary)}</div></details></details>'
+    )

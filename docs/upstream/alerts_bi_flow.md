@@ -1,5 +1,9 @@
 # Alerts BI — Runtime Flow
 
+## Unified operator service amendment — 2026-10-08
+
+The accepted consolidation in `alerts_bi_design.md` supersedes the separate trigger/admin web topology described below. `alerts-bi-admin serve` now provides authenticated Teams → team run history → selected run Overview/Findings/Decisions/Activity, alongside global Schedule and Decisions pages. The approved compact overview, split findings panel and action dialogs retain trigger/publish/withdraw/decide; detailed charts, SQL, filters and exports expand under run details. It reuses the existing SQL/reporting and review operations; portal, weekly scheduling, exact 168-hour windows, migration ownership and output payloads remain unchanged. JSON triggers require proxy identity and `X-CSRF-Token` from `/csrf`. Browser writes require same-site form CSRF. The admin repository owns UI source and vendors a pinned execution-runtime wheel; no sibling checkout or separate trigger listener is required. Deploy one admin console behind the existing operator login proxy; see `unified-console-deployment.md`. The old trigger factory remains a compatibility harness only.
+
 Repository separation: use the [current source map](source-map.md) for package paths and application ownership. The behavior described below is unchanged.
 
 This document describes one MVP run from start to finish. [`alerts_bi_design.md`](alerts_bi_design.md) remains the source of truth for rules, rationale, and scope.
@@ -210,6 +214,13 @@ The self-contained HTML also shows run/version metadata, supplied panel IDs, rul
 A completed run is not yet visible to anyone outside the standardization team. An operator publishes it as the team's weekly review with `alerts-bi publish`, which refuses a week that overlaps a published one and, unless told otherwise, one that leaves a gap. The GET-only review portal then shows it to internal readers from the `portal_*` views using the same SQL database and login as the pipeline: weekly totals per schema, history across published weeks, the work list and each alert's stored evidence. Operators record human decisions on findings with `alerts-bi decide`; they sit beside the machine findings and never change them.
 
 ## 11. The weekly schedule (design section 7.11)
+
+Portal clarification (2026-10-08): readers can select several applications above the team
+tabs. The GET selection follows every tab, week and alert link. Weekly summaries and
+history use the selected published alert identities. Daily application buckets and
+overlapping event unions are unavailable in existing storage and are labeled accordingly;
+no new analysis is triggered. Published team phase, readiness percentage and review notes
+remain labeled whole-team context. See the global-filter amendment in the canonical design.
 
 `alerts-bi weekly`, invoked daily, runs steps 1-9 for every team enrolled in the registry, once per completed Monday-to-Monday UTC week that has not been published yet, oldest first, with `run_at` set to the Monday boundary. It then performs step 10's publication itself when the run is healthy. An unhealthy week is held for an operator and the weeks after it are stored but not published; a newly enrolled team starts at its most recent completed week.
 

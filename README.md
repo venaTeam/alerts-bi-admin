@@ -1,15 +1,22 @@
 # Alerts BI operator app
 
-The independent operator app publishes and withdraws weekly reviews, records append-only
-human decisions and renders run scorecards and team summaries from SQL Server. It uses
-the shared operations package and never imports the runs pipeline or portal application.
+The unified operator console lives in this repository. Teams opens a team's run history
+and its Overview, Findings, Decisions and Activity tabs. Schedule and Decisions also have
+workspace-wide pages. Trigger analysis, inspect stored evidence, publish or withdraw a
+review, and record append-only human decisions from the same authenticated application.
+
+The UI source is in `src/`. Analysis runs in-process through the pinned execution runtime
+in `vendor/`; no sibling checkout or separate trigger web service is required. The runtime
+is exported from the tracked runs revision recorded in `vendor/runtime-source.json`.
+Shared/operations wheels remain immutable dependencies. Portal stays a separate reader
+service; runs remains the migration and weekly-job owner.
 
 Python 3.12+ and `uv` are required. From this repository:
 
 ```powershell
 uv sync --frozen
 Copy-Item .env.example .env
-# Set SQL_*, a private ADMIN_SECRET (at least 32 characters), and ADMIN_REGISTRY_PATH.
+# Set SQL_*, ES_*, LLM_*, a private ADMIN_SECRET (32+ characters), and registry path.
 uv run --frozen alerts-bi-admin serve
 ```
 
@@ -19,11 +26,15 @@ the trusted login proxy to pass `X-Forwarded-User`. For an isolated local sessio
 The app refuses unsigned forms, tokens belonging to another operator, and declared
 cross-site writes. Every write is attributed to its operator.
 
-The authenticated `GET /healthz` compiles zero-row queries for the tables and columns used
-by the app, scorecards and operator actions. Missing tables/columns return a generic 503.
-Readiness does not fetch alert data, mutate the database or apply migrations.
+The authenticated `GET /healthz` checks Elasticsearch, SQL and the operator schema.
+Missing dependencies return JSON with `ok=false` and HTTP 503. All API routes require
+operator identity. JSON `POST /runs` also requires the `X-CSRF-Token` returned by `GET /csrf`.
+Browser actions use signed, same-site forms. A manual run covers exactly the preceding
+168 hours and stays unpublished after completion. The UI and JSON API share one process
+execution gate; deploy one application worker and one replica.
 
-Supply the same registry JSON that the runs app uses, through `ADMIN_REGISTRY_PATH`
+The bundled `config/teams.json` is an exported runs artifact, not an independent registry.
+Supply your deployment registry through `ADMIN_REGISTRY_PATH`
 or `serve --registry <path>`. It is runtime configuration, not a dependency on a sibling
 checkout. The schema validator is packaged in the operations wheel. Database migrations
 and the original mock stack belong to `venaTeam/alerts-bi-runs` and must be applied first.
@@ -53,8 +64,9 @@ uv build
 docker build -t alerts-bi-admin:local .
 ```
 
-The image expects an oauth-proxy sidecar sharing its loopback network and a registry mount;
-it contains no credentials or migrations. A standalone clone uses the immutable wheels in
+The image expects an oauth-proxy sidecar sharing its loopback network, a registry mount,
+and the SQL/ES/model settings. `ADMIN_OUT_DIR` must be writable; the image provides
+`/app/out` for its non-root user. Apply migrations through the runs deployment before use. A standalone clone uses the immutable wheels in
 `vendor/` and the committed lockfile. Canonical design and cross-application SQL tests live
 in `venaTeam/alerts-bi-design`; `docs/upstream/` contains this application's pinned snapshot.
 
@@ -65,3 +77,9 @@ Application code lives directly in `src/`. Local tests import `src`, while setup
 maps that directory to the service's distinct installed Python package. The console
 command and Docker listener are unchanged. `uv sync --frozen` installs the editable
 mapping; `uv build` produces the independently installable wheel and source archive.
+
+
+For the execution artifact's provenance and rebuild procedure, see `vendor/README.md`.
+The integration suite resets only the configured disposable `alerts_bi_test` database and
+uses the existing Elasticsearch mock. To run it, provide the corresponding SQL and ES
+settings in your environment; unit checks do not require running services.

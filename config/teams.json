@@ -1,0 +1,189 @@
+{
+  "registry_version": "2026-10-01.1",
+  "effective_date": "2026-10-01",
+  "teams": [
+    {
+      "team_id": "payments-core",
+      "weekly_review": { "enabled": true },
+      "display_name": "Payments Core",
+      "v1_operators": [],
+      "v2_operator": "payments-core",
+      "panels": [
+        {
+          "panel_id": "payments-core-v2-main",
+          "schema": "v2",
+          "sql": "SELECT * FROM appchi_v2_hot WHERE operator = 'payments-core'"
+        }
+      ]
+    },
+    {
+      "team_id": "legacy-batch-jobs",
+      "weekly_review": { "enabled": true },
+      "display_name": "Legacy Batch Jobs",
+      "v1_operators": ["batch-team", "BATCH_JOBS", "batch_svc"],
+      "v2_operator": null,
+      "panels": [
+        {
+          "panel_id": "legacy-batch-jobs-v1-main",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator IN ('batch-team','BATCH_JOBS','batch_svc') AND node_name != 'legacy-heartbeat-node' AND message NOT LIKE '%test%'"
+        }
+      ]
+    },
+    {
+      "team_id": "fraud-detection",
+      "weekly_review": { "enabled": true },
+      "display_name": "Fraud Detection",
+      "v1_operators": ["fraud-detection"],
+      "v2_operator": null,
+      "panels": [
+        {
+          "panel_id": "fraud-detection-v1-main",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator = 'fraud-detection' AND node_name != 'fraud-canary-test'"
+        }
+      ]
+    },
+    {
+      "team_id": "checkout-api",
+      "weekly_review": { "enabled": true },
+      "display_name": "Checkout API",
+      "v1_operators": ["checkout", "Checkout-API"],
+      "v2_operator": "checkout-api",
+      "panels": [
+        {
+          "panel_id": "checkout-api-v1-main",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator IN ('checkout','Checkout-API') AND node_name NOT LIKE 'test-%'"
+        },
+        {
+          "panel_id": "checkout-api-v2-main",
+          "schema": "v2",
+          "sql": "SELECT * FROM appchi_v2_hot WHERE operator = 'checkout-api'"
+        }
+      ]
+    },
+    {
+      "team_id": "notifications-svc",
+      "weekly_review": { "enabled": true },
+      "display_name": "Notifications Service",
+      "v1_operators": ["notifications", "notif-svc", "NOTIF_TEAM"],
+      "v2_operator": "notifications-svc",
+      "panels": [
+        {
+          "panel_id": "notifications-svc-v1-main",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator IN ('notifications','notif-svc','NOTIF_TEAM') AND node_name != 'notif-canary' AND application != 'sms-gateway-test'"
+        },
+        {
+          "panel_id": "notifications-svc-v2-main",
+          "schema": "v2",
+          "sql": "SELECT * FROM appchi_v2_hot WHERE operator = 'notifications-svc' AND node_name != 'notif-canary'"
+        }
+      ]
+    },
+    {
+      "team_id": "search-platform",
+      "weekly_review": { "enabled": true },
+      "display_name": "Search Platform",
+      "v1_operators": ["search-platform"],
+      "v2_operator": "search-platform",
+      "panels": [
+        {
+          "panel_id": "search-platform-v1-main",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator = 'search-platform'"
+        },
+        {
+          "panel_id": "search-platform-v2-main",
+          "schema": "v2",
+          "sql": "SELECT * FROM appchi_v2_hot WHERE operator = 'search-platform'"
+        }
+      ]
+    },
+    {
+      "team_id": "data-pipeline-etl",
+      "weekly_review": { "enabled": true },
+      "display_name": "Data Pipeline / ETL",
+      "v1_operators": ["data-pipeline", "dp-team", "ETL_TEAM", "pipeline"],
+      "v2_operator": "data-pipeline-etl",
+      "panels": [
+        {
+          "panel_id": "data-pipeline-etl-v1-main",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator IN ('data-pipeline','dp-team','ETL_TEAM','pipeline') AND node_name NOT IN ('dp-heartbeat','dp-test-node') AND message NOT LIKE '%OK%'"
+        },
+        {
+          "panel_id": "data-pipeline-etl-v2-main",
+          "schema": "v2",
+          "sql": "SELECT * FROM appchi_v2_hot WHERE operator = 'data-pipeline-etl' AND node_name NOT IN ('dp-heartbeat','dp-test-node')"
+        }
+      ]
+    },
+
+    {
+      "team_id": "acceptance-core",
+      "display_name": "Acceptance — core rules",
+      "v1_operators": ["acc-core"],
+      "v2_operator": "acc-core-v2"
+    },
+    {
+      "team_id": "acceptance-batching",
+      "display_name": "Acceptance — LLM batching",
+      "v1_operators": [],
+      "v2_operator": "acc-batching"
+    },
+    {
+      "team_id": "acceptance-suppression",
+      "display_name": "Acceptance — suppression safety",
+      "v1_operators": ["acc-suppression"],
+      "v2_operator": null,
+      "panels": [
+        {
+          "panel_id": "acceptance-suppression-a",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator = 'acc-suppression' AND node_name != 'junk-node' AND message NOT LIKE '%canary%'"
+        },
+        {
+          "panel_id": "acceptance-suppression-b",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator = 'acc-suppression' AND node_name NOT IN ('junk-node') AND (node_name != 'or-nested-node' OR severity = 'critical') AND node_name != $queryNodes",
+          "variables": [{ "name": "queryNodes", "type": "query" }]
+        }
+      ]
+    },
+    {
+      "team_id": "acceptance-blast-radius",
+      "display_name": "Acceptance — blast-radius guard",
+      "v1_operators": ["acc-blast"],
+      "v2_operator": null,
+      "panels": [
+        {
+          "panel_id": "acceptance-blast-radius-main",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator = 'acc-blast' AND node_name NOT IN ('blast-node-1','blast-node-2','blast-node-3')"
+        }
+      ]
+    },
+    {
+      "team_id": "acceptance-fire-patterns",
+      "display_name": "Acceptance — R6 fire patterns",
+      "v1_operators": ["acc-fire"],
+      "v2_operator": "acc-fire-v2",
+      "planning": { "v1_rule_effort_days": 1.5 }
+    },
+    {
+      "team_id": "acceptance-unseen",
+      "display_name": "Acceptance — unseen visibility",
+      "v1_operators": ["acc-unseen"],
+      "v2_operator": "acc-unseen-v2",
+      "panels": [
+        {
+          "panel_id": "acceptance-unseen-v1",
+          "schema": "v1",
+          "sql": "SELECT * FROM appchi_v1_hot WHERE operator = 'acc-unseen' AND application = 'shown-app' AND (node_name = 'n1' OR severity = 'critical') AND node_name != 'junk'"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "repository": "https://github.com/venaTeam/alerts-bi-runs",
+  "revision": "89f6c88aff7a7c225f4e2a20485ebd8660db3ddb",
+  "distribution": "alerts-bi-runs-runtime",
+  "version": "0.1.0+admin.20261008",
+  "source_changes": "Packaging metadata only: runtime name/version, pinned shared/operations dependencies, no console entry points.",
+  "wheel": "alerts_bi_runs_runtime-0.1.0+admin.20261008-py3-none-any.whl",
+  "sha256": "b8182bb9d6a357d37bbe94acf8baa79460b5a62f7565660d36369a2c1c6eaa7c",
+  "registry": {
+    "path": "config/teams.json",
+    "sha256": "50c29418b54eee0482ba6cda6e50c352ead1f1de20f63539791a256d9886ddf0"
+  }
+}

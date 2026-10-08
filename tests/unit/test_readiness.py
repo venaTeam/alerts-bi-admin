@@ -6,6 +6,7 @@ from typing import cast
 from unittest.mock import Mock
 
 import pytest
+from alerts_bi_runs.api.schemas import CheckOut
 from alerts_bi_shared.db.connection import Database
 from fastapi.testclient import TestClient
 from src import app
@@ -19,6 +20,7 @@ def client_for(monkeypatch: pytest.MonkeyPatch, db: Mock) -> TestClient:
         yield cast(Database, db)
 
     monkeypatch.setattr(app, "connect", connect)
+    monkeypatch.setattr(app, "check_health", lambda settings: {"execution": CheckOut(ok=True)})
     settings = AdminSettings(config=load_config(), database="alerts_bi_test", secret="x" * 40)
     return TestClient(app.build_admin(settings), headers={"X-Forwarded-User": "operator"})
 
@@ -30,7 +32,7 @@ def test_healthy_schema_checks_all_operator_tables_without_fetching_rows(
     db.query.return_value = []
     with client_for(monkeypatch, db) as client:
         response = client.get("/healthz")
-    assert response.status_code == 200 and response.text == "ok"
+    assert response.status_code == 200 and response.json()["ok"] is True
     statements = [call.args[0] for call in db.query.call_args_list]
     assert len(statements) == 9
     assert all(statement.startswith("SELECT TOP 0 ") for statement in statements)

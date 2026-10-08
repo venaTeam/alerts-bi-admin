@@ -359,9 +359,14 @@ def _page(**changes: Any) -> str:
     return summary_page("alice", _summary(**changes), shared="")
 
 
-def test_the_page_escapes_alert_text_and_carries_no_script_or_inline_style() -> None:
+def test_the_page_escapes_alert_text_and_uses_only_the_console_script() -> None:
     html = _page()
-    assert "<script" not in html and " style=" not in html
+    from src.pages import SCRIPT_PATH
+
+    assert re.findall(r"<script[^>]*>.*?</script>", html) == [
+        f'<script src="{SCRIPT_PATH}" defer></script>'
+    ]
+    assert " style=" not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "Signed in as alice" in html
 

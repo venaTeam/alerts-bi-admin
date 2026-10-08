@@ -1,0 +1,13 @@
+# Unified operator service — 2026-10-08
+
+Deploy the admin image once for the operator console. It contains the unified UI source and a pinned in-process execution-runtime wheel from runs. Keep the portal Deployment and runs weekly CronJob. A standalone clone of admin includes its required immutable wheels and lockfile. This document is a rollout recipe, not evidence of deployment.
+
+Use the existing authenticated admin Deployment/Route, service account, role binding, TLS certificate and oauth-proxy. Replace its application container with the newly built admin image and command `alerts-bi-admin serve --port 8200 --registry /etc/alerts-bi/teams.json`. Set `ADMIN_HOST=127.0.0.1`, `ADMIN_PORT=8200`, `ADMIN_SECRET` (32+ random characters), and `ADMIN_USER_HEADER=X-Forwarded-User`. Change proxy upstream to `http://127.0.0.1:8200`. Remove inherited `API_HOST=0.0.0.0`. Never set `--dev-user` in a deployment.
+
+The unified application needs the existing SQL, Elasticsearch and LLM settings and secrets, registry ConfigMap and writable output directory (`ADMIN_OUT_DIR`; `/app/out` in the image) from runs. Reuse the runs migration init Job; schema head remains `008_measurement_basis`. Keep the Service pointed solely at the login proxy, never at the application port. Restrict direct access to the pod's loopback. Use one application worker and one replica, matching the process-local run gate. Manual triggers are synchronous; allow a proxy/Route timeout suitable for the existing maximum analysis duration. A timed-out client must check team history before retrying.
+
+After validating the new route, stop the old unauthenticated trigger Deployment and remove its Service/Route so that there is a single operator surface. Existing weekly jobs continue using the runs image's `weekly` command. Portal uses its existing image and only published SQL views. No tables or publication records are migrated.
+
+Validate login denial without identity, authenticated `/healthz`, team/run navigation, one explicit fake-model run against the mock environment, publication/withdrawal, and recorded decision actor. API callers retain `POST /runs` request payloads but must authenticate via the proxy and send a same-site `X-CSRF-Token` obtained from `/csrf`. `/teams` retains JSON discovery. All four export names remain unchanged. Health probes must run through a trusted authenticated path; do not spoof identity on a publicly reachable route.
+
+Rollback by restoring the previous admin application image/configuration behind the same authenticated route. Stored runs, decisions and publications are unchanged and remain readable by the legacy app. Do not restore an unauthenticated trigger route.

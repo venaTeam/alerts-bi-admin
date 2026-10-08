@@ -39,6 +39,8 @@ def csrf_token(secret: str, user: str, day: date) -> str:
 
 def valid_csrf(secret: str, user: str, token: str, today: date) -> bool:
     """Accept today's token or yesterday's, so a form left open past midnight UTC still works."""
+    if len(token) != 64 or any(char not in "0123456789abcdef" for char in token):
+        return False
     return any(
         hmac.compare_digest(csrf_token(secret, user, day), token)
         for day in (today, today - timedelta(days=1))

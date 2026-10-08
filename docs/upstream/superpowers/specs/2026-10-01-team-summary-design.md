@@ -1,6 +1,6 @@
 # Team summary — design
 
-**Status:** implemented (2026-10-01). Amended the same day by the product owner: the presentation slides show day-by-day distinct and rule-flagged distinct alerts for the one selected published week, labelled "by UTC day", through the `portal_daily_metrics` view (migration `007_portal_daily`). This is a within-week view, never a comparison across weeks (design 7.10). Migration `008` later changed `portal_reviews.basis_changed` to compare the team's own registry entry.
+**Status:** implemented (2026-10-01). Amended the same day by the product owner: the presentation slides show day-by-day distinct and rule-flagged distinct alerts for the one selected published week, labelled "by UTC day", through the `portal_daily_metrics` view (migration `007_portal_daily`). This is a within-week view, never a comparison across weeks (design 7.10). Migration `008` later changed `portal_reviews.basis_changed` to compare the team's own registry entry. **Amended 2026-10-04 (product owner):** the portal no longer shows one Summary section; its team week is split into tabs, names problems without rule ids, and leaves the per-application table and the estimate off its tabs (they stay on the admin page and the slides). Design section 7.10 is authoritative.
 **Date:** 2026-10-01
 **Base:** `origin/main` at `a2fca5c` (review portal, weekly schedule, admin app, LLM audit)
 **Visual reference:** the design canvas "Alerts BI Team Summary"

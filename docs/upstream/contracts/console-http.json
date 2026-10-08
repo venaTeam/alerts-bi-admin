@@ -1,0 +1,48 @@
+{
+  "approved": "2026-10-08",
+  "owner": "alerts-bi-admin",
+  "entrypoint": "alerts-bi-admin serve",
+  "authentication": "Loopback-only application behind trusted operator identity proxy; explicit --dev-user for local development only",
+  "csrf": {
+    "forms": "csrf field",
+    "json_trigger": "X-CSRF-Token header",
+    "token_endpoint": "GET /csrf",
+    "same_site": true
+  },
+  "read_routes": [
+    "/",
+    "/schedule",
+    "/decisions",
+    "/teams",
+    "/teams/{team_id}",
+    "/teams/{team_id}/summary",
+    "/runs/{run_id}/findings",
+    "/runs/{run_id}/scorecard",
+    "/runs/{run_id}",
+    "/runs/{run_id}/{name}",
+    "/healthz"
+  ],
+  "write_routes": [
+    "/teams/{team_id}/trigger",
+    "/runs",
+    "/runs/{run_id}/publish",
+    "/runs/{run_id}/withdraw",
+    "/runs/{run_id}/decide"
+  ],
+  "team_tabs": [
+    "overview",
+    "findings",
+    "decisions",
+    "activity"
+  ],
+  "run_scope": "An explicitly selected run must belong to the selected team",
+  "payload_baseline": "trigger-openapi.json",
+  "schema_head": "008_measurement_basis",
+  "deployment": "One replica, one application worker; login proxy is the only service port",
+  "workspace_navigation": [
+    "teams",
+    "schedule",
+    "decisions"
+  ],
+  "execution_runtime": "Pinned alerts-bi-runs-runtime wheel in the admin repository; in-process API/config adapters, no separate listener"
+}
