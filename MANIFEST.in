@@ -1,4 +1,4 @@
-include uv.lock README.md AGENTS.md CLAUDE.md .env.example Dockerfile alembic.ini docker-compose.yml .dockerignore .gitattributes
+include poetry.lock README.md AGENTS.md CLAUDE.md .env.example Dockerfile alembic.ini docker-compose.yml .dockerignore .gitattributes
 recursive-include docs *.md *.json
 recursive-include packages *.py py.typed *.toml *.md *.json
 recursive-include config *.json

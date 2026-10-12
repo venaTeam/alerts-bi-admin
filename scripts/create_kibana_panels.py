@@ -4,7 +4,7 @@ Shows how many DISTINCT alerts exist (application + key_field), how that splits 
 how it moves day to day.
 
   KIBANA_URL=https://kibana.internal:5601 KIBANA_AUTH=user:pass \
-      uv run python scripts/create_kibana_panels.py
+      poetry run python scripts/create_kibana_panels.py
 
 Kibana has no built-in unique-count across two fields, so this first adds an ``alert_uid``
 RUNTIME FIELD to each data view that emits ``application|key_field`` - the primary key of an

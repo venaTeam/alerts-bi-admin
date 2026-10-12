@@ -11,14 +11,16 @@ decisions in the same application. The existing UI is preserved.
 
 ## Install and start
 
-Python 3.12+ and uv are required. A standalone clone includes all source and resources:
+Python 3.12+ and Poetry 2.3.1 are required. A standalone clone includes all source and resources:
 
 ```powershell
-uv sync --frozen
+poetry sync --no-root
+poetry run python -m ensurepip --upgrade
+poetry run python -m pip install --no-deps -e .
 Copy-Item .env.example .env
 # Configure SQL_*, ES_*, LLM_* and a private ADMIN_SECRET of at least 32 characters.
-uv run --frozen alerts-bi-admin db setup
-uv run --frozen alerts-bi-admin serve
+poetry run alerts-bi-admin db setup
+poetry run alerts-bi-admin serve
 ```
 
 `db setup` targets SQL_DATABASE unless `--database` is explicit; run it only for an authorized
@@ -35,18 +37,18 @@ unavailable. Keep one UI worker/replica; manual analysis is synchronous and uses
 ## Commands
 
 ```powershell
-uv run --frozen alerts-bi-admin run --team checkout-api --fake-llm --database alerts_bi_test
-uv run --frozen alerts-bi-admin weekly --dry-run
-uv run --frozen alerts-bi-admin weekly
-uv run --frozen alerts-bi-admin weekly-status
-uv run --frozen alerts-bi-admin db status
-uv run --frozen alerts-bi-admin registry check --registry config/teams.json
-uv run --frozen alerts-bi-admin report --run-id <id>
-uv run --frozen alerts-bi-admin publications --team <team>
-uv run --frozen alerts-bi-admin publish --run-id <id> --by <operator>
-uv run --frozen alerts-bi-admin unpublish --run-id <id> --reason <reason> --by <operator>
-uv run --frozen alerts-bi-admin decide --run-id <id> --schema v1 --application <app> --key-field <key> --finding R1 --state confirmed --note <note> --by <operator>
-uv run --frozen alerts-bi-admin decisions --team <team>
+poetry run alerts-bi-admin run --team checkout-api --fake-llm --database alerts_bi_test
+poetry run alerts-bi-admin weekly --dry-run
+poetry run alerts-bi-admin weekly
+poetry run alerts-bi-admin weekly-status
+poetry run alerts-bi-admin db status
+poetry run alerts-bi-admin registry check --registry config/teams.json
+poetry run alerts-bi-admin report --run-id <id>
+poetry run alerts-bi-admin publications --team <team>
+poetry run alerts-bi-admin publish --run-id <id> --by <operator>
+poetry run alerts-bi-admin unpublish --run-id <id> --reason <reason> --by <operator>
+poetry run alerts-bi-admin decide --run-id <id> --schema v1 --application <app> --key-field <key> --finding R1 --state confirmed --note <note> --by <operator>
+poetry run alerts-bi-admin decisions --team <team>
 ```
 
 Manual runs cover exactly the preceding 168 hours and remain unpublished. Weekly jobs retain
@@ -62,12 +64,22 @@ using `ADMIN_REGISTRY_PATH`/`serve --registry`, and pass `--registry` to engine/
 UI source is directly in `src/`; engine code is in `src/engine`, installed under
 `alerts_bi_admin.engine`. Historical revisions use local and installed `src.db.ledger`
 compatibility bridges. Never edit applied SQL/revision files. Public library namespaces remain
-`alerts_bi_shared` and `alerts_bi_operations`, maintained in `packages/` with a local uv workspace.
+`alerts_bi_shared` and `alerts_bi_operations`, maintained in `packages/` as local Poetry path dependencies.
 There is no runs runtime package or sibling checkout dependency.
 
+`poetry sync --no-root` installs the locked dependencies and editable local libraries.
+Existing uv-created `.venv` environments may lack pip: the `ensurepip` setup step
+bootstraps it before installing the application. Keep the three setup commands together.
+The application uses setuptools for its `src` to `alerts_bi_admin` mapping and
+migration compatibility bridge; Poetry's root editable installer cannot preserve that
+mapping. `poetry build` uses the declared setuptools backend. Docker builds and installs
+the app and both library wheels for a non-editable production environment.
+Use `poetry check --lock` to check the lockfile. Current service commands are in this
+README; the pinned `docs/upstream/` snapshot retains its historical tooling examples.
+
 ```powershell
-uv build --package alerts-bi-admin
-uv run python scripts/build_libraries.py
+poetry build
+poetry run python scripts/build_libraries.py
 docker build -t alerts-bi-admin:local .
 ```
 
@@ -86,15 +98,15 @@ Never use `down -v` for a source relocation. Configure `.env` before starting lo
 ```powershell
 docker compose up -d
 $env:STATS_ONLY = "1"
-uv run python scripts/generate_mock_alerts.py
+poetry run python scripts/generate_mock_alerts.py
 Remove-Item Env:STATS_ONLY
-uv run --frozen ruff check .
-uv run --frozen ruff format --check .
-uv run --frozen mypy
-uv run --frozen pytest tests/unit tests/engine/unit -q
-uv run --frozen pytest tests/integration tests/engine/integration -q -rs
-uv run --frozen pytest tests/engine/acceptance -q -rs
-uv run --frozen alerts-bi-admin verify-acceptance --database alerts_bi_test
+poetry run ruff check .
+poetry run ruff format --check .
+poetry run mypy
+poetry run pytest tests/unit tests/engine/unit -q
+poetry run pytest tests/integration tests/engine/integration -q -rs
+poetry run pytest tests/engine/acceptance -q -rs
+poetry run alerts-bi-admin verify-acceptance --database alerts_bi_test
 ```
 
 Integration suites require real local SQL Server and the seeded Elasticsearch mock. They reset

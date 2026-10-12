@@ -5,9 +5,9 @@ Covers the v1 (Appchi) and v2 (Appchi V2) schemas described in docs/alerts_bi_de
 section 6) - not part of the BI pipeline itself.
 
 Usage:
-  uv run python scripts/generate_mock_alerts.py            append another copy of the data
-  RESET=1 uv run python scripts/generate_mock_alerts.py    clean reload (acceptance)
-  STATS_ONLY=1 uv run python scripts/generate_mock_alerts.py   statistics only, no writes
+  poetry run python scripts/generate_mock_alerts.py            append another copy of the data
+  RESET=1 poetry run python scripts/generate_mock_alerts.py    clean reload (acceptance)
+  STATS_ONLY=1 poetry run python scripts/generate_mock_alerts.py   statistics only, no writes
 
 The seven realistic teams' definitions live in ``mock_teams.json``, which was exported
 mechanically from the superseded JavaScript generator during the port so that not one

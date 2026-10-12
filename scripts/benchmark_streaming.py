@@ -1,9 +1,9 @@
 """Read-only CPU/memory probe using the existing mock generator, no ES/SQL/model calls.
 
 Run each mode in a fresh process for comparable peak memory:
-  uv run python scripts/benchmark_streaming.py --events 300000 --mode materialized
-  uv run python scripts/benchmark_streaming.py --events 300000 --mode streaming
-  uv run python scripts/benchmark_streaming.py --events 2000000 --mode streaming
+  poetry run python scripts/benchmark_streaming.py --events 300000 --mode materialized
+  poetry run python scripts/benchmark_streaming.py --events 300000 --mode streaming
+  poetry run python scripts/benchmark_streaming.py --events 2000000 --mode streaming
 
 This repeats the existing team's definitions across an exact week; it is a scale probe,
 not an acceptance fixture or a production-throughput prediction. Fixture construction is

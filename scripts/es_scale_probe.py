@@ -3,10 +3,10 @@
 Reports the two approved data-quality diagnostics from design section 3.7 for one selected
 team. Read-only - issues aggregations only, never writes. Safe to point at production ECK.
 
-  uv run python scripts/es_scale_probe.py --team checkout-api
-  uv run python scripts/es_scale_probe.py --team acceptance-core --run-at 2026-08-25T18:00:00Z
-  ES_URL=https://eck.internal:9200 ES_AUTH=user:pass uv run python scripts/es_scale_probe.py --team X
-  uv run python scripts/es_scale_probe.py --all-teams        (sizing only, no ownership scope)
+  poetry run python scripts/es_scale_probe.py --team checkout-api
+  poetry run python scripts/es_scale_probe.py --team acceptance-core --run-at 2026-08-25T18:00:00Z
+  ES_URL=https://eck.internal:9200 ES_AUTH=user:pass poetry run python scripts/es_scale_probe.py --team X
+  poetry run python scripts/es_scale_probe.py --all-teams        (sizing only, no ownership scope)
 
 SCOPE. A run of the BI itself never reads more than one team, so this probe defaults to the
 same discipline: pass --team and it filters by that team's registry operators exactly as the

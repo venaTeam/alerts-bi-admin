@@ -49,7 +49,7 @@ def es_client() -> EsClient:
     if not available:
         pytest.skip(
             "mock Elasticsearch has no appchi-v1 index; run: docker compose up -d && "
-            "RESET=1 uv run python scripts/generate_mock_alerts.py"
+            "RESET=1 poetry run python scripts/generate_mock_alerts.py"
         )
     return client
 

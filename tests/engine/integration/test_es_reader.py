@@ -28,7 +28,7 @@ def client() -> EsClient:
     if not es.index_exists(V1_INDEX):
         pytest.skip(
             "mock Elasticsearch is not reachable; run: docker compose up -d && "
-            "RESET=1 uv run python scripts/generate_mock_alerts.py"
+            "RESET=1 poetry run python scripts/generate_mock_alerts.py"
         )
     return es
 
