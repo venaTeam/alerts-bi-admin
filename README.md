@@ -11,13 +11,14 @@ is exported from the tracked runs revision recorded in `vendor/runtime-source.js
 Shared/operations wheels remain immutable dependencies. Portal stays a separate reader
 service; runs remains the migration and weekly-job owner.
 
-Python 3.12+ and `uv` are required. From this repository:
+Python 3.12+ and `Poetry 2.3.1` are required. From this repository:
 
 ```powershell
-uv sync --frozen
+poetry sync --no-root
+poetry run python -m pip install --no-deps -e .
 Copy-Item .env.example .env
 # Set SQL_*, ES_*, LLM_*, a private ADMIN_SECRET (32+ characters), and registry path.
-uv run --frozen alerts-bi-admin serve
+poetry run alerts-bi-admin serve
 ```
 
 The default listener is `http://127.0.0.1:8200`. It only binds to loopback and expects
@@ -42,12 +43,12 @@ and the original mock stack belong to `venaTeam/alerts-bi-runs` and must be appl
 Existing operator commands are available under the new executable:
 
 ```powershell
-uv run --frozen alerts-bi-admin registry check --registry <path>
-uv run --frozen alerts-bi-admin publications --team <team>
-uv run --frozen alerts-bi-admin publish --run-id <id> --by <operator>
-uv run --frozen alerts-bi-admin unpublish --run-id <id> --reason <reason> --by <operator>
-uv run --frozen alerts-bi-admin decide --run-id <id> --schema v1 --application <app> --key-field <key> --finding R1 --state confirmed --note <note> --by <operator>
-uv run --frozen alerts-bi-admin decisions --team <team>
+poetry run alerts-bi-admin registry check --registry <path>
+poetry run alerts-bi-admin publications --team <team>
+poetry run alerts-bi-admin publish --run-id <id> --by <operator>
+poetry run alerts-bi-admin unpublish --run-id <id> --reason <reason> --by <operator>
+poetry run alerts-bi-admin decide --run-id <id> --schema v1 --application <app> --key-field <key> --finding R1 --state confirmed --note <note> --by <operator>
+poetry run alerts-bi-admin decisions --team <team>
 ```
 
 `--by` defaults to the current OS user, preserving the previous CLI behavior. Publication
@@ -56,11 +57,11 @@ operations implementation as scheduled runs. The listener's `ADMIN_DATABASE`/`--
 override remains supported; operator commands default to `SQL_DATABASE`.
 
 ```powershell
-uv run --frozen ruff format --check .
-uv run --frozen ruff check .
-uv run --frozen mypy
-uv run --frozen pytest -q
-uv build
+poetry run ruff format --check .
+poetry run ruff check .
+poetry run mypy
+poetry run pytest -q
+poetry build
 docker build -t alerts-bi-admin:local .
 ```
 
@@ -75,8 +76,14 @@ Imported from `venaTeam/alerts-bi` at `c518eeaeb5a3ecb35b5348828300454379e7d535`
 
 Application code lives directly in `src/`. Local tests import `src`, while setuptools
 maps that directory to the service's distinct installed Python package. The console
-command and Docker listener are unchanged. `uv sync --frozen` installs the editable
-mapping; `uv build` produces the independently installable wheel and source archive.
+command and Docker listener are unchanged. `poetry sync --no-root` installs the
+locked dependencies; `poetry run python -m pip install --no-deps -e .` installs
+the editable setuptools mapping. Poetry's own editable installer does not map
+`src` to the service namespace, so keep these two setup steps together.
+`poetry build` uses the declared setuptools backend to produce the independently
+installable wheel and source archive. The Docker image installs that wheel.
+Run `poetry check --lock` to validate the committed lockfile. `docs/upstream/`
+is an immutable historical snapshot; current service commands are listed here.
 
 
 For the execution artifact's provenance and rebuild procedure, see `vendor/README.md`.

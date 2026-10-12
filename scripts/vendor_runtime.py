@@ -79,7 +79,7 @@ def build(repository: Path) -> None:
     (source / "pyproject.toml").write_text(metadata, encoding="utf-8")
     built = ROOT / "out" / ("runtime-wheel-" + RUNTIME_VERSION)
     subprocess.run(
-        ["uv", "build", "--wheel", "--offline", "--quiet", "--out-dir", str(built)],
+        ["poetry", "build", "--format", "wheel", "--quiet", "--output", str(built)],
         cwd=source,
         check=True,
     )

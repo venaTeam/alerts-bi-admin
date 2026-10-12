@@ -1,11 +1,17 @@
 FROM python:3.12-slim
-COPY --from=ghcr.io/astral-sh/uv:0.10.8 /uv /usr/local/bin/uv
+RUN python -m venv /opt/poetry \
+    && /opt/poetry/bin/pip install --no-cache-dir "poetry==2.3.1"
+ENV POETRY_VIRTUALENVS_IN_PROJECT=true
+ENV POETRY_NO_INTERACTION=1
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml poetry.lock README.md ./
 COPY vendor/ vendor/
 COPY src/ src/
 COPY config/ config/
-RUN uv sync --frozen --no-dev --no-editable
+RUN /opt/poetry/bin/poetry check --lock \
+    && /opt/poetry/bin/poetry sync --only main --no-root \
+    && /opt/poetry/bin/poetry build --format wheel \
+    && .venv/bin/python -m pip install --no-deps dist/*.whl
 RUN mkdir -p /app/out && chown 1001:0 /app/out
 ENV ADMIN_OUT_DIR=/app/out
 ENV PATH="/app/.venv/bin:$PATH"

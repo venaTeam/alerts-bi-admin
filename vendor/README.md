@@ -14,10 +14,11 @@ To produce a new runtime artifact, update the explicit revision and version in
 `scripts/vendor_runtime.py`, then run:
 
 ```powershell
-python scripts/vendor_runtime.py C:/path/to/alerts-bi-runs
-uv lock
-uv sync --frozen
-uv run pytest -q
+poetry run python scripts/vendor_runtime.py C:/path/to/alerts-bi-runs
+poetry lock
+poetry sync --no-root
+poetry run python -m pip install --no-deps -e .
+poetry run pytest -q
 ```
 
 The script refuses to overwrite a released wheel or a changed registry. Commit the new
