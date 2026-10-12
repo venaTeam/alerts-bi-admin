@@ -44,5 +44,5 @@
     "schedule",
     "decisions"
   ],
-  "execution_runtime": "Pinned alerts-bi-runs-runtime wheel in the admin repository; in-process API/config adapters, no separate listener"
+  "execution_runtime": "Maintained alerts_bi_admin.engine source in the admin distribution; no runs package or listener"
 }

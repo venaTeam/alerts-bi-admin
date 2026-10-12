@@ -9,14 +9,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
-from alerts_bi_runs.config import load_config
-from alerts_bi_runs.db.repositories import PersistencePayload, persist_run
-from alerts_bi_runs.es.client import EsClient
-from alerts_bi_runs.es.reader import V1_INDEX
 from alerts_bi_shared.db.connection import connect
 from fastapi.testclient import TestClient
 from src.app import build_admin
 from src.config import AdminConfig, AdminSettings
+from src.engine.config import load_config
+from src.engine.db.repositories import PersistencePayload, persist_run
+from src.engine.es.client import EsClient
+from src.engine.es.reader import V1_INDEX
 from src.pages import finding_key
 from src.queries import decision_history
 
@@ -39,7 +39,7 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
             [
                 sys.executable,
                 "-c",
-                "from alerts_bi_runs.config import load_config; from alerts_bi_runs.db.migrate import reset_test_database; config=load_config(); reset_test_database(config.sql, config.sql.test_database)",
+                "from alerts_bi_admin.engine.config import load_config; from alerts_bi_admin.engine.db.migrate import reset_test_database; config=load_config(); reset_test_database(config.sql, config.sql.test_database)",
             ],
             cwd=tmp_path_factory.mktemp("migrate"),
             check=True,

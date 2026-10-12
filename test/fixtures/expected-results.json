@@ -1,0 +1,916 @@
+{
+  "_comment": [
+    "Hand-reviewed acceptance oracle (design section 7.5, acceptance-data contract).",
+    "",
+    "Every number here was computed BY HAND from the fixture definitions in",
+    "scripts/acceptance_teams.py, not emitted by the pipeline under test. The pipeline",
+    "must not generate its own oracle: an oracle derived from the code it checks would",
+    "agree with any bug that is consistent.",
+    "",
+    "Derivations are recorded in _why on each team so a reviewer can re-check the",
+    "arithmetic without re-reading the generator.",
+    "",
+    "Window: run_at 2026-08-25T18:00:00Z, so the exact half-open range",
+    "[2026-08-18T18:00:00Z, 2026-08-25T18:00:00Z) covering 8 UTC dates and 168 hours.",
+    "Buckets not listed under `daily` must be present and entirely zero.",
+    "",
+    "`fire_patterns` and `unseen` give the expected per-identity work-list values",
+    "(alert_findings.fire_pattern, clear_count, max_clear_cycles_24h,",
+    "max_episode_firing_rows, open_since and unseen), keyed by key_field, for R6 by firing",
+    "episodes and the unseen measure (design section 7.14). A null `unseen` means the",
+    "schema has no panel, which is different from 0.",
+    "",
+    "R6 stuck needs a Grafana open episode whose firing rows span at least 72h (last",
+    "firing row - open_since). Every team except acceptance-fire-patterns keeps its rows",
+    "on 2026-08-23 and 2026-08-24, 24h apart at most, so none can be stuck, and none has a",
+    "clear row or an API spamming rate: those teams are R6-free.",
+    "",
+    "Verified with: uv run alerts-bi verify-acceptance"
+  ],
+
+  "run_at": "2026-08-25T18:00:00.000Z",
+  "window": {
+    "start": "2026-08-18T18:00:00.000Z",
+    "end": "2026-08-25T18:00:00.000Z",
+    "bucket_count": 8,
+    "covered_hours_total": 168,
+    "first_bucket": { "date": "2026-08-18", "covered_hours": 6 },
+    "last_bucket": { "date": "2026-08-25", "covered_hours": 18 }
+  },
+
+  "teams": {
+    "acceptance-core": {
+      "_why": [
+        "13 v1 rows: c01-c10 and two c11 rows on 2026-08-23, one c11 row on 2026-08-24.",
+        "11 v1 identities: the two c11 defs share obj c11-multiday, so they are one identity.",
+        "No R6: c11's open episode (F, F at 08-23 12:00, F at 08-24 12:00) opened 54h before",
+        "window_end, and every other alert is one firing row there too, so nothing is stuck.",
+        "Core findings: R1 on c05, R2 on c06, R3 on the Unknown object, R4 on c08,",
+        "R7 on c09 (+1ms future) and c10 (-24h-1ms stale), R1 on the c11 row dated 08-24.",
+        "NOT flagged: c02 is an API alert with no rule URL (R4 is Grafana-only), and c03/c04",
+        "sit exactly on the two INCLUSIVE R7 boundaries.",
+        "So 7 v1 identities are rule_flagged and 4 (c01-c04) go to the model.",
+        "flagged_by_rule rows: 6 on 08-23 and 1 on 08-24 = 7.",
+        "distinct/day = (11 on 08-23 + 1 on 08-24) / 7 = 12/7.",
+        "6 v2 identities; only v06 has a core finding (R2). Readiness: v01 ready, v04 ready",
+        "(a non-critical R9 does not block), v06 ready (a core finding is not a readiness",
+        "gap); v02 (R8), v03 (critical R9) and v05 (R10) are not => 3/6 = 50%.",
+        "Both schemas present => phase_1."
+      ],
+      "phase_derived": "phase_1",
+      "phase2_readiness_pct": 50,
+      "identity_states": { "rule_flagged": 8, "assessed_good": 9 },
+      "schemas": {
+        "v1": {
+          "identities": 11,
+          "totals": {
+            "alerts": 13,
+            "distinct_sum": 12,
+            "distinct_per_day": 1.7142857142857142,
+            "alerts_per_hour": 0.07738095238095238,
+            "flagged_by_rule": 7,
+            "flagged_by_rule_distinct_sum": 7,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 4,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 12,
+            "node_name_denominator": 12,
+            "node_name_ratio": 1,
+            "key_inflation_numerator": 12,
+            "key_inflation_denominator": 12,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 12,
+              "distinct_alerts": 11,
+              "alerts_per_hour": 0.5,
+              "flagged_by_rule": 6,
+              "flagged_by_rule_distinct": 6,
+              "assessed_good": 4,
+              "unassessed": 0,
+              "suppressed": 0,
+              "node_name_numerator": 11,
+              "node_name_denominator": 11,
+              "key_inflation_numerator": 11,
+              "key_inflation_denominator": 11
+            },
+            "2026-08-24": {
+              "covered_hours": 24,
+              "alerts": 1,
+              "distinct_alerts": 1,
+              "alerts_per_hour": 0.041666666666666664,
+              "flagged_by_rule": 1,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 0,
+              "unassessed": 0,
+              "suppressed": 0,
+              "node_name_numerator": 1,
+              "node_name_denominator": 1,
+              "key_inflation_numerator": 1,
+              "key_inflation_denominator": 1
+            }
+          },
+          "rule_counts": {
+            "2026-08-23": {
+              "R1": [1, 1],
+              "R2": [1, 1],
+              "R3": [1, 1],
+              "R4": [1, 1],
+              "R7": [2, 2]
+            },
+            "2026-08-24": { "R1": [1, 1] }
+          }
+        },
+        "v2": {
+          "identities": 6,
+          "totals": {
+            "alerts": 6,
+            "distinct_sum": 6,
+            "distinct_per_day": 0.8571428571428571,
+            "alerts_per_hour": 0.03571428571428571,
+            "flagged_by_rule": 1,
+            "flagged_by_rule_distinct_sum": 1,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 5,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 4,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 0,
+            "node_name_denominator": 0,
+            "node_name_ratio": null,
+            "key_inflation_numerator": 6,
+            "key_inflation_denominator": 6,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 6,
+              "distinct_alerts": 6,
+              "alerts_per_hour": 0.25,
+              "flagged_by_rule": 1,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 5,
+              "unassessed": 0,
+              "phase2_gaps": 4,
+              "suppressed": 0,
+              "node_name_numerator": 0,
+              "node_name_denominator": 0,
+              "key_inflation_numerator": 6,
+              "key_inflation_denominator": 6
+            }
+          },
+          "rule_counts": {
+            "2026-08-23": {
+              "R2": [1, 1],
+              "R8": [1, 1],
+              "R9": [2, 2],
+              "R10": [1, 1]
+            }
+          }
+        }
+      }
+    },
+
+    "acceptance-batching": {
+      "_why": [
+        "401 v2 identities share one alert_rule_url and 3 API alerts carry none, so there",
+        "are exactly two groups: one by alert_rule_url and one by application. They are",
+        "never packed together.",
+        "No R6: every alert is one firing row on 2026-08-23, 54h before window_end.",
+        "The 401-alert group exceeds the 200 cap, so it splits into balanced partitions of",
+        "134, 134 and 133 - not 200, 200 and 1. Total batches: 4.",
+        "No core findings anywhere (the API alerts have no rule URL, which R4 does not",
+        "penalise), so all 404 identities are assessed.",
+        "Every alert has impact and a valid runbook and none matches R10, so readiness is",
+        "100% and, with no v1 identities, the phase is done."
+      ],
+      "phase_derived": "done",
+      "phase2_readiness_pct": 100,
+      "identity_states": { "assessed_good": 404 },
+      "llm_batches": {
+        "total": 4,
+        "partition_sizes_by_group": {
+          "https://grafana.internal/d/acc-batch-big": [134, 134, 133],
+          "acc-batch-api-app": [3]
+        }
+      },
+      "schemas": {
+        "v1": {
+          "identities": 0,
+          "totals": { "alerts": 0, "distinct_sum": 0, "flagged_by_rule": 0 },
+          "daily": {},
+          "rule_counts": {}
+        },
+        "v2": {
+          "identities": 404,
+          "totals": {
+            "alerts": 404,
+            "distinct_sum": 404,
+            "distinct_per_day": 57.714285714285715,
+            "alerts_per_hour": 2.4047619047619047,
+            "flagged_by_rule": 0,
+            "flagged_by_rule_distinct_sum": 0,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 404,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 0,
+            "node_name_denominator": 0,
+            "node_name_ratio": null,
+            "key_inflation_numerator": 404,
+            "key_inflation_denominator": 404,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 404,
+              "distinct_alerts": 404,
+              "alerts_per_hour": 16.833333333333332,
+              "flagged_by_rule": 0,
+              "flagged_by_rule_distinct": 0,
+              "assessed_good": 404,
+              "unassessed": 0,
+              "phase2_gaps": 0,
+              "suppressed": 0
+            }
+          },
+          "rule_counts": {}
+        }
+      }
+    },
+
+    "acceptance-suppression": {
+      "_why": [
+        "6 v1 rows on 2026-08-23, one identity each.",
+        "No R6: every alert is one firing row on 2026-08-23, 54h before window_end.",
+        "Panel A excludes s01 (node_name = junk-node) and s02 (message LIKE %canary%).",
+        "Panel B excludes s01 only; its node_name != or-nested-node leaf sits inside an OR",
+        "and its node_name != $queryNodes leaf uses a query variable that is never",
+        "executed, so both are unmeasured rather than applied.",
+        "Multi-panel unanimity therefore suppresses s01 alone: s02 is visible in panel B,",
+        "and a row visible in any panel is not hidden from the team.",
+        "suppression_unmeasured = 2 leaves, both from panel B.",
+        "s01 becomes core R5, so 1 identity is rule_flagged and the other 5 are assessed.",
+        "No v2 identities => phase_0 and null readiness."
+      ],
+      "phase_derived": "phase_0",
+      "phase2_readiness_pct": null,
+      "identity_states": { "rule_flagged": 1, "assessed_good": 5 },
+      "suppression": {
+        "suppressed_rows": 1,
+        "unmeasured_leaves": 2,
+        "suppressed_node_names": ["junk-node"],
+        "not_suppressed_node_names": [
+          "real-node-1",
+          "or-nested-node",
+          "query-var-node",
+          "real-node-2",
+          "real-node-3"
+        ]
+      },
+      "schemas": {
+        "v1": {
+          "identities": 6,
+          "totals": {
+            "alerts": 6,
+            "distinct_sum": 6,
+            "distinct_per_day": 0.8571428571428571,
+            "alerts_per_hour": 0.03571428571428571,
+            "flagged_by_rule": 1,
+            "flagged_by_rule_distinct_sum": 1,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 5,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 1,
+            "suppression_unmeasured": 2,
+            "node_name_numerator": 6,
+            "node_name_denominator": 6,
+            "node_name_ratio": 1,
+            "key_inflation_numerator": 6,
+            "key_inflation_denominator": 6,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-18": {
+              "covered_hours": 6,
+              "alerts": 0,
+              "distinct_alerts": 0,
+              "suppressed": 0,
+              "suppression_unmeasured": 2
+            },
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 6,
+              "distinct_alerts": 6,
+              "alerts_per_hour": 0.25,
+              "flagged_by_rule": 1,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 5,
+              "unassessed": 0,
+              "suppressed": 1,
+              "suppression_unmeasured": 0,
+              "node_name_numerator": 6,
+              "node_name_denominator": 6,
+              "key_inflation_numerator": 6,
+              "key_inflation_denominator": 6
+            }
+          },
+          "rule_counts": { "2026-08-23": { "R5": [1, 1] } }
+        },
+        "v2": {
+          "identities": 0,
+          "totals": { "alerts": 0, "distinct_sum": 0, "flagged_by_rule": 0 },
+          "daily": {},
+          "rule_counts": {}
+        }
+      }
+    },
+
+    "acceptance-blast-radius": {
+      "_why": [
+        "5 v1 rows on 2026-08-23. The single panel excludes 3 of the 5 node names, which is",
+        "60% of the team's owned rows and above the 50% guard, so the leaf is NOT applied:",
+        "it becomes unmeasured and routed to human review.",
+        "Nothing is suppressed and nothing is rule_flagged, so all 5 identities are",
+        "assessed. suppression_unmeasured = 1 leaf.",
+        "No R6: every alert is one firing row on 2026-08-23, 54h before window_end.",
+        "No v2 identities => phase_0 and null readiness."
+      ],
+      "phase_derived": "phase_0",
+      "phase2_readiness_pct": null,
+      "identity_states": { "assessed_good": 5 },
+      "suppression": { "suppressed_rows": 0, "unmeasured_leaves": 1 },
+      "schemas": {
+        "v1": {
+          "identities": 5,
+          "totals": {
+            "alerts": 5,
+            "distinct_sum": 5,
+            "distinct_per_day": 0.7142857142857143,
+            "alerts_per_hour": 0.02976190476190476,
+            "flagged_by_rule": 0,
+            "flagged_by_rule_distinct_sum": 0,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 5,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 1,
+            "node_name_numerator": 5,
+            "node_name_denominator": 5,
+            "node_name_ratio": 1,
+            "key_inflation_numerator": 5,
+            "key_inflation_denominator": 5,
+            "key_inflation_ratio": 1
+          },
+          "daily": {
+            "2026-08-18": {
+              "covered_hours": 6,
+              "alerts": 0,
+              "suppressed": 0,
+              "suppression_unmeasured": 1
+            },
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 5,
+              "distinct_alerts": 5,
+              "alerts_per_hour": 0.20833333333333334,
+              "flagged_by_rule": 0,
+              "flagged_by_rule_distinct": 0,
+              "assessed_good": 5,
+              "unassessed": 0,
+              "suppressed": 0,
+              "suppression_unmeasured": 0
+            }
+          },
+          "rule_counts": {}
+        },
+        "v2": {
+          "identities": 0,
+          "totals": { "alerts": 0, "distinct_sum": 0, "flagged_by_rule": 0 },
+          "daily": {},
+          "rule_counts": {}
+        }
+      }
+    },
+
+    "acceptance-fire-patterns": {
+      "_why": [
+        "R6 by firing episodes (design 7.14). An episode is a run of consecutive firing rows",
+        "closed by a clear (v1 severity clear, v2 status resolved); firing rows after the last",
+        "clear are the open episode, and open_since is its first row's time when the LAST row",
+        "is firing. flapping: >= 3 cycles in a rolling 24h, any provider. spamming: API only,",
+        "n x 24h >= 24 x span and span >= 6h (span = last - first). Grafana writes a row per",
+        "evaluation, so repeated Grafana rows are never spamming. stuck: Grafana whose last",
+        "row is firing with (last firing row - open_since) >= 72h, inclusive. Never measured",
+        "to window_end: Grafana writes a row per evaluation while firing, so silence after",
+        "the last row means it stopped firing; one row spans 0h and is never stuck.",
+        "Priority flapping -> spamming -> stuck. max_episode_firing_rows is a diagnostic.",
+        "(a) F every 12h from 08-21 12:00 to 08-24 12:00 (7 rows), no clear: rows span",
+        "exactly 72h => stuck (inclusive). 1 row 08-21, 2 each on 08-22, 08-23, 08-24.",
+        "(b) F every 12h from 08-21 12:01 to 08-24 00:01 (6 rows) + F 08-24 12:00, no clear:",
+        "rows span 71h59m => none. 1 row 08-21, 2 each on 08-22, 08-23, 08-24.",
+        "(c) F 01:00, F 01:05, C 01:10 on 08-24: closed => none.",
+        "(d) F, F, F, C on 08-24 02:00-02:15: closed, Grafana => none (max episode 3).",
+        "(e) F, C, F, F, C on 08-24 03:00-03:20: 2 cycles, closed => none.",
+        "(f) F every 12h from 08-21 00:00 to 08-24 12:00 (8 rows), no clear: rows span 84h",
+        "=> stuck. 2 rows on each of 08-21..08-24.",
+        "(g) F/C pairs on 08-24, clears 00:05, 10:05, 20:05 => 3 cycles in 24h => flapping.",
+        "(h) API, F F F C x3 on 08-23 (every 30 min, clears 01:30, 04:30, 08:00): 3 cycles",
+        "=> flapping, which wins over spamming (12 rows over 8h: 12 x 24h >= 24 x 8h).",
+        "(i) F/C pairs with clears 08-22 18:05, 08-23 07:05, 08-23 20:05 (26h first to last)",
+        "=> at most 2 cycles in any [t, t+24h), ends on a clear => none. 2 rows 08-22, 4 08-23.",
+        "(j) API, hourly 08-22 00:00..22:00 + 08-23 00:00 = 24 rows, span 24h => 24 x 24h >=",
+        "24 x 24h => spamming. 23 rows on 08-22, 1 on 08-23.",
+        "(k) API, hourly 08-22 00:00..21:00 + 08-23 00:00 = 23 rows, span 24h => none.",
+        "(l) API, 30 rows 10 min apart from 08-24 00:00: span 4h50m < 6h => none.",
+        "(m) API, 5 rows 25h apart from 08-20 00:00, no clear, span 100h: 5 x 24h < 24 x",
+        "100h and stuck is Grafana-only => none. One row per date 08-20..08-24.",
+        "(p) ONE Grafana F at 08-21 14:00 (100h before window_end), then silence: one row",
+        "spans 0h => none. Measured to window_end it would be stuck (final review C1).",
+        "v1 rows by date: 08-20 1 (m); 08-21 6 (a, b, f 2, m, p); 08-22 54 (a 2, b 2, f 2,",
+        "i 2, j 23, k 22, m); 08-23 25 (a 2, b 2, f 2, h 12, i 4, j, k, m); 08-24 55 (a 2,",
+        "b 2, f 2, c 3, d 4, e 5, g 6, l 30, m). 141.",
+        "v1 distinct by date: 1, 5, 7, 8, 9 => 30/7.",
+        "R6 on every row of a, f, g, h, j: 08-21 [3,2] (a, f 2); 08-22 [27,3] (a 2, f 2,",
+        "j 23); 08-23 [17,4] (a 2, f 2, h 12, j); 08-24 [10,3] (a 2, f 2, g 6). 57 rows;",
+        "distinct sum 12.",
+        "Model: b, c, d, e, i, k, l, m, p (9) are assessed_good, counted once on every date",
+        "they appear: 08-20 m; 08-21 b, m, p; 08-22 b, i, k, m; 08-23 b, i, k, m; 08-24 b, c,",
+        "d, e, l, m => 1 + 3 + 4 + 4 + 6 = 18.",
+        "Batches: b, c, d, e, i, p share the v1 rule URL (6); k, l, m are API with no URL =>",
+        "one application group of 3.",
+        "v2 (n) flapping: F 08-21 12:00, then R 02:00, F 06:00, R 08:00, F 12:00, R 14:00 on",
+        "08-23 => 3 clears in 12h; ends resolved. (o) stuck: one row per 12h evaluation from",
+        "08-21 00:00 to 08-25 12:00 (10 rows), never resolved: rows span 108h.",
+        "v2 rows by date: 08-21 3 (n, o 2); 08-22 2; 08-23 7 (n 5, o 2); 08-24 2; 08-25 2 =",
+        "16. Distinct 2, 1, 2, 1, 1 => 7/7. Both R6 on every row. Both ready => 100%.",
+        "One node_name per object, so node and key operands equal distinct per date.",
+        "No panels, so unseen is NULL on both schemas. Both schemas present => phase_1."
+      ],
+      "phase_derived": "phase_1",
+      "phase2_readiness_pct": 100,
+      "identity_states": { "rule_flagged": 7, "assessed_good": 9 },
+      "llm_batches": {
+        "total": 2,
+        "partition_sizes_by_group": {
+          "https://grafana.internal/d/acc-fire-1": [6],
+          "acc-fire-api": [3]
+        }
+      },
+      "fire_patterns": {
+        "v1": {
+          "acc-fire-app:f-a-stuck-72h:node-f": { "fire_pattern": "stuck", "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 7, "open_since": "2026-08-21T12:00:00.000Z" },
+          "acc-fire-app:f-b-open-71h59m:node-f": { "fire_pattern": null, "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 7, "open_since": "2026-08-21T12:01:00.000Z" },
+          "acc-fire-app:f-c-ffc:node-f": { "fire_pattern": null, "clear_count": 1, "max_clear_cycles_24h": 1, "max_episode_firing_rows": 2, "open_since": null },
+          "acc-fire-app:f-d-fffc:node-f": { "fire_pattern": null, "clear_count": 1, "max_clear_cycles_24h": 1, "max_episode_firing_rows": 3, "open_since": null },
+          "acc-fire-app:f-e-fcffc:node-f": { "fire_pattern": null, "clear_count": 2, "max_clear_cycles_24h": 2, "max_episode_firing_rows": 2, "open_since": null },
+          "acc-fire-app:f-f-open-stuck:node-f": { "fire_pattern": "stuck", "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 8, "open_since": "2026-08-21T00:00:00.000Z" },
+          "acc-fire-app:f-g-flap:node-f": { "fire_pattern": "flapping", "clear_count": 3, "max_clear_cycles_24h": 3, "max_episode_firing_rows": 1, "open_since": null },
+          "acc-fire-api:f-h-api-flap-spam:node-f": { "fire_pattern": "flapping", "clear_count": 3, "max_clear_cycles_24h": 3, "max_episode_firing_rows": 3, "open_since": null },
+          "acc-fire-app:f-i-spread:node-f": { "fire_pattern": null, "clear_count": 3, "max_clear_cycles_24h": 2, "max_episode_firing_rows": 1, "open_since": null },
+          "acc-fire-api:f-j-api24:node-f": { "fire_pattern": "spamming", "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 24, "open_since": "2026-08-22T00:00:00.000Z" },
+          "acc-fire-api:f-k-api23:node-f": { "fire_pattern": null, "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 23, "open_since": "2026-08-22T00:00:00.000Z" },
+          "acc-fire-api:f-l-api30-short:node-f": { "fire_pattern": null, "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 30, "open_since": "2026-08-24T00:00:00.000Z" },
+          "acc-fire-api:f-m-api-100h:node-f": { "fire_pattern": null, "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 5, "open_since": "2026-08-20T00:00:00.000Z" },
+          "acc-fire-app:f-p-stale-100h:node-f": { "fire_pattern": null, "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 1, "open_since": "2026-08-21T14:00:00.000Z" }
+        },
+        "v2": {
+          "acc-fire-v2-flap": { "fire_pattern": "flapping", "clear_count": 3, "max_clear_cycles_24h": 3, "max_episode_firing_rows": 1, "open_since": null },
+          "acc-fire-v2-stuck": { "fire_pattern": "stuck", "clear_count": 0, "max_clear_cycles_24h": 0, "max_episode_firing_rows": 10, "open_since": "2026-08-21T00:00:00.000Z" }
+        }
+      },
+      "schemas": {
+        "v1": {
+          "identities": 14,
+          "totals": {
+            "alerts": 141,
+            "distinct_sum": 30,
+            "distinct_per_day": 4.285714285714286,
+            "alerts_per_hour": 0.8392857142857143,
+            "flagged_by_rule": 57,
+            "flagged_by_rule_distinct_sum": 12,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 18,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 30,
+            "node_name_denominator": 30,
+            "node_name_ratio": 1,
+            "key_inflation_numerator": 30,
+            "key_inflation_denominator": 30,
+            "key_inflation_ratio": 1,
+            "unseen": null,
+            "unseen_unmeasured": null
+          },
+          "daily": {
+            "2026-08-20": {
+              "covered_hours": 24,
+              "alerts": 1,
+              "distinct_alerts": 1,
+              "alerts_per_hour": 0.041666666666666664,
+              "flagged_by_rule": 0,
+              "flagged_by_rule_distinct": 0,
+              "assessed_good": 1,
+              "unassessed": 0,
+              "suppressed": 0,
+              "unseen": null,
+              "node_name_numerator": 1,
+              "node_name_denominator": 1,
+              "key_inflation_numerator": 1,
+              "key_inflation_denominator": 1
+            },
+            "2026-08-21": {
+              "covered_hours": 24,
+              "alerts": 6,
+              "distinct_alerts": 5,
+              "alerts_per_hour": 0.25,
+              "flagged_by_rule": 3,
+              "flagged_by_rule_distinct": 2,
+              "assessed_good": 3,
+              "unassessed": 0,
+              "suppressed": 0,
+              "unseen": null,
+              "node_name_numerator": 5,
+              "node_name_denominator": 5,
+              "key_inflation_numerator": 5,
+              "key_inflation_denominator": 5
+            },
+            "2026-08-22": {
+              "covered_hours": 24,
+              "alerts": 54,
+              "distinct_alerts": 7,
+              "alerts_per_hour": 2.25,
+              "flagged_by_rule": 27,
+              "flagged_by_rule_distinct": 3,
+              "assessed_good": 4,
+              "unassessed": 0,
+              "suppressed": 0,
+              "unseen": null,
+              "node_name_numerator": 7,
+              "node_name_denominator": 7,
+              "key_inflation_numerator": 7,
+              "key_inflation_denominator": 7
+            },
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 25,
+              "distinct_alerts": 8,
+              "alerts_per_hour": 1.0416666666666667,
+              "flagged_by_rule": 17,
+              "flagged_by_rule_distinct": 4,
+              "assessed_good": 4,
+              "unassessed": 0,
+              "suppressed": 0,
+              "unseen": null,
+              "node_name_numerator": 8,
+              "node_name_denominator": 8,
+              "key_inflation_numerator": 8,
+              "key_inflation_denominator": 8
+            },
+            "2026-08-24": {
+              "covered_hours": 24,
+              "alerts": 55,
+              "distinct_alerts": 9,
+              "alerts_per_hour": 2.2916666666666665,
+              "flagged_by_rule": 10,
+              "flagged_by_rule_distinct": 3,
+              "assessed_good": 6,
+              "unassessed": 0,
+              "suppressed": 0,
+              "unseen": null,
+              "node_name_numerator": 9,
+              "node_name_denominator": 9,
+              "key_inflation_numerator": 9,
+              "key_inflation_denominator": 9
+            }
+          },
+          "rule_counts": {
+            "2026-08-21": { "R6": [3, 2] },
+            "2026-08-22": { "R6": [27, 3] },
+            "2026-08-23": { "R6": [17, 4] },
+            "2026-08-24": { "R6": [10, 3] }
+          }
+        },
+        "v2": {
+          "identities": 2,
+          "totals": {
+            "alerts": 16,
+            "distinct_sum": 7,
+            "distinct_per_day": 1,
+            "alerts_per_hour": 0.09523809523809523,
+            "flagged_by_rule": 16,
+            "flagged_by_rule_distinct_sum": 7,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 0,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 0,
+            "node_name_denominator": 0,
+            "node_name_ratio": null,
+            "key_inflation_numerator": 7,
+            "key_inflation_denominator": 7,
+            "key_inflation_ratio": 1,
+            "unseen": null,
+            "unseen_unmeasured": null
+          },
+          "daily": {
+            "2026-08-21": {
+              "covered_hours": 24,
+              "alerts": 3,
+              "distinct_alerts": 2,
+              "alerts_per_hour": 0.125,
+              "flagged_by_rule": 3,
+              "flagged_by_rule_distinct": 2,
+              "assessed_good": 0,
+              "unassessed": 0,
+              "phase2_gaps": 0,
+              "suppressed": 0,
+              "node_name_numerator": 0,
+              "node_name_denominator": 0,
+              "key_inflation_numerator": 2,
+              "key_inflation_denominator": 2
+            },
+            "2026-08-22": {
+              "covered_hours": 24,
+              "alerts": 2,
+              "distinct_alerts": 1,
+              "alerts_per_hour": 0.08333333333333333,
+              "flagged_by_rule": 2,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 0,
+              "phase2_gaps": 0,
+              "key_inflation_numerator": 1,
+              "key_inflation_denominator": 1
+            },
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 7,
+              "distinct_alerts": 2,
+              "alerts_per_hour": 0.2916666666666667,
+              "flagged_by_rule": 7,
+              "flagged_by_rule_distinct": 2,
+              "assessed_good": 0,
+              "unassessed": 0,
+              "phase2_gaps": 0,
+              "suppressed": 0,
+              "node_name_numerator": 0,
+              "node_name_denominator": 0,
+              "key_inflation_numerator": 2,
+              "key_inflation_denominator": 2
+            },
+            "2026-08-24": {
+              "covered_hours": 24,
+              "alerts": 2,
+              "distinct_alerts": 1,
+              "alerts_per_hour": 0.08333333333333333,
+              "flagged_by_rule": 2,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 0,
+              "phase2_gaps": 0,
+              "key_inflation_numerator": 1,
+              "key_inflation_denominator": 1
+            },
+            "2026-08-25": {
+              "covered_hours": 18,
+              "alerts": 2,
+              "distinct_alerts": 1,
+              "alerts_per_hour": 0.1111111111111111,
+              "flagged_by_rule": 2,
+              "flagged_by_rule_distinct": 1,
+              "assessed_good": 0,
+              "phase2_gaps": 0,
+              "key_inflation_numerator": 1,
+              "key_inflation_denominator": 1
+            }
+          },
+          "rule_counts": {
+            "2026-08-21": { "R6": [3, 2] },
+            "2026-08-22": { "R6": [2, 1] },
+            "2026-08-23": { "R6": [7, 2] },
+            "2026-08-24": { "R6": [2, 1] },
+            "2026-08-25": { "R6": [2, 1] }
+          }
+        }
+      }
+    },
+
+    "acceptance-unseen": {
+      "_why": [
+        "One v1 panel: operator = 'acc-unseen' AND application = 'shown-app' AND",
+        "(node_name = 'n1' OR severity = 'critical') AND node_name != 'junk'. No v2 panel.",
+        "Identity leaves (spec 6): operator = 'acc-unseen' matches every row, so it hides",
+        "none; application = 'shown-app' hides every row whose application differs. The",
+        "OR-nested node_name = 'n1' is an identity leaf that cannot be evaluated: it adds 1 to",
+        "unseen_unmeasured and never hides. severity is a classification field and is",
+        "ignored. node_name != 'junk' is the only suppression leaf (no negation sits under",
+        "the OR, so suppression_unmeasured = 0).",
+        "7 v1 rows: u01 other-app/n1 on 08-23 and 08-24; u02 shown-app/n1 on 08-23 and",
+        "08-24; u03 shown-app/junk, u04 shown-app/n2, u05 other-app/junk on 08-23.",
+        "No R6: at most two firing rows per alert, opened 54h before window_end.",
+        "Suppressed: u03 and u05 (2 of 7 = 29%, under the 50% guard) => R5 [2, 2] on 08-23.",
+        "Hidden by the panel: u01 (2 rows) and u05. Unseen = hidden minus suppressed = u01's",
+        "2 rows: 1 on 08-23, 1 on 08-24. u05 counts only as suppressed. u04 is seen because",
+        "the only leaf that would hide it is the unmeasured OR leaf.",
+        "unseen_unmeasured = 1, on v1's first bucket (08-18) only; every other v1 bucket has",
+        "unseen 0, not NULL, because the schema has a panel.",
+        "v2: 2 ready identities on 08-23, no panel => unseen and unseen_unmeasured NULL on",
+        "every v2 bucket and NULL on both v2 work-list rows.",
+        "Model: u01, u02, u04 (v1) and uv01, uv02 (v2) are assessed_good; u03, u05 are",
+        "rule_flagged. v1 assessed_good by date: 08-23 3, 08-24 2 (u01, u02) => 5.",
+        "Both schemas present, readiness 2/2 => phase_1, 100%."
+      ],
+      "phase_derived": "phase_1",
+      "phase2_readiness_pct": 100,
+      "identity_states": { "rule_flagged": 2, "assessed_good": 5 },
+      "llm_batches": {
+        "total": 2,
+        "partition_sizes_by_group": {
+          "https://grafana.internal/d/acc-unseen-1": [3],
+          "https://grafana.internal/d/acc-unseen-v2": [2]
+        }
+      },
+      "suppression": {
+        "suppressed_rows": 2,
+        "unmeasured_leaves": 0,
+        "suppressed_node_names": ["junk", "junk"],
+        "not_suppressed_node_names": ["n1", "n2"]
+      },
+      "unseen": {
+        "v1": {
+          "unseen_rows": 2,
+          "unseen_unmeasured": 1,
+          "worklist_unseen": {
+            "other-app:u01-other:n1": true,
+            "shown-app:u02-shown:n1": false,
+            "shown-app:u03-junk:junk": false,
+            "shown-app:u04-or:n2": false,
+            "other-app:u05-other-junk:junk": false
+          }
+        },
+        "v2": {
+          "unseen_rows": null,
+          "unseen_unmeasured": null,
+          "worklist_unseen": { "acc-unseen-uv01": null, "acc-unseen-uv02": null }
+        }
+      },
+      "schemas": {
+        "v1": {
+          "identities": 5,
+          "totals": {
+            "alerts": 7,
+            "distinct_sum": 7,
+            "distinct_per_day": 1,
+            "alerts_per_hour": 0.041666666666666664,
+            "flagged_by_rule": 2,
+            "flagged_by_rule_distinct_sum": 2,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 5,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 2,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 7,
+            "node_name_denominator": 7,
+            "node_name_ratio": 1,
+            "key_inflation_numerator": 7,
+            "key_inflation_denominator": 7,
+            "key_inflation_ratio": 1,
+            "unseen": 2,
+            "unseen_unmeasured": 1
+          },
+          "daily": {
+            "2026-08-18": {
+              "covered_hours": 6,
+              "alerts": 0,
+              "distinct_alerts": 0,
+              "suppressed": 0,
+              "suppression_unmeasured": 0,
+              "unseen": 0,
+              "unseen_unmeasured": 1
+            },
+            "2026-08-19": { "covered_hours": 24, "alerts": 0, "unseen": 0, "unseen_unmeasured": 0 },
+            "2026-08-20": { "covered_hours": 24, "alerts": 0, "unseen": 0, "unseen_unmeasured": 0 },
+            "2026-08-21": { "covered_hours": 24, "alerts": 0, "unseen": 0, "unseen_unmeasured": 0 },
+            "2026-08-22": { "covered_hours": 24, "alerts": 0, "unseen": 0, "unseen_unmeasured": 0 },
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 5,
+              "distinct_alerts": 5,
+              "alerts_per_hour": 0.20833333333333334,
+              "flagged_by_rule": 2,
+              "flagged_by_rule_distinct": 2,
+              "assessed_good": 3,
+              "unassessed": 0,
+              "suppressed": 2,
+              "suppression_unmeasured": 0,
+              "unseen": 1,
+              "unseen_unmeasured": 0,
+              "node_name_numerator": 5,
+              "node_name_denominator": 5,
+              "key_inflation_numerator": 5,
+              "key_inflation_denominator": 5
+            },
+            "2026-08-24": {
+              "covered_hours": 24,
+              "alerts": 2,
+              "distinct_alerts": 2,
+              "alerts_per_hour": 0.08333333333333333,
+              "flagged_by_rule": 0,
+              "flagged_by_rule_distinct": 0,
+              "assessed_good": 2,
+              "unassessed": 0,
+              "suppressed": 0,
+              "suppression_unmeasured": 0,
+              "unseen": 1,
+              "unseen_unmeasured": 0,
+              "node_name_numerator": 2,
+              "node_name_denominator": 2,
+              "key_inflation_numerator": 2,
+              "key_inflation_denominator": 2
+            },
+            "2026-08-25": { "covered_hours": 18, "alerts": 0, "unseen": 0, "unseen_unmeasured": 0 }
+          },
+          "rule_counts": { "2026-08-23": { "R5": [2, 2] } }
+        },
+        "v2": {
+          "identities": 2,
+          "totals": {
+            "alerts": 2,
+            "distinct_sum": 2,
+            "distinct_per_day": 0.2857142857142857,
+            "alerts_per_hour": 0.011904761904761904,
+            "flagged_by_rule": 0,
+            "flagged_by_rule_distinct_sum": 0,
+            "flagged_by_llm": 0,
+            "flagged_by_llm_distinct_sum": 0,
+            "needs_review_sum": 0,
+            "assessed_good_sum": 2,
+            "unassessed_sum": 0,
+            "phase2_gaps_sum": 0,
+            "suppressed": 0,
+            "suppression_unmeasured": 0,
+            "node_name_numerator": 0,
+            "node_name_denominator": 0,
+            "node_name_ratio": null,
+            "key_inflation_numerator": 2,
+            "key_inflation_denominator": 2,
+            "key_inflation_ratio": 1,
+            "unseen": null,
+            "unseen_unmeasured": null
+          },
+          "daily": {
+            "2026-08-23": {
+              "covered_hours": 24,
+              "alerts": 2,
+              "distinct_alerts": 2,
+              "alerts_per_hour": 0.08333333333333333,
+              "flagged_by_rule": 0,
+              "flagged_by_rule_distinct": 0,
+              "assessed_good": 2,
+              "unassessed": 0,
+              "phase2_gaps": 0,
+              "suppressed": 0,
+              "node_name_numerator": 0,
+              "node_name_denominator": 0,
+              "key_inflation_numerator": 2,
+              "key_inflation_denominator": 2
+            }
+          },
+          "rule_counts": {}
+        }
+      }
+    }
+  }
+}

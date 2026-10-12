@@ -1,38 +1,46 @@
 [project]
 name = "alerts-bi-admin"
 version = "0.1.0"
-description = "Alerts BI operator app for publication and human decisions"
+description = "Unified Alerts BI operator, analysis, migrations and weekly scheduling"
 requires-python = ">=3.12"
 readme = "README.md"
 dependencies = [
-    "alerts-bi-runs-runtime==0.1.0+admin.20261008",
-    "alerts-bi-shared==0.1.2",
-    "alerts-bi-operations==0.1.2",
+    "alerts-bi-shared==0.1.3",
+    "alerts-bi-operations==0.1.3",
+    "elasticsearch>=8.15,<9",
+    "openai>=1.55,<2",
+    "sqlalchemy>=2.0,<3",
+    "alembic>=1.14,<2",
+    "pymssql>=2.3,<3",
+    "jsonschema>=4.23,<5",
     "fastapi>=0.115,<1",
-    "uvicorn>=0.32,<1",
+    "uvicorn>=0.32,<1"
 ]
 
 [project.scripts]
 alerts-bi-admin = "alerts_bi_admin.cli:run_cli"
 
 [dependency-groups]
-dev = ["pytest>=8.3,<9", "ruff>=0.8,<0.13", "mypy>=1.13,<2", "httpx>=0.27,<1"]
+dev = ["pytest>=8.3,<9", "ruff>=0.8,<0.13", "mypy>=1.13,<2", "httpx>=0.27,<1", "types-jsonschema>=4.23"]
+
+[tool.uv.workspace]
+members = ["packages/*"]
 
 [tool.uv.sources]
-alerts-bi-runs-runtime = {path = "vendor/alerts_bi_runs_runtime-0.1.0+admin.20261008-py3-none-any.whl"}
-alerts-bi-shared = {path = "vendor/alerts_bi_shared-0.1.2-py3-none-any.whl"}
-alerts-bi-operations = {path = "vendor/alerts_bi_operations-0.1.2-py3-none-any.whl"}
+alerts-bi-shared = {workspace = true}
+alerts-bi-operations = {workspace = true}
 
 [build-system]
 requires = ["setuptools>=80,<81"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["alerts_bi_admin"]
-package-dir = {"alerts_bi_admin" = "src"}
+packages = ["alerts_bi_admin", "alerts_bi_admin.db", "alerts_bi_admin.engine", "alerts_bi_admin.engine.api", "alerts_bi_admin.engine.api.routers", "alerts_bi_admin.engine.api.ui", "alerts_bi_admin.engine.config", "alerts_bi_admin.engine.db", "alerts_bi_admin.engine.db.migrations", "alerts_bi_admin.engine.db.migrations.versions", "alerts_bi_admin.engine.domain", "alerts_bi_admin.engine.es", "alerts_bi_admin.engine.llm", "alerts_bi_admin.engine.rules", "alerts_bi_admin.engine.run", "alerts_bi_admin.engine.suppression", "alerts_bi_admin.engine.weekly", "src", "src.db"]
+package-dir = {"alerts_bi_admin" = "src", "src" = "compat/src"}
 
 [tool.setuptools.package-data]
 alerts_bi_admin = ["py.typed"]
+"alerts_bi_admin.engine" = ["db/migrations/001_initial_schema.sql", "db/migrations/002_review_portal.sql", "db/migrations/003_weekly_schedule.sql", "db/migrations/004_llm_review_audit.sql", "db/migrations/005_team_summary.sql", "db/migrations/006_r6_episodes.sql", "db/migrations/007_portal_daily.sql", "db/migrations/008_measurement_basis.sql", "db/migrations/script.py.mako", "py.typed", "resources/guides/Alerting_Guide_Appchi_EN.md", "resources/guides/what_is_an_incorrect_alert_EN.md"]
 
 [tool.ruff]
 line-length = 100
@@ -43,17 +51,24 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
 ignore = ["E501"]
 
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E741"]
+
 [tool.ruff.format]
 quote-style = "double"
 
 [tool.mypy]
 python_version = "3.12"
-files = ["src", "tests"]
+files = ["src", "tests", "scripts", "packages"]
 strict = true
 warn_unreachable = true
 disallow_any_explicit = false
 
+[[tool.mypy.overrides]]
+module = ["pymssql.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: requires the disposable alerts_bi_test SQL database and local Elasticsearch mock"]
+markers = ["integration: requires disposable alerts_bi_test and the local ES mock", "acceptance: requires the existing mock fixture load"]
 filterwarnings = ["error::DeprecationWarning:alerts_bi_admin.*", "error::DeprecationWarning:src.*"]

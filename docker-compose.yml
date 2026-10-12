@@ -1,0 +1,61 @@
+name: ${COMPOSE_PROJECT_NAME:-alertsbi}
+
+services:
+  es:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.0
+    container_name: alerts-bi-es
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q '\"status\":\"green\"\\|\"status\":\"yellow\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.0
+    container_name: alerts-bi-kibana
+    depends_on:
+      es:
+        condition: service_healthy
+    environment:
+      - ELASTICSEARCH_HOSTS=http://es:9200
+      - XPACK_SECURITY_ENABLED=false
+    ports:
+      - "5601:5601"
+
+  # Persistent store for run snapshots (design section 6). Pinned image: an
+  # unpinned tag would silently change the engine under the migrations.
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-CU14-ubuntu-22.04
+    container_name: alerts-bi-sqlserver
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=${MSSQL_SA_PASSWORD:?set MSSQL_SA_PASSWORD in .env}
+      - MSSQL_PID=Developer
+    ports:
+      - "1433:1433"
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      # /opt/mssql-tools18/bin exists on 2022 CU images; -C trusts the self-signed cert.
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -C -Q 'SELECT 1' -b -o /dev/null",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+volumes:
+  es-data:
+  mssql-data:

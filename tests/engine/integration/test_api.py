@@ -1,0 +1,317 @@
+"""The HTTP trigger surface, against the real mock Elasticsearch and a disposable database.
+
+Integration rather than unit tests on purpose: the surface's whole job is to reach the same
+pipeline the CLI reaches, so a test that stubbed the pipeline out would assert only that the
+router works.
+
+Most tests drive the app through ``TestClient``, which exercises the full ASGI stack
+including the exception handlers. One test boots the real uvicorn server, because
+``TestClient`` speaks ASGI directly and so cannot catch a server that is wired up wrong.
+"""
+
+from __future__ import annotations
+
+import socket
+import threading
+from collections.abc import Iterator
+from pathlib import Path
+
+import httpx
+import pytest
+import uvicorn
+from alerts_bi_operations.report.render import OUTPUT_FILES
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from src.engine.api import build_app
+from src.engine.api.service import RunGate
+from src.engine.config import ApiSettings, load_config
+from src.engine.db.migrate import reset_test_database
+from src.engine.es.client import EsClient
+from src.engine.es.reader import V1_INDEX
+
+pytestmark = pytest.mark.integration
+
+CONFIG = load_config()
+
+#: The mock dataset is generated against this fixed clock.
+RUN_AT = "2026-08-25T18:00:00Z"
+TEAM = "checkout-api"
+JSON = {"Accept": "application/json"}
+
+
+def run_body(**overrides: object) -> dict[str, object]:
+    return {"team": TEAM, "run_at": RUN_AT, "llm": "fake", **overrides}
+
+
+@pytest.fixture(scope="module")
+def settings(tmp_path_factory: pytest.TempPathFactory) -> ApiSettings:
+    try:
+        if not EsClient(CONFIG.es).index_exists(V1_INDEX):
+            pytest.skip("mock Elasticsearch has no appchi-v1 index")
+    except Exception as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"mock Elasticsearch is not reachable: {exc}")
+    try:
+        reset_test_database(CONFIG.sql, CONFIG.sql.test_database)
+    except Exception as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"SQL Server is not reachable: {exc}")
+
+    return ApiSettings(
+        CONFIG,
+        database=CONFIG.sql.test_database,
+        out_root=Path(tmp_path_factory.mktemp("api-out")),
+    )
+
+
+@pytest.fixture(scope="module")
+def app(settings: ApiSettings) -> FastAPI:
+    return build_app(settings)
+
+
+@pytest.fixture(scope="module")
+def client(app: FastAPI) -> Iterator[TestClient]:
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+# ------------------------------------------------------------------ discovery
+
+
+def test_the_index_lists_every_registered_team_and_offers_a_run_form(client: TestClient) -> None:
+    response = client.get("/")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert 'action="/runs"' in response.text
+    assert TEAM in response.text
+
+
+def test_the_team_list_comes_from_the_registry(client: TestClient) -> None:
+    teams = {team["team_id"]: team for team in client.get("/teams").json()["teams"]}
+    assert TEAM in teams
+    assert teams[TEAM]["display_name"] == "Checkout API"
+    assert teams[TEAM]["v1_operators"] == ["checkout", "Checkout-API"]
+
+
+def test_health_reports_each_dependency_separately(client: TestClient) -> None:
+    payload = client.get("/healthz").json()
+    assert payload["checks"]["elasticsearch"]["ok"] is True
+    assert payload["checks"]["sql_server"]["ok"] is True
+    assert payload["ok"] is True
+
+
+def test_an_unknown_route_is_a_404_rather_than_a_traceback(client: TestClient) -> None:
+    response = client.get("/nope")
+    assert response.status_code == 404
+    assert "Traceback" not in response.text
+
+
+# ------------------------------------------------------------------- openapi
+
+
+def test_the_openapi_document_describes_the_surface(client: TestClient) -> None:
+    schema = client.get("/openapi.json").json()
+    assert set(schema["paths"]) >= {
+        "/healthz",
+        "/teams",
+        "/runs",
+        "/runs/{run_id}",
+        "/runs/{run_id}/{name}",
+    }
+    assert schema["info"]["title"] == "Alerts BI"
+
+
+def test_the_run_contract_is_published_rather_than_described_in_prose(
+    client: TestClient,
+) -> None:
+    run_request = client.get("/openapi.json").json()["components"]["schemas"]["RunRequest"]
+    assert run_request["required"] == ["team"], "team never defaults"
+    assert run_request["properties"]["llm"]["default"] == "live"
+
+
+def test_the_interactive_documentation_is_served(client: TestClient) -> None:
+    assert client.get("/docs").status_code == 200
+
+
+# ----------------------------------------------------------------------- runs
+
+
+def test_a_run_returns_the_scorecard_html_for_that_run(client: TestClient) -> None:
+    response = client.post("/runs", json=run_body())
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "Alerts BI scorecard" in response.text
+    assert "Checkout API" in response.text
+    # The run identity travels in a header so a caller can fetch the CSVs afterwards.
+    assert len(response.headers["x-alerts-bi-run-id"]) == 64
+
+
+def test_a_run_writes_the_four_approved_files_exactly_as_the_cli_does(
+    client: TestClient,
+) -> None:
+    response = client.post("/runs", json=run_body())
+    out_dir = Path(response.headers["x-alerts-bi-out-dir"])
+    assert sorted(p.name for p in out_dir.iterdir()) == sorted(OUTPUT_FILES)
+
+
+def test_a_json_caller_gets_the_summary_and_links_instead_of_html(client: TestClient) -> None:
+    payload = client.post("/runs", json=run_body(), headers=JSON).json()
+    assert payload["team_id"] == TEAM
+    assert payload["phase"] == "phase_1"
+    assert payload["v1"] == {"rows": 875, "distinct": 5}
+    assert payload["llm_assessed"] is True
+    assert payload["scorecard"] == f"/runs/{payload['run_id']}"
+    assert set(payload["files"]) == set(OUTPUT_FILES)
+
+
+def test_run_at_may_be_omitted_and_defaults_to_now(client: TestClient) -> None:
+    """A production run omits it; only the fixed-clock mock needs it pinned."""
+    payload = client.post("/runs", json={"team": TEAM, "llm": "off"}, headers=JSON).json()
+    assert payload["team_id"] == TEAM
+    assert payload["llm_assessed"] is False
+
+
+def test_the_same_team_and_clock_reuse_one_run_id(client: TestClient) -> None:
+    first = client.post("/runs", json=run_body())
+    second = client.post("/runs", json=run_body())
+    assert first.headers["x-alerts-bi-run-id"] == second.headers["x-alerts-bi-run-id"]
+
+
+# ------------------------------------------------------------- run refusals
+
+
+def test_a_run_without_a_team_is_refused_rather_than_fanning_out(client: TestClient) -> None:
+    response = client.post("/runs", json={"llm": "fake"}, headers=JSON)
+    assert response.status_code == 422
+    assert "team" in response.text
+
+
+def test_an_empty_team_is_refused_too(client: TestClient) -> None:
+    assert client.post("/runs", json=run_body(team=""), headers=JSON).status_code == 422
+
+
+def test_an_unknown_team_is_rejected_before_any_elasticsearch_query(
+    client: TestClient,
+) -> None:
+    response = client.post("/runs", json=run_body(team="not-a-team"), headers=JSON)
+    assert response.status_code == 400
+    assert "registry" in response.json()["detail"]
+
+
+def test_a_malformed_run_at_is_rejected(client: TestClient) -> None:
+    assert (
+        client.post("/runs", json=run_body(run_at="last-tuesday"), headers=JSON).status_code == 422
+    )
+
+
+def test_an_unknown_llm_mode_is_rejected_rather_than_silently_defaulting(
+    client: TestClient,
+) -> None:
+    response = client.post("/runs", json=run_body(llm="maybe"), headers=JSON)
+    assert response.status_code == 422
+    assert "llm" in response.text
+
+
+def test_a_browser_gets_a_readable_page_when_validation_fails(client: TestClient) -> None:
+    """The run form posts from the index page, so this must not come back as raw JSON."""
+    response = client.post("/runs", json=run_body(llm="maybe"), headers={"Accept": "text/html"})
+    assert response.status_code == 422
+    assert response.headers["content-type"].startswith("text/html")
+    assert "llm" in response.text
+
+
+def test_a_second_concurrent_run_is_refused_rather_than_racing(
+    client: TestClient, app: FastAPI
+) -> None:
+    """Two runs of the same team and clock would derive one run_id and fight over its rows."""
+    gate: RunGate = app.state.run_gate
+    assert gate.acquire(), "the gate should be free before this test takes it"
+    try:
+        response = client.post("/runs", json=run_body(), headers=JSON)
+    finally:
+        gate.release()
+    assert response.status_code == 409
+    assert "already in progress" in response.json()["detail"]
+
+
+# -------------------------------------------------------------------- reports
+
+
+def test_a_stored_run_renders_from_sql_on_demand(client: TestClient) -> None:
+    run_id = client.post("/runs", json=run_body()).headers["x-alerts-bi-run-id"]
+    response = client.get(f"/runs/{run_id}")
+    assert response.status_code == 200
+    assert "Alerts BI scorecard" in response.text
+
+
+@pytest.mark.parametrize("name", ["daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"])
+def test_each_csv_export_is_served_from_the_stored_rows(client: TestClient, name: str) -> None:
+    run_id = client.post("/runs", json=run_body()).headers["x-alerts-bi-run-id"]
+    response = client.get(f"/runs/{run_id}/{name}")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert name in response.headers["content-disposition"]
+    # RFC 4180 line endings survive the transport.
+    assert response.content.count(b"\r\n") > 1
+
+
+def test_latest_resolves_that_team_s_most_recent_run(client: TestClient) -> None:
+    """Latest means the newest run_at, not the most recently executed run.
+
+    The newer window is run FIRST here on purpose: if insertion or completion order were
+    what decided it, this would return the older one.
+    """
+    team = "payments-core"
+    newer = client.post("/runs", json=run_body(team=team, run_at=RUN_AT))
+    client.post("/runs", json=run_body(team=team, run_at="2026-08-24T18:00:00Z"))
+
+    response = client.get(f"/runs/latest?team={team}")
+    assert response.status_code == 200
+    assert response.headers["x-alerts-bi-run-id"] == newer.headers["x-alerts-bi-run-id"]
+
+
+def test_latest_without_a_team_is_refused(client: TestClient) -> None:
+    response = client.get("/runs/latest", headers=JSON)
+    assert response.status_code == 400
+    assert "team" in response.json()["detail"]
+
+
+def test_an_unknown_run_id_is_a_404_not_an_empty_report(client: TestClient) -> None:
+    response = client.get(f"/runs/{'f' * 64}", headers=JSON)
+    assert response.status_code == 404
+    assert "not in the store" in response.json()["detail"]
+
+
+def test_only_the_four_approved_outputs_are_reachable(client: TestClient) -> None:
+    """The file contract is the file contract; the surface serves nothing else."""
+    run_id = client.post("/runs", json=run_body()).headers["x-alerts-bi-run-id"]
+    for name in ("findings.json", "runs.csv", "secrets.txt"):
+        assert client.get(f"/runs/{run_id}/{name}", headers=JSON).status_code == 422, name
+
+
+# ------------------------------------------------------------- the real server
+
+
+def _free_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port: int = probe.getsockname()[1]
+    return port
+
+
+def test_the_uvicorn_server_actually_serves(settings: ApiSettings) -> None:
+    port = _free_port()
+    config = uvicorn.Config(build_app(settings), host="127.0.0.1", port=port, log_level="error")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = 15.0
+        while not server.started and deadline > 0 and thread.is_alive():
+            thread.join(0.1)
+            deadline -= 0.1
+        assert server.started, "uvicorn did not start"
+        response = httpx.get(f"http://127.0.0.1:{port}/healthz", timeout=30)
+        assert response.status_code == 200
+        assert response.json()["ok"] is True
+    finally:
+        server.should_exit = True
+        thread.join(timeout=15)

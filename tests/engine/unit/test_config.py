@@ -1,0 +1,152 @@
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import pytest
+from alerts_bi_shared.logging_setup import redact_error
+from src.engine.config import MAX_BATCH_SIZE_CEILING, load_config, load_dotenv
+
+ENV_NAMES = [
+    "ES_URL",
+    "ES_USERNAME",
+    "ES_PASSWORD",
+    "ES_CA_CERT",
+    "ES_PAGE_SIZE",
+    "ES_REQUEST_TIMEOUT_MS",
+    "SQL_HOST",
+    "SQL_PORT",
+    "SQL_USER",
+    "SQL_PASSWORD",
+    "SQL_DATABASE",
+    "SQL_TEST_DATABASE",
+    "SQL_ENCRYPT",
+    "SQL_TRUST_SERVER_CERTIFICATE",
+    "LLM_ENABLED",
+    "LLM_BASE_URL",
+    "LLM_API_KEY",
+    "LLM_MODEL",
+    "LLM_MODEL_REVISION",
+    "LLM_MAX_COMPLETION_TOKENS",
+    "LLM_TIMEOUT_MS",
+    "LLM_MAX_BATCH_SIZE",
+    "LLM_LIVE_TEST",
+]
+
+
+@pytest.fixture(autouse=True)
+def clean_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Start every test from a known environment and an empty working directory.
+
+    load_config() reads .env from the working directory, so the tests run in a temporary
+    directory to keep the developer's real .env out of the results.
+    """
+    for name in ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
+
+
+def test_optional_model_revision_and_completion_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert load_config().llm.max_completion_tokens is None
+    monkeypatch.setenv("LLM_MODEL_REVISION", "weights-2026-09-24")
+    monkeypatch.setenv("LLM_MAX_COMPLETION_TOKENS", "4096")
+    assert load_config().llm.model_revision == "weights-2026-09-24"
+    assert load_config().llm.max_completion_tokens == 4096
+    monkeypatch.setenv("LLM_MAX_COMPLETION_TOKENS", "-1")
+    with pytest.raises(ValueError, match="nonnegative"):
+        load_config()
+
+
+def test_defaults_are_sane_without_any_environment() -> None:
+    config = load_config()
+    assert config.es.url == "http://localhost:9200"
+    assert config.es.page_size == 1000
+    assert config.sql.database == "alerts_bi_dev"
+    assert config.sql.test_database == "alerts_bi_test"
+    assert config.llm.enabled is False
+    assert config.llm.max_batch_size == MAX_BATCH_SIZE_CEILING
+
+
+def test_environment_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ES_URL", "https://eck.internal:9200/")
+    monkeypatch.setenv("ES_PAGE_SIZE", "250")
+    monkeypatch.setenv("SQL_PORT", "1444")
+    config = load_config()
+    assert config.es.url == "https://eck.internal:9200", "a trailing slash is stripped"
+    assert config.es.page_size == 250
+    assert config.sql.port == 1444
+
+
+@pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+def test_truthy_flags(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("LLM_ENABLED", value)
+    assert load_config().llm.enabled is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", "anything else"])
+def test_falsey_flags(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("LLM_ENABLED", value)
+    assert load_config().llm.enabled is False
+
+
+def test_batch_size_may_be_lowered(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_MAX_BATCH_SIZE", "50")
+    assert load_config().llm.max_batch_size == 50
+
+
+def test_batch_size_may_never_be_raised_above_the_design_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LLM_MAX_BATCH_SIZE", "201")
+    with pytest.raises(ValueError, match="exceeds the design ceiling"):
+        load_config()
+
+
+def test_a_non_positive_batch_size_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_MAX_BATCH_SIZE", "0")
+    with pytest.raises(ValueError, match="positive integer"):
+        load_config()
+
+
+def test_a_non_numeric_integer_setting_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ES_PAGE_SIZE", "lots")
+    with pytest.raises(ValueError, match="must be an integer"):
+        load_config()
+
+
+def test_dotenv_does_not_override_the_real_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "# a comment",
+                "",
+                "ES_URL=http://from-file:9200",
+                'SQL_DATABASE="quoted_value"',
+                "SQL_TEST_DATABASE='single_quoted'",
+                "MALFORMED_LINE_WITHOUT_EQUALS",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ES_URL", "http://from-environment:9200")
+
+    load_dotenv(env_file)
+
+    assert os.environ["ES_URL"] == "http://from-environment:9200", "real environment wins"
+    assert os.environ["SQL_DATABASE"] == "quoted_value", "surrounding quotes are stripped"
+    assert os.environ["SQL_TEST_DATABASE"] == "single_quoted"
+    assert "MALFORMED_LINE_WITHOUT_EQUALS" not in os.environ
+
+
+def test_a_missing_dotenv_file_is_not_an_error() -> None:
+    load_dotenv("definitely-not-a-file.env")
+
+
+def test_redact_error_is_short_and_names_the_type() -> None:
+    summary = redact_error(ValueError("something went wrong " + "x" * 500))
+    assert summary.startswith("ValueError: ")
+    assert len(summary) <= 320
+    assert redact_error(None) == "unknown error"
