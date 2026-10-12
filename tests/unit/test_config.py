@@ -35,23 +35,24 @@ def test_database_and_registry_overrides_are_preserved(monkeypatch: pytest.Monke
     assert explicit.registry_path == "other/teams.json"
 
 
-def test_admin_uses_only_packaged_runtime_adapters() -> None:
+def test_operator_ui_uses_only_local_engine_adapters() -> None:
     sources = Path(__file__).resolve().parents[2] / "src"
-    forbidden = ("alerts_bi_portal", "elasticsearch", "openai")
+    forbidden = ("alerts_bi_runs", "alerts_bi_portal", "elasticsearch", "openai")
     adapters = {
-        "alerts_bi_runs.config",
-        "alerts_bi_runs.api.negotiation",
-        "alerts_bi_runs.api.routers.runs",
-        "alerts_bi_runs.api.schemas",
-        "alerts_bi_runs.api.service",
+        "engine.config",
+        "engine.api.negotiation",
+        "engine.api.routers.runs",
+        "engine.api.schemas",
+        "engine.api.service",
+        "engine.cli",
     }
-    modules = list(sources.rglob("*.py"))
+    modules = list(sources.glob("*.py"))
     assert modules
     for path in modules:
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.ImportFrom) and node.module:
                 assert not node.module.startswith(forbidden), path
-                if node.module.startswith("alerts_bi_runs"):
+                if node.module.startswith("engine"):
                     assert node.module in adapters, path
             elif isinstance(node, ast.Import):
                 assert all(not item.name.startswith(forbidden) for item in node.names), path

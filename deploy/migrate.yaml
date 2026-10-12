@@ -1,0 +1,16 @@
+# Deployment example; replace image placeholders and review before applying.
+apiVersion: batch/v1
+kind: Job
+metadata: {name: alerts-bi-migrate}
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ADMIN_IMAGE_DIGEST
+          command: ["alerts-bi-admin", "db", "setup"]
+          envFrom:
+            - configMapRef: {name: alerts-bi-config}
+            - secretRef: {name: alerts-bi-secrets}

@@ -1,0 +1,575 @@
+{
+  "generatedAt": "2026-08-25T18:00:00.000Z",
+  "totalRows": 40125,
+  "summary": [
+    {
+      "team": "payments-core",
+      "phase": "done",
+      "quality": "good",
+      "v1Rows": 0,
+      "v2Rows": 19,
+      "v1Distinct": 0,
+      "v2Distinct": 10
+    },
+    {
+      "team": "legacy-batch-jobs",
+      "phase": "phase0-not-started",
+      "quality": "bad",
+      "v1Rows": 11852,
+      "v2Rows": 0,
+      "v1Distinct": 10,
+      "v2Distinct": 0
+    },
+    {
+      "team": "fraud-detection",
+      "phase": "phase0-mid-cleanup",
+      "quality": "in-between",
+      "v1Rows": 882,
+      "v2Rows": 0,
+      "v1Distinct": 9,
+      "v2Distinct": 0
+    },
+    {
+      "team": "checkout-api",
+      "phase": "phase1",
+      "quality": "in-between",
+      "v1Rows": 1026,
+      "v2Rows": 17,
+      "v1Distinct": 10,
+      "v2Distinct": 10
+    },
+    {
+      "team": "notifications-svc",
+      "phase": "phase1",
+      "quality": "bad",
+      "v1Rows": 8692,
+      "v2Rows": 35,
+      "v1Distinct": 10,
+      "v2Distinct": 10
+    },
+    {
+      "team": "search-platform",
+      "phase": "phase2",
+      "quality": "good",
+      "v1Rows": 291,
+      "v2Rows": 16,
+      "v1Distinct": 3,
+      "v2Distinct": 12
+    },
+    {
+      "team": "data-pipeline-etl",
+      "phase": "phase1",
+      "quality": "bad",
+      "v1Rows": 16322,
+      "v2Rows": 80,
+      "v1Distinct": 10,
+      "v2Distinct": 10
+    },
+    {
+      "team": "acceptance-core",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 13,
+      "v2Rows": 6,
+      "v1Distinct": 12,
+      "v2Distinct": 6
+    },
+    {
+      "team": "acceptance-batching",
+      "phase": "acceptance",
+      "quality": "good",
+      "v1Rows": 0,
+      "v2Rows": 404,
+      "v1Distinct": 0,
+      "v2Distinct": 404
+    },
+    {
+      "team": "acceptance-suppression",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 6,
+      "v2Rows": 0,
+      "v1Distinct": 6,
+      "v2Distinct": 0
+    },
+    {
+      "team": "acceptance-blast-radius",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 5,
+      "v2Rows": 0,
+      "v1Distinct": 5,
+      "v2Distinct": 0
+    },
+    {
+      "team": "acceptance-fire-patterns",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 141,
+      "v2Rows": 16,
+      "v1Distinct": 20,
+      "v2Distinct": 4
+    },
+    {
+      "team": "acceptance-unseen",
+      "phase": "acceptance",
+      "quality": "mixed",
+      "v1Rows": 7,
+      "v2Rows": 2,
+      "v1Distinct": 5,
+      "v2Distinct": 2
+    }
+  ],
+  "ruleBreakdown": [
+    {
+      "team": "legacy-batch-jobs",
+      "schema": "v1",
+      "rule": 1,
+      "rows": 9795,
+      "distinct": 3
+    },
+    {
+      "team": "legacy-batch-jobs",
+      "schema": "v1",
+      "rule": 2,
+      "rows": 32,
+      "distinct": 2
+    },
+    {
+      "team": "legacy-batch-jobs",
+      "schema": "v1",
+      "rule": 3,
+      "rows": 2306,
+      "distinct": 2
+    },
+    {
+      "team": "legacy-batch-jobs",
+      "schema": "v1",
+      "rule": 4,
+      "rows": 5,
+      "distinct": 1
+    },
+    {
+      "team": "legacy-batch-jobs",
+      "schema": "v1",
+      "rule": 5,
+      "rows": 32,
+      "distinct": 2
+    },
+    {
+      "team": "legacy-batch-jobs",
+      "schema": "v1",
+      "rule": 6,
+      "rows": 8354,
+      "distinct": 2
+    },
+    {
+      "team": "legacy-batch-jobs",
+      "schema": "v1",
+      "rule": 7,
+      "rows": 577,
+      "distinct": 1
+    },
+    {
+      "team": "fraud-detection",
+      "schema": "v1",
+      "rule": 1,
+      "rows": 145,
+      "distinct": 1
+    },
+    {
+      "team": "fraud-detection",
+      "schema": "v1",
+      "rule": 2,
+      "rows": 10,
+      "distinct": 1
+    },
+    {
+      "team": "fraud-detection",
+      "schema": "v1",
+      "rule": 5,
+      "rows": 10,
+      "distinct": 1
+    },
+    {
+      "team": "checkout-api",
+      "schema": "v1",
+      "rule": 1,
+      "rows": 289,
+      "distinct": 1
+    },
+    {
+      "team": "checkout-api",
+      "schema": "v1",
+      "rule": 2,
+      "rows": 8,
+      "distinct": 1
+    },
+    {
+      "team": "checkout-api",
+      "schema": "v1",
+      "rule": 4,
+      "rows": 2,
+      "distinct": 1
+    },
+    {
+      "team": "checkout-api",
+      "schema": "v1",
+      "rule": 5,
+      "rows": 8,
+      "distinct": 1
+    },
+    {
+      "team": "checkout-api",
+      "schema": "v2",
+      "rule": 4,
+      "rows": 3,
+      "distinct": 1
+    },
+    {
+      "team": "checkout-api",
+      "schema": "v2",
+      "rule": 8,
+      "rows": 2,
+      "distinct": 1
+    },
+    {
+      "team": "checkout-api",
+      "schema": "v2",
+      "rule": 9,
+      "rows": 2,
+      "distinct": 1
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v1",
+      "rule": 1,
+      "rows": 7779,
+      "distinct": 3
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v1",
+      "rule": 2,
+      "rows": 42,
+      "distinct": 3
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v1",
+      "rule": 3,
+      "rows": 1153,
+      "distinct": 1
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v1",
+      "rule": 4,
+      "rows": 4,
+      "distinct": 1
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v1",
+      "rule": 5,
+      "rows": 42,
+      "distinct": 3
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v1",
+      "rule": 6,
+      "rows": 6626,
+      "distinct": 2
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v1",
+      "rule": 7,
+      "rows": 577,
+      "distinct": 1
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v2",
+      "rule": 1,
+      "rows": 3,
+      "distinct": 1
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v2",
+      "rule": 2,
+      "rows": 22,
+      "distinct": 2
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v2",
+      "rule": 5,
+      "rows": 22,
+      "distinct": 2
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v2",
+      "rule": 8,
+      "rows": 27,
+      "distinct": 4
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v2",
+      "rule": 9,
+      "rows": 5,
+      "distinct": 2
+    },
+    {
+      "team": "notifications-svc",
+      "schema": "v2",
+      "rule": 10,
+      "rows": 1,
+      "distinct": 1
+    },
+    {
+      "team": "search-platform",
+      "schema": "v2",
+      "rule": 8,
+      "rows": 1,
+      "distinct": 1
+    },
+    {
+      "team": "search-platform",
+      "schema": "v2",
+      "rule": 9,
+      "rows": 2,
+      "distinct": 1
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v1",
+      "rule": 1,
+      "rows": 13972,
+      "distinct": 4
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v1",
+      "rule": 2,
+      "rows": 38,
+      "distinct": 2
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v1",
+      "rule": 3,
+      "rows": 3170,
+      "distinct": 2
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v1",
+      "rule": 4,
+      "rows": 5,
+      "distinct": 1
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v1",
+      "rule": 5,
+      "rows": 1479,
+      "distinct": 3
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v1",
+      "rule": 6,
+      "rows": 12243,
+      "distinct": 3
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v1",
+      "rule": 7,
+      "rows": 865,
+      "distinct": 1
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v2",
+      "rule": 2,
+      "rows": 28,
+      "distinct": 2
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v2",
+      "rule": 4,
+      "rows": 3,
+      "distinct": 1
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v2",
+      "rule": 5,
+      "rows": 28,
+      "distinct": 2
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v2",
+      "rule": 8,
+      "rows": 76,
+      "distinct": 7
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v2",
+      "rule": 9,
+      "rows": 48,
+      "distinct": 5
+    },
+    {
+      "team": "data-pipeline-etl",
+      "schema": "v2",
+      "rule": 10,
+      "rows": 2,
+      "distinct": 1
+    }
+  ],
+  "panelQueries": [
+    {
+      "team": "payments-core",
+      "v1": null,
+      "v2": "SELECT * FROM appchi_v2_hot WHERE operator = 'payments-core'",
+      "v1Operators": null,
+      "v2Operator": "payments-core"
+    },
+    {
+      "team": "legacy-batch-jobs",
+      "v1": "SELECT * FROM appchi_v1_hot WHERE operator IN ('batch-team','BATCH_JOBS','batch_svc') AND node_name != 'legacy-heartbeat-node' AND message NOT LIKE '%test%'",
+      "v2": null,
+      "v1Operators": [
+        "batch-team",
+        "BATCH_JOBS",
+        "batch_svc"
+      ],
+      "v2Operator": null
+    },
+    {
+      "team": "fraud-detection",
+      "v1": "SELECT * FROM appchi_v1_hot WHERE operator = 'fraud-detection' AND node_name != 'fraud-canary-test'",
+      "v2": null,
+      "v1Operators": [
+        "fraud-detection"
+      ],
+      "v2Operator": null
+    },
+    {
+      "team": "checkout-api",
+      "v1": "SELECT * FROM appchi_v1_hot WHERE operator IN ('checkout','Checkout-API') AND node_name NOT LIKE 'test-%'",
+      "v2": "SELECT * FROM appchi_v2_hot WHERE operator = 'checkout-api'",
+      "v1Operators": [
+        "checkout",
+        "Checkout-API"
+      ],
+      "v2Operator": "checkout-api"
+    },
+    {
+      "team": "notifications-svc",
+      "v1": "SELECT * FROM appchi_v1_hot WHERE operator IN ('notifications','notif-svc','NOTIF_TEAM') AND node_name != 'notif-canary' AND application != 'sms-gateway-test'",
+      "v2": "SELECT * FROM appchi_v2_hot WHERE operator = 'notifications-svc' AND node_name != 'notif-canary'",
+      "v1Operators": [
+        "notifications",
+        "notif-svc",
+        "NOTIF_TEAM"
+      ],
+      "v2Operator": "notifications-svc"
+    },
+    {
+      "team": "search-platform",
+      "v1": "SELECT * FROM appchi_v1_hot WHERE operator = 'search-platform'",
+      "v2": "SELECT * FROM appchi_v2_hot WHERE operator = 'search-platform'",
+      "v1Operators": [
+        "search-platform"
+      ],
+      "v2Operator": "search-platform"
+    },
+    {
+      "team": "data-pipeline-etl",
+      "v1": "SELECT * FROM appchi_v1_hot WHERE operator IN ('data-pipeline','dp-team','ETL_TEAM','pipeline') AND node_name NOT IN ('dp-heartbeat','dp-test-node') AND message NOT LIKE '%OK%'",
+      "v2": "SELECT * FROM appchi_v2_hot WHERE operator = 'data-pipeline-etl' AND node_name NOT IN ('dp-heartbeat','dp-test-node')",
+      "v1Operators": [
+        "data-pipeline",
+        "dp-team",
+        "ETL_TEAM",
+        "pipeline"
+      ],
+      "v2Operator": "data-pipeline-etl"
+    },
+    {
+      "team": "acceptance-core",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-core"
+      ],
+      "v2Operator": "acc-core-v2"
+    },
+    {
+      "team": "acceptance-batching",
+      "v1": null,
+      "v2": null,
+      "v1Operators": null,
+      "v2Operator": "acc-batching"
+    },
+    {
+      "team": "acceptance-suppression",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-suppression"
+      ],
+      "v2Operator": null
+    },
+    {
+      "team": "acceptance-blast-radius",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-blast"
+      ],
+      "v2Operator": null
+    },
+    {
+      "team": "acceptance-fire-patterns",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-fire"
+      ],
+      "v2Operator": "acc-fire-v2"
+    },
+    {
+      "team": "acceptance-unseen",
+      "v1": null,
+      "v2": null,
+      "v1Operators": [
+        "acc-unseen"
+      ],
+      "v2Operator": "acc-unseen-v2"
+    }
+  ],
+  "unattributed": {
+    "v1Rows": 290,
+    "v2Rows": 3,
+    "v1Operators": [
+      "ghost-team-alpha",
+      "unregistered-legacy-cron"
+    ],
+    "v2Operators": [
+      "unmapped-svc-9",
+      "api-key-not-in-registry"
+    ]
+  }
+}

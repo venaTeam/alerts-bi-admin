@@ -1,0 +1,1 @@
+"""Alerts BI domain package."""

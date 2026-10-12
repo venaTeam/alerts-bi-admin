@@ -5,14 +5,18 @@ ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 ENV POETRY_NO_INTERACTION=1
 WORKDIR /app
 COPY pyproject.toml poetry.lock README.md ./
-COPY vendor/ vendor/
+COPY packages/ packages/
 COPY src/ src/
+COPY compat/ compat/
 COPY config/ config/
+COPY alembic.ini ./
 RUN /opt/poetry/bin/poetry check --lock \
     && /opt/poetry/bin/poetry sync --only main --no-root \
+    && /opt/poetry/bin/poetry --directory packages/shared build --output /app/dist \
+    && /opt/poetry/bin/poetry --directory packages/operations build --output /app/dist \
     && /opt/poetry/bin/poetry build --format wheel \
-    && .venv/bin/python -m pip install --no-deps dist/*.whl
-RUN mkdir -p /app/out && chown 1001:0 /app/out
+    && .venv/bin/python -m pip install --no-deps --force-reinstall dist/*.whl
+RUN mkdir -p /app/out && chgrp -R 0 /app && chmod -R g=u /app
 ENV ADMIN_OUT_DIR=/app/out
 ENV PATH="/app/.venv/bin:$PATH"
 USER 1001

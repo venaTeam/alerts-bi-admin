@@ -1,49 +1,49 @@
-# Alerts BI operator app
+# Alerts BI unified operator and analysis application
 
-The unified operator console lives in this repository. Teams opens a team's run history
-and its Overview, Findings, Decisions and Activity tabs. Schedule and Decisions also have
-workspace-wide pages. Trigger analysis, inspect stored evidence, publish or withdraw a
-review, and record append-only human decisions from the same authenticated application.
+This repository owns the authenticated operator UI/API, analysis engine, SQL migrations,
+weekly jobs, team registry, mock tooling, and shared/operations library sources. It replaces
+the former runs service and source repository. The standalone portal remains a read-only
+consumer of published SQL views and `alerts-bi-shared`.
 
-The UI source is in `src/`. Analysis runs in-process through the pinned execution runtime
-in `vendor/`; no sibling checkout or separate trigger web service is required. The runtime
-is exported from the tracked runs revision recorded in `vendor/runtime-source.json`.
-Shared/operations wheels remain immutable dependencies. Portal stays a separate reader
-service; runs remains the migration and weekly-job owner.
+Teams opens run history and Overview, Findings, Decisions and Activity tabs. Schedule and
+Decisions have workspace-wide pages. Trigger, inspect, publish, withdraw and record human
+decisions in the same application. The existing UI is preserved.
 
-Python 3.12+ and `Poetry 2.3.1` are required. From this repository:
+## Install and start
+
+Python 3.12+ and Poetry 2.3.1 are required. A standalone clone includes all source and resources:
 
 ```powershell
 poetry sync --no-root
+poetry run python -m ensurepip --upgrade
 poetry run python -m pip install --no-deps -e .
 Copy-Item .env.example .env
-# Set SQL_*, ES_*, LLM_*, a private ADMIN_SECRET (32+ characters), and registry path.
+# Configure SQL_*, ES_*, LLM_* and a private ADMIN_SECRET of at least 32 characters.
+poetry run alerts-bi-admin db setup
 poetry run alerts-bi-admin serve
 ```
 
-The default listener is `http://127.0.0.1:8200`. It only binds to loopback and expects
-the trusted login proxy to pass `X-Forwarded-User`. For an isolated local session,
-`alerts-bi-admin serve --dev-user your-name` supplies an explicit development identity.
-The app refuses unsigned forms, tokens belonging to another operator, and declared
-cross-site writes. Every write is attributed to its operator.
+`db setup` targets SQL_DATABASE unless `--database` is explicit; run it only for an authorized
+database. It preserves applied revisions and rejects checksum drift. No data/schema migration
+is introduced by the repository move. Schema head stays `008_measurement_basis`.
 
-The authenticated `GET /healthz` checks Elasticsearch, SQL and the operator schema.
-Missing dependencies return JSON with `ok=false` and HTTP 503. All API routes require
-operator identity. JSON `POST /runs` also requires the `X-CSRF-Token` returned by `GET /csrf`.
-Browser actions use signed, same-site forms. A manual run covers exactly the preceding
-168 hours and stays unpublished after completion. The UI and JSON API share one process
-execution gate; deploy one application worker and one replica.
+The listener binds only to loopback, default port 8200, behind the trusted login proxy's
+`X-Forwarded-User`. Local-only `serve --dev-user your-name` supplies an explicit development
+identity. Every HTTP route requires identity. Writes require actor-bound CSRF tokens and
+same-site requests; JSON `POST /runs` gets its token from authenticated `GET /csrf`.
+`GET /healthz` checks SQL, Elasticsearch and operator schema, returning a redacted 503 when
+unavailable. Keep one UI worker/replica; manual analysis is synchronous and uses a process gate.
 
-The bundled `config/teams.json` is an exported runs artifact, not an independent registry.
-Supply your deployment registry through `ADMIN_REGISTRY_PATH`
-or `serve --registry <path>`. It is runtime configuration, not a dependency on a sibling
-checkout. The schema validator is packaged in the operations wheel. Database migrations
-and the original mock stack belong to `venaTeam/alerts-bi-runs` and must be applied first.
-
-Existing operator commands are available under the new executable:
+## Commands
 
 ```powershell
-poetry run alerts-bi-admin registry check --registry <path>
+poetry run alerts-bi-admin run --team checkout-api --fake-llm --database alerts_bi_test
+poetry run alerts-bi-admin weekly --dry-run
+poetry run alerts-bi-admin weekly
+poetry run alerts-bi-admin weekly-status
+poetry run alerts-bi-admin db status
+poetry run alerts-bi-admin registry check --registry config/teams.json
+poetry run alerts-bi-admin report --run-id <id>
 poetry run alerts-bi-admin publications --team <team>
 poetry run alerts-bi-admin publish --run-id <id> --by <operator>
 poetry run alerts-bi-admin unpublish --run-id <id> --reason <reason> --by <operator>
@@ -51,42 +51,71 @@ poetry run alerts-bi-admin decide --run-id <id> --schema v1 --application <app> 
 poetry run alerts-bi-admin decisions --team <team>
 ```
 
-`--by` defaults to the current OS user, preserving the previous CLI behavior. Publication
-overlaps and gaps, explicit replacement and immutable decision history use the same
-operations implementation as scheduled runs. The listener's `ADMIN_DATABASE`/`--database`
-override remains supported; operator commands default to `SQL_DATABASE`.
+Manual runs cover exactly the preceding 168 hours and remain unpublished. Weekly jobs retain
+the Monday UTC windows, SQL schedule lock, health gate, catch-up and publication policy.
+Run exactly one weekly scheduler. Operator `--by` defaults to the OS user; web writes use the
+proxy identity. Operator commands support `--database`, while the listener additionally
+supports `ADMIN_DATABASE`. Registry is admin-owned `config/teams.json`; mount production values
+using `ADMIN_REGISTRY_PATH`/`serve --registry`, and pass `--registry` to engine/job commands.
+`ADMIN_OUT_DIR` configures HTTP output; CLI jobs use `--out` or their documented defaults.
+
+## Source, libraries and builds
+
+UI source is directly in `src/`; engine code is in `src/engine`, installed under
+`alerts_bi_admin.engine`. Historical revisions use local and installed `src.db.ledger`
+compatibility bridges. Never edit applied SQL/revision files. Public library namespaces remain
+`alerts_bi_shared` and `alerts_bi_operations`, maintained in `packages/` as local Poetry path dependencies.
+There is no runs runtime package or sibling checkout dependency.
+
+`poetry sync --no-root` installs the locked dependencies and editable local libraries.
+Existing uv-created `.venv` environments may lack pip: the `ensurepip` setup step
+bootstraps it before installing the application. Keep the three setup commands together.
+The application uses setuptools for its `src` to `alerts_bi_admin` mapping and
+migration compatibility bridge; Poetry's root editable installer cannot preserve that
+mapping. `poetry build` uses the declared setuptools backend. Docker builds and installs
+the app and both library wheels for a non-editable production environment.
+Use `poetry check --lock` to check the lockfile. Current service commands are in this
+README; the pinned `docs/upstream/` snapshot retains its historical tooling examples.
 
 ```powershell
-poetry run ruff format --check .
-poetry run ruff check .
-poetry run mypy
-poetry run pytest -q
 poetry build
+poetry run python scripts/build_libraries.py
 docker build -t alerts-bi-admin:local .
 ```
 
-The image expects an oauth-proxy sidecar sharing its loopback network, a registry mount,
-and the SQL/ES/model settings. `ADMIN_OUT_DIR` must be writable; the image provides
-`/app/out` for its non-root user. Apply migrations through the runs deployment before use. A standalone clone uses the immutable wheels in
-`vendor/` and the committed lockfile. Canonical design and cross-application SQL tests live
-in `venaTeam/alerts-bi-design`; `docs/upstream/` contains this application's pinned snapshot.
+Portal pins an immutable shared wheel; copy each new versioned artifact to its vendor directory
+and update its lockfile only after verifying compatibility. Never overwrite a released wheel.
+An admin wheel install requires matching shared/operations wheels; the Docker build uses only
+this checkout and committed lockfile. Source provenance is in `docs/engine-source-import.json`.
 
-Imported from `venaTeam/alerts-bi` at `c518eeaeb5a3ecb35b5348828300454379e7d535`.
+## Local mocks and verification
 
+The original mock generator, scripts and hand-reviewed oracle now live here. The Compose
+project defaults to `alertsbi` to reuse the existing named volumes. For an existing installation
+with another project name, set COMPOSE_PROJECT_NAME to its existing name before using Compose.
+Never use `down -v` for a source relocation. Configure `.env` before starting local dependencies.
 
-Application code lives directly in `src/`. Local tests import `src`, while setuptools
-maps that directory to the service's distinct installed Python package. The console
-command and Docker listener are unchanged. `poetry sync --no-root` installs the
-locked dependencies; `poetry run python -m pip install --no-deps -e .` installs
-the editable setuptools mapping. Poetry's own editable installer does not map
-`src` to the service namespace, so keep these two setup steps together.
-`poetry build` uses the declared setuptools backend to produce the independently
-installable wheel and source archive. The Docker image installs that wheel.
-Run `poetry check --lock` to validate the committed lockfile. `docs/upstream/`
-is an immutable historical snapshot; current service commands are listed here.
+```powershell
+docker compose up -d
+$env:STATS_ONLY = "1"
+poetry run python scripts/generate_mock_alerts.py
+Remove-Item Env:STATS_ONLY
+poetry run ruff check .
+poetry run ruff format --check .
+poetry run mypy
+poetry run pytest tests/unit tests/engine/unit -q
+poetry run pytest tests/integration tests/engine/integration -q -rs
+poetry run pytest tests/engine/acceptance -q -rs
+poetry run alerts-bi-admin verify-acceptance --database alerts_bi_test
+```
 
+Integration suites require real local SQL Server and the seeded Elasticsearch mock. They reset
+only disposable `alerts_bi_test`; run them serially, with no other session testing that database.
+Acceptance uses the original fixed-clock fixture load; never regenerate expected-results.json.
+`scripts/evaluate_llm.py`, `benchmark_streaming.py`, `es_scale_probe.py` and `create_kibana_panels.py`
+retain their existing explicit options. Live model evaluation is opt-in and separate from fake tests.
 
-For the execution artifact's provenance and rebuild procedure, see `vendor/README.md`.
-The integration suite resets only the configured disposable `alerts_bi_test` database and
-uses the existing Elasticsearch mock. To run it, provide the corresponding SQL and ES
-settings in your environment; unit checks do not require running services.
+The admin image provides writable `/app/out` for its non-root user. Deployment examples and
+the ordered scheduler/migration transfer, rollback and eventual archival checklist are in
+`docs/upstream/openshift-deployment.md` and `docs/upstream/runs-retirement.md`. PRs do not deploy
+or stop services. Canonical requirements stay in alerts-bi-design; snapshots here are pinned.

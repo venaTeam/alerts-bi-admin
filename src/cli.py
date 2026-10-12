@@ -1,4 +1,4 @@
-"""Operator CLI and unified admin listener; analysis uses the packaged runs runtime."""
+"""Unified operator, analysis, migration and weekly-job commands."""
 
 from __future__ import annotations
 
@@ -10,17 +10,22 @@ from datetime import datetime
 from alerts_bi_shared.db.connection import connect
 from alerts_bi_shared.logging_setup import log, redact_error
 from alerts_bi_shared.timefmt import iso_instant
+from alerts_bi_shared.versions import APP_VERSION
 
 from .config import AdminConfig, load_config
+from .engine.cli import ENGINE_COMMANDS, add_commands, dispatch
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Alerts BI operator application.")
+    parser = argparse.ArgumentParser(
+        prog="alerts-bi-admin", description="Alerts BI operator and analysis application."
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
+    parser.add_argument("--version", action="version", version=f"alerts-bi-admin {APP_VERSION}")
     serve = subparsers.add_parser("serve", help="serve the loopback admin app behind a login proxy")
     serve.add_argument("--port", type=int, help="ADMIN_PORT, else 8200")
     serve.add_argument("--database", help="ADMIN_DATABASE, else SQL_DATABASE")
-    serve.add_argument("--registry", help="path to the same team registry used by runs")
+    serve.add_argument("--registry", help="team registry path; default config/teams.json")
     serve.add_argument(
         "--dev-user", help="local development only: identity when no proxy is present"
     )
@@ -80,6 +85,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--registry", help="registry path; default config/teams.json")
 
+    add_commands(subparsers)
     return parser
 
 
@@ -258,9 +264,13 @@ def _command_admin(args: argparse.Namespace, config: AdminConfig) -> int:
 def main(argv: list[str] | None = None) -> int:
     # A bare invocation starts the app; subcommands expose the existing operator tools.
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if not arguments or (arguments[0].startswith("--") and arguments[0] not in ("--help",)):
+    if not arguments or (
+        arguments[0].startswith("--") and arguments[0] not in ("--help", "--version")
+    ):
         arguments.insert(0, "serve")
     args = build_parser().parse_args(arguments)
+    if args.command in ENGINE_COMMANDS:
+        return dispatch(args)
     config = load_config()
     handlers = {
         "serve": _command_admin,

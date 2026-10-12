@@ -1,0 +1,22 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install poetry==2.3.1
+      - run: poetry sync --no-root
+      - run: poetry run python -m ensurepip --upgrade
+      - run: poetry run python -m pip install --no-deps -e .
+      - run: poetry run ruff format --check .
+      - run: poetry run ruff check .
+      - run: poetry run mypy
+      - run: poetry run pytest tests/unit tests/engine/unit
+      - run: poetry build
+      - run: poetry run python scripts/build_libraries.py

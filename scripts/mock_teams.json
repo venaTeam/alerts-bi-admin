@@ -1,0 +1,1606 @@
+{
+  "teams": [
+    {
+      "name": "payments-core",
+      "phase": "done",
+      "quality": "good",
+      "schemas": [
+        "v2"
+      ],
+      "v2Operator": "payments-core",
+      "v1PanelQuery": null,
+      "v2PanelQuery": "SELECT * FROM appchi_v2_hot WHERE operator = 'payments-core'",
+      "v2Defs": [
+        {
+          "application": "payments-api",
+          "obj": "payment-processor",
+          "message": "Payment authorization error rate above 3% over 5m",
+          "severity": "critical",
+          "impact": "Customers cannot complete checkout; revenue loss accruing",
+          "runbook_url": "https://runbooks.internal/payments-core/auth-error-rate",
+          "alert_rule_url": "https://grafana.internal/d/pay-1",
+          "refireCount": 3,
+          "resolves": true,
+          "recencyDays": 1
+        },
+        {
+          "application": "payments-api",
+          "obj": "payment-processor",
+          "message": "p99 latency above 900ms on authorize endpoint",
+          "severity": "high",
+          "impact": "Checkout feels slow to customers, cart abandonment risk rises",
+          "runbook_url": "https://runbooks.internal/payments-core/latency",
+          "alert_rule_url": "https://grafana.internal/d/pay-2",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 4
+        },
+        {
+          "application": "payments-worker",
+          "obj": "settlement-queue",
+          "message": "Settlement queue depth above 5000 for 15m",
+          "severity": "high",
+          "impact": "Merchant payouts will be delayed past SLA",
+          "runbook_url": "https://runbooks.internal/payments-core/settlement-backlog",
+          "alert_rule_url": "https://grafana.internal/d/pay-3",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 9
+        },
+        {
+          "application": "payments-worker",
+          "obj": "settlement-queue",
+          "message": "Settlement job failure rate above 1% over 10m",
+          "severity": "critical",
+          "impact": "A portion of merchant settlements will fail and require manual reconciliation",
+          "runbook_url": "https://runbooks.internal/payments-core/settlement-failures",
+          "alert_rule_url": "https://grafana.internal/d/pay-4",
+          "refireCount": 3,
+          "resolves": true,
+          "recencyDays": 14
+        },
+        {
+          "application": "payments-api",
+          "obj": "fraud-hold-check",
+          "message": "Fraud-hold check latency above 400ms over 5m",
+          "severity": "warning",
+          "impact": "Slightly slower checkout for a subset of flagged transactions",
+          "runbook_url": "https://runbooks.internal/payments-core/fraud-hold-latency",
+          "alert_rule_url": "https://grafana.internal/d/pay-5",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 20
+        },
+        {
+          "application": "payments-api",
+          "obj": "card-vault",
+          "message": "Card vault write error rate above 0.5% over 5m",
+          "severity": "critical",
+          "impact": "New card saves fail for customers, blocking future one-click checkout",
+          "runbook_url": "https://runbooks.internal/payments-core/vault-errors",
+          "alert_rule_url": "https://grafana.internal/d/pay-6",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 27
+        },
+        {
+          "application": "payments-worker",
+          "obj": "refund-processor",
+          "message": "Refund processing lag above 30m for queued refunds",
+          "severity": "warning",
+          "impact": "Customers see delayed refunds and may open support tickets",
+          "runbook_url": "https://runbooks.internal/payments-core/refund-lag",
+          "alert_rule_url": "https://grafana.internal/d/pay-7",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 33
+        },
+        {
+          "application": "payments-api",
+          "obj": "payment-processor",
+          "message": "Circuit breaker open on upstream acquirer connection",
+          "severity": "critical",
+          "impact": "All payments to that acquirer fail until the breaker resets",
+          "runbook_url": "https://runbooks.internal/payments-core/breaker-open",
+          "alert_rule_url": "https://grafana.internal/d/pay-8",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 41
+        },
+        {
+          "application": "payments-worker",
+          "obj": "settlement-queue",
+          "message": "Dead-letter queue depth above 50 for settlement jobs",
+          "severity": "high",
+          "impact": "Those settlements will not retry automatically and need manual replay",
+          "runbook_url": "https://runbooks.internal/payments-core/dlq-depth",
+          "alert_rule_url": "https://grafana.internal/d/pay-9",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 48
+        },
+        {
+          "application": "payments-api",
+          "obj": "rate-limiter",
+          "message": "Upstream acquirer rate-limit responses above 2% over 10m",
+          "severity": "warning",
+          "impact": "A small share of payments will be retried with added latency",
+          "runbook_url": "https://runbooks.internal/payments-core/rate-limit",
+          "alert_rule_url": "https://grafana.internal/d/pay-10",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 55
+        }
+      ]
+    },
+    {
+      "name": "legacy-batch-jobs",
+      "phase": "phase0-not-started",
+      "quality": "bad",
+      "schemas": [
+        "v1"
+      ],
+      "v1Operators": [
+        "batch-team",
+        "BATCH_JOBS",
+        "batch_svc"
+      ],
+      "v1PanelQuery": "SELECT * FROM appchi_v1_hot WHERE operator IN ('batch-team','BATCH_JOBS','batch_svc') AND node_name != 'legacy-heartbeat-node' AND message NOT LIKE '%test%'",
+      "v2PanelQuery": null,
+      "v1Defs": [
+        {
+          "application": "nightly-etl",
+          "obj": "job-runner",
+          "node_name": "etl-node-1",
+          "message": "Issue detected",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/batch-1",
+          "badRule": [
+            1,
+            6
+          ],
+          "refireCount": 32,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "report-gen",
+          "obj": "job-runner",
+          "node_name": "report-node-2",
+          "message": "Error Occurred",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/batch-2",
+          "badRule": [
+            1,
+            6
+          ],
+          "refireCount": 28,
+          "intervalHours": 12,
+          "recencyDays": 2
+        },
+        {
+          "application": "nightly-etl",
+          "obj": "heartbeat",
+          "node_name": "legacy-heartbeat-node",
+          "message": "i am alive",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 18,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "archiver",
+          "obj": "heartbeat",
+          "node_name": "legacy-heartbeat-node",
+          "message": "service started",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 14,
+          "intervalHours": 12,
+          "recencyDays": 1
+        },
+        {
+          "application": "nightly-etl",
+          "obj": "Unknown",
+          "node_name": "Default",
+          "message": "Unable to get data",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1,
+            3
+          ],
+          "refireCount": 6,
+          "intervalHours": 24,
+          "recencyDays": 5
+        },
+        {
+          "application": "report-gen",
+          "obj": "Test",
+          "node_name": "N/A",
+          "message": "Test",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            3
+          ],
+          "refireCount": 4,
+          "intervalHours": 24,
+          "recencyDays": 12
+        },
+        {
+          "application": "archiver",
+          "obj": "job-runner",
+          "node_name": "archiver-node-1",
+          "message": "Manual escalation triggered by script",
+          "severity": "error",
+          "provider": "api",
+          "badRule": [
+            4
+          ],
+          "refireCount": 5,
+          "intervalHours": 8,
+          "recencyDays": 3
+        },
+        {
+          "application": "report-gen",
+          "obj": "job-runner",
+          "node_name": "report-node-3",
+          "message": "Nightly report generation failed for finance dataset",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            7
+          ],
+          "refireCount": 3,
+          "intervalHours": 24,
+          "recencyDays": 6
+        },
+        {
+          "application": "nightly-etl",
+          "obj": "job-runner",
+          "node_name": "etl-node-4",
+          "message": "ETL job for warehouse sync failed with exit code 1",
+          "severity": "major",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/batch-9",
+          "refireCount": 2,
+          "intervalHours": 24,
+          "recencyDays": 8,
+          "resolves": true
+        },
+        {
+          "application": "archiver",
+          "obj": "job-runner",
+          "node_name": "archiver-node-2",
+          "message": "Archive job disk write failures above threshold",
+          "severity": "major",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/batch-10",
+          "refireCount": 2,
+          "intervalHours": 24,
+          "recencyDays": 15,
+          "resolves": true
+        }
+      ]
+    },
+    {
+      "name": "fraud-detection",
+      "phase": "phase0-mid-cleanup",
+      "quality": "in-between",
+      "schemas": [
+        "v1"
+      ],
+      "v1Operators": [
+        "fraud-detection"
+      ],
+      "v1PanelQuery": "SELECT * FROM appchi_v1_hot WHERE operator = 'fraud-detection' AND node_name != 'fraud-canary-test'",
+      "v2PanelQuery": null,
+      "v1Defs": [
+        {
+          "application": "fraud-scoring",
+          "obj": "scoring-service",
+          "node_name": "fs-node-1",
+          "message": "Fraud score latency above 500ms over 5m",
+          "severity": "major",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/fraud-1",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 1,
+          "resolves": true
+        },
+        {
+          "application": "fraud-scoring",
+          "obj": "scoring-service",
+          "node_name": "fs-node-2",
+          "message": "Fraud model inference error rate above 2% over 10m",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/fraud-2",
+          "refireCount": 3,
+          "intervalHours": 12,
+          "recencyDays": 3,
+          "resolves": true
+        },
+        {
+          "application": "fraud-rules-engine",
+          "obj": "rules-evaluator",
+          "node_name": "fr-node-1",
+          "message": "Rules engine queue depth above 2000 for 10m",
+          "severity": "major",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/fraud-3",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 6,
+          "resolves": true
+        },
+        {
+          "application": "fraud-rules-engine",
+          "obj": "rules-evaluator",
+          "node_name": "fr-node-2",
+          "message": "Rule evaluation timeout rate above 1% over 5m",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/fraud-4",
+          "refireCount": 1,
+          "intervalHours": 12,
+          "recencyDays": 10,
+          "resolves": true
+        },
+        {
+          "application": "fraud-scoring",
+          "obj": "model-loader",
+          "node_name": "fs-node-3",
+          "message": "Fraud model reload failure on deploy",
+          "severity": "major",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/fraud-5",
+          "refireCount": 1,
+          "intervalHours": 12,
+          "recencyDays": 18,
+          "resolves": true
+        },
+        {
+          "application": "fraud-scoring",
+          "obj": "scoring-service",
+          "node_name": "fs-node-1",
+          "message": "Fraud score cache hit rate below 60% over 15m",
+          "severity": "warning",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/fraud-6",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 24,
+          "resolves": true
+        },
+        {
+          "application": "fraud-rules-engine",
+          "obj": "rules-evaluator",
+          "node_name": "fr-node-3",
+          "message": "Manual chargeback review queue above SLA threshold",
+          "severity": "warning",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/fraud-7",
+          "refireCount": 1,
+          "intervalHours": 12,
+          "recencyDays": 31,
+          "resolves": true
+        },
+        {
+          "application": "fraud-scoring",
+          "obj": "scoring-service",
+          "node_name": "fs-node-2",
+          "message": "Error Occurred",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1
+          ],
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 2
+        },
+        {
+          "application": "fraud-rules-engine",
+          "obj": "heartbeat",
+          "node_name": "fraud-canary-test",
+          "message": "healthy",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 10,
+          "intervalHours": 12,
+          "recencyDays": 0
+        }
+      ]
+    },
+    {
+      "name": "checkout-api",
+      "phase": "phase1",
+      "quality": "in-between",
+      "schemas": [
+        "v1",
+        "v2"
+      ],
+      "v1Operators": [
+        "checkout",
+        "Checkout-API"
+      ],
+      "v2Operator": "checkout-api",
+      "v1PanelQuery": "SELECT * FROM appchi_v1_hot WHERE operator IN ('checkout','Checkout-API') AND node_name NOT LIKE 'test-%'",
+      "v2PanelQuery": "SELECT * FROM appchi_v2_hot WHERE operator = 'checkout-api'",
+      "v1Defs": [
+        {
+          "application": "checkout-svc",
+          "obj": "checkout-flow",
+          "node_name": "chk-node-1",
+          "message": "Checkout completion rate below 90% over 15m",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/chk-1",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 1,
+          "resolves": true
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "checkout-flow",
+          "node_name": "chk-node-2",
+          "message": "p95 latency above 700ms on checkout submit",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/chk-2",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 3,
+          "resolves": true
+        },
+        {
+          "application": "cart-svc",
+          "obj": "cart-store",
+          "node_name": "cart-node-1",
+          "message": "Cart persistence write error rate above 1% over 5m",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/chk-3",
+          "refireCount": 3,
+          "intervalHours": 12,
+          "recencyDays": 6,
+          "resolves": true
+        },
+        {
+          "application": "cart-svc",
+          "obj": "cart-store",
+          "node_name": "cart-node-2",
+          "message": "Cart abandonment spike above baseline by 20%",
+          "severity": "warning",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/chk-4",
+          "refireCount": 1,
+          "intervalHours": 12,
+          "recencyDays": 10,
+          "resolves": true
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "inventory-check",
+          "node_name": "chk-node-3",
+          "message": "Inventory check timeout rate above 2% over 10m",
+          "severity": "major",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/chk-5",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 14,
+          "resolves": true
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "checkout-flow",
+          "node_name": "chk-node-1",
+          "message": "Checkout retry rate above 5% over 10m",
+          "severity": "warning",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/chk-6",
+          "refireCount": 1,
+          "intervalHours": 12,
+          "recencyDays": 20,
+          "resolves": true
+        },
+        {
+          "application": "cart-svc",
+          "obj": "promo-engine",
+          "node_name": "cart-node-3",
+          "message": "Promo code validation error rate above 3% over 5m",
+          "severity": "warning",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/chk-7",
+          "refireCount": 1,
+          "intervalHours": 12,
+          "recencyDays": 27,
+          "resolves": true
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "checkout-flow",
+          "node_name": "chk-node-4",
+          "message": "Something went wrong",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1
+          ],
+          "refireCount": 3,
+          "intervalHours": 12,
+          "recencyDays": 4
+        },
+        {
+          "application": "cart-svc",
+          "obj": "heartbeat",
+          "node_name": "test-node-1",
+          "message": "OK",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 8,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "gateway",
+          "node_name": "chk-node-5",
+          "message": "Manual escalation triggered by script",
+          "severity": "error",
+          "provider": "api",
+          "badRule": [
+            4
+          ],
+          "refireCount": 2,
+          "intervalHours": 24,
+          "recencyDays": 9
+        }
+      ],
+      "v2Defs": [
+        {
+          "application": "checkout-svc",
+          "obj": "checkout-flow",
+          "message": "Checkout completion rate below 90% over 15m",
+          "severity": "high",
+          "impact": "Customers abandon carts at a higher rate, direct revenue impact",
+          "runbook_url": "https://runbooks.internal/checkout-api/completion-rate",
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-1",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 1
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "checkout-flow",
+          "message": "p95 latency above 700ms on checkout submit",
+          "severity": "high",
+          "impact": "Checkout feels slow, increasing abandonment",
+          "runbook_url": "https://runbooks.internal/checkout-api/latency",
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-2",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 3
+        },
+        {
+          "application": "cart-svc",
+          "obj": "cart-store",
+          "message": "Cart persistence write error rate above 1% over 5m",
+          "severity": "high",
+          "impact": "Customers lose cart contents and must re-add items",
+          "runbook_url": "https://runbooks.internal/checkout-api/cart-write-errors",
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-3",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 5
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "inventory-check",
+          "message": "Inventory check timeout rate above 2% over 10m",
+          "severity": "warning",
+          "impact": "Some checkouts stall waiting on stock confirmation",
+          "runbook_url": "https://runbooks.internal/checkout-api/inventory-timeout",
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-4",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 8
+        },
+        {
+          "application": "cart-svc",
+          "obj": "promo-engine",
+          "message": "Promo code validation error rate above 3% over 5m",
+          "severity": "warning",
+          "impact": "Customers see promo codes rejected incorrectly",
+          "runbook_url": "https://runbooks.internal/checkout-api/promo-errors",
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-5",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 12
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "checkout-flow",
+          "message": "Checkout retry rate above 5% over 10m",
+          "severity": "warning",
+          "impact": "More load on payment gateway from retried submissions",
+          "runbook_url": "https://runbooks.internal/checkout-api/retry-rate",
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-6",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 16
+        },
+        {
+          "application": "cart-svc",
+          "obj": "cart-store",
+          "message": "Cart abandonment spike above baseline by 20%",
+          "severity": "warning",
+          "impact": "Indicates a possible checkout regression affecting conversion",
+          "runbook_url": "https://runbooks.internal/checkout-api/abandonment-spike",
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-7",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 22
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "gateway",
+          "message": "Payment gateway 5xx rate above 2% over 5m",
+          "severity": "critical",
+          "impact": null,
+          "runbook_url": "https://runbooks.internal/checkout-api/gateway-5xx",
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-8",
+          "badRule": [
+            8
+          ],
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 2
+        },
+        {
+          "application": "checkout-svc",
+          "obj": "checkout-flow",
+          "message": "Checkout service circuit breaker open",
+          "severity": "critical",
+          "impact": "All checkout submissions fail until breaker resets",
+          "runbook_url": null,
+          "alert_rule_url": "https://grafana.internal/d/chk-v2-9",
+          "badRule": [
+            9
+          ],
+          "refireCount": 2,
+          "resolves": false,
+          "recencyDays": 0
+        },
+        {
+          "application": "cart-svc",
+          "obj": "cart-store",
+          "message": "Cart save request received",
+          "severity": "warning",
+          "impact": null,
+          "runbook_url": null,
+          "provider": "api",
+          "badRule": [
+            4
+          ],
+          "refireCount": 3,
+          "resolves": false,
+          "recencyDays": 7
+        }
+      ]
+    },
+    {
+      "name": "notifications-svc",
+      "phase": "phase1",
+      "quality": "bad",
+      "schemas": [
+        "v1",
+        "v2"
+      ],
+      "v1Operators": [
+        "notifications",
+        "notif-svc",
+        "NOTIF_TEAM"
+      ],
+      "v2Operator": "notifications-svc",
+      "v1PanelQuery": "SELECT * FROM appchi_v1_hot WHERE operator IN ('notifications','notif-svc','NOTIF_TEAM') AND node_name != 'notif-canary' AND application != 'sms-gateway-test'",
+      "v2PanelQuery": "SELECT * FROM appchi_v2_hot WHERE operator = 'notifications-svc' AND node_name != 'notif-canary'",
+      "v1Defs": [
+        {
+          "application": "notif-dispatcher",
+          "obj": "dispatch-queue",
+          "node_name": "notif-node-1",
+          "message": "Dispatch queue depth above 10000 for 10m",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/notif-1",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 2,
+          "resolves": true
+        },
+        {
+          "application": "email-worker",
+          "obj": "send-worker",
+          "node_name": "email-node-1",
+          "message": "Email send failure rate above 5% over 10m",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/notif-2",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 5,
+          "resolves": true
+        },
+        {
+          "application": "notif-dispatcher",
+          "obj": "dispatch-queue",
+          "node_name": "notif-node-2",
+          "message": "Something went wrong",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1,
+            6
+          ],
+          "refireCount": 26,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "sms-gateway",
+          "obj": "sms-send",
+          "node_name": "sms-node-1",
+          "message": "Error Occurred",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1,
+            6
+          ],
+          "refireCount": 22,
+          "intervalHours": 12,
+          "recencyDays": 1
+        },
+        {
+          "application": "notif-dispatcher",
+          "obj": "heartbeat",
+          "node_name": "notif-canary",
+          "message": "i am alive",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 16,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "email-worker",
+          "obj": "heartbeat",
+          "node_name": "notif-canary",
+          "message": "service started",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 14,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "sms-gateway-test",
+          "obj": "sms-send",
+          "node_name": "sms-test-node",
+          "message": "completed successfully",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 12,
+          "intervalHours": 12,
+          "recencyDays": 1
+        },
+        {
+          "application": "notif-dispatcher",
+          "obj": "Default",
+          "node_name": "N/A",
+          "message": "Unable to get data",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1,
+            3
+          ],
+          "refireCount": 5,
+          "intervalHours": 24,
+          "recencyDays": 8
+        },
+        {
+          "application": "email-worker",
+          "obj": "send-worker",
+          "node_name": "email-node-2",
+          "message": "Manual escalation triggered by script",
+          "severity": "error",
+          "provider": "api",
+          "badRule": [
+            4
+          ],
+          "refireCount": 4,
+          "intervalHours": 24,
+          "recencyDays": 11
+        },
+        {
+          "application": "sms-gateway",
+          "obj": "sms-send",
+          "node_name": "sms-node-2",
+          "message": "SMS delivery confirmation lag above 60s",
+          "severity": "major",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/notif-9",
+          "badRule": [
+            7
+          ],
+          "refireCount": 3,
+          "intervalHours": 24,
+          "recencyDays": 15
+        }
+      ],
+      "v2Defs": [
+        {
+          "application": "notif-dispatcher",
+          "obj": "dispatch-queue",
+          "message": "Dispatch queue depth above 10000 for 10m",
+          "severity": "high",
+          "impact": "Notification delivery delays for all channels",
+          "runbook_url": "https://runbooks.internal/notifications-svc/queue-depth",
+          "alert_rule_url": "https://grafana.internal/d/notif-v2-1",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 2
+        },
+        {
+          "application": "email-worker",
+          "obj": "send-worker",
+          "message": "Email send failure rate above 5% over 10m",
+          "severity": "high",
+          "impact": "Customers miss transactional emails such as receipts",
+          "runbook_url": "https://runbooks.internal/notifications-svc/email-failures",
+          "alert_rule_url": "https://grafana.internal/d/notif-v2-2",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 4
+        },
+        {
+          "application": "notif-dispatcher",
+          "obj": "dispatch-queue",
+          "message": "Something went wrong",
+          "severity": "high",
+          "impact": null,
+          "runbook_url": null,
+          "alert_rule_url": "https://grafana.internal/d/notif-v2-3",
+          "badRule": [
+            1,
+            8,
+            9
+          ],
+          "refireCount": 3,
+          "resolves": false,
+          "recencyDays": 1
+        },
+        {
+          "application": "sms-gateway",
+          "obj": "sms-send",
+          "message": "SMS delivery failure rate above 3% over 10m",
+          "severity": "critical",
+          "impact": null,
+          "runbook_url": null,
+          "alert_rule_url": "https://grafana.internal/d/notif-v2-4",
+          "badRule": [
+            8,
+            9
+          ],
+          "refireCount": 2,
+          "resolves": false,
+          "recencyDays": 0
+        },
+        {
+          "application": "notif-dispatcher",
+          "obj": "heartbeat",
+          "node_name": "notif-canary",
+          "message": "i am alive",
+          "severity": "warning",
+          "impact": null,
+          "provider": "api",
+          "badRule": [
+            2,
+            5,
+            8
+          ],
+          "refireCount": 12,
+          "resolves": false,
+          "recencyDays": 0
+        },
+        {
+          "application": "email-worker",
+          "obj": "heartbeat",
+          "node_name": "notif-canary",
+          "message": "healthy",
+          "severity": "warning",
+          "impact": null,
+          "provider": "api",
+          "badRule": [
+            2,
+            5,
+            8
+          ],
+          "refireCount": 10,
+          "resolves": false,
+          "recencyDays": 0
+        },
+        {
+          "application": "email-worker",
+          "obj": "send-worker",
+          "message": "Email bounce rate above 8% over 15m",
+          "severity": "warning",
+          "impact": "high bounce rate",
+          "runbook_url": "https://runbooks.internal/notifications-svc/bounce-rate",
+          "alert_rule_url": "https://grafana.internal/d/notif-v2-6",
+          "badRule": [
+            10
+          ],
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 9
+        },
+        {
+          "application": "sms-gateway",
+          "obj": "sms-send",
+          "message": "SMS provider latency above 2s over 10m",
+          "severity": "warning",
+          "impact": "Delayed SMS delivery for OTP and alerts, users may retry",
+          "runbook_url": "https://runbooks.internal/notifications-svc/sms-latency",
+          "alert_rule_url": "https://grafana.internal/d/notif-v2-7",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 13
+        },
+        {
+          "application": "notif-dispatcher",
+          "obj": "dispatch-queue",
+          "message": "Dead-letter queue depth above 500 for notification jobs",
+          "severity": "high",
+          "impact": "Those notifications will not retry automatically and are lost",
+          "runbook_url": "https://runbooks.internal/notifications-svc/dlq",
+          "alert_rule_url": "https://grafana.internal/d/notif-v2-8",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 18
+        },
+        {
+          "application": "email-worker",
+          "obj": "template-render",
+          "message": "Template render error rate above 1% over 5m",
+          "severity": "warning",
+          "impact": "Customers may receive malformed emails for affected templates",
+          "runbook_url": "https://runbooks.internal/notifications-svc/template-errors",
+          "alert_rule_url": "https://grafana.internal/d/notif-v2-9",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 24
+        }
+      ]
+    },
+    {
+      "name": "search-platform",
+      "phase": "phase2",
+      "quality": "good",
+      "schemas": [
+        "v1",
+        "v2"
+      ],
+      "v1Operators": [
+        "search-platform"
+      ],
+      "v2Operator": "search-platform",
+      "v1PanelQuery": "SELECT * FROM appchi_v1_hot WHERE operator = 'search-platform'",
+      "v2PanelQuery": "SELECT * FROM appchi_v2_hot WHERE operator = 'search-platform'",
+      "v1Defs": [
+        {
+          "application": "search-api",
+          "obj": "query-handler",
+          "node_name": "search-node-legacy-1",
+          "message": "Legacy query timeout rate above 2% over 10m (pending v2 cutover)",
+          "severity": "warning",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/search-legacy-1",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 30,
+          "resolves": true
+        },
+        {
+          "application": "indexer",
+          "obj": "index-builder",
+          "node_name": "search-node-legacy-2",
+          "message": "Legacy index build lag above 15m (pending v2 cutover)",
+          "severity": "warning",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/search-legacy-2",
+          "refireCount": 2,
+          "intervalHours": 12,
+          "recencyDays": 40,
+          "resolves": true
+        },
+        {
+          "application": "query-router",
+          "obj": "router",
+          "node_name": "search-node-legacy-3",
+          "message": "Legacy router 5xx rate above 1% (pending v2 cutover)",
+          "severity": "error",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/search-legacy-3",
+          "refireCount": 1,
+          "intervalHours": 12,
+          "recencyDays": 55,
+          "resolves": true
+        }
+      ],
+      "v2Defs": [
+        {
+          "application": "search-api",
+          "obj": "query-handler",
+          "message": "Query error rate above 2% over 10m",
+          "severity": "high",
+          "impact": "Users see failed or empty search results",
+          "runbook_url": "https://runbooks.internal/search-platform/query-errors",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-1",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 1
+        },
+        {
+          "application": "search-api",
+          "obj": "query-handler",
+          "message": "p99 query latency above 1200ms over 10m",
+          "severity": "high",
+          "impact": "Search feels slow, users may abandon the search flow",
+          "runbook_url": "https://runbooks.internal/search-platform/query-latency",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-2",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 3
+        },
+        {
+          "application": "indexer",
+          "obj": "index-builder",
+          "message": "Index build lag above 20m over baseline",
+          "severity": "warning",
+          "impact": "Search results reflect stale catalog data for affected items",
+          "runbook_url": "https://runbooks.internal/search-platform/index-lag",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-3",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 6
+        },
+        {
+          "application": "indexer",
+          "obj": "index-builder",
+          "message": "Index build failure rate above 1% over 15m",
+          "severity": "high",
+          "impact": "New or updated items stop appearing in search results",
+          "runbook_url": "https://runbooks.internal/search-platform/index-failures",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-4",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 9
+        },
+        {
+          "application": "query-router",
+          "obj": "router",
+          "message": "Router 5xx rate above 1% over 5m",
+          "severity": "critical",
+          "impact": "Search is unavailable for affected users",
+          "runbook_url": "https://runbooks.internal/search-platform/router-5xx",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-5",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 12
+        },
+        {
+          "application": "query-router",
+          "obj": "router",
+          "message": "Routing table reload failure on deploy",
+          "severity": "high",
+          "impact": "New search backends will not receive traffic until reload succeeds",
+          "runbook_url": "https://runbooks.internal/search-platform/reload-failure",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-6",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 16
+        },
+        {
+          "application": "search-api",
+          "obj": "ranking-service",
+          "message": "Ranking model inference latency above 300ms over 10m",
+          "severity": "warning",
+          "impact": "Search relevance falls back to a simpler ranking method",
+          "runbook_url": "https://runbooks.internal/search-platform/ranking-latency",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-7",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 20
+        },
+        {
+          "application": "indexer",
+          "obj": "index-builder",
+          "message": "Index shard allocation imbalance above 30%",
+          "severity": "warning",
+          "impact": "Some queries run slower than others due to hot shards",
+          "runbook_url": "https://runbooks.internal/search-platform/shard-imbalance",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-8",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 25
+        },
+        {
+          "application": "search-api",
+          "obj": "query-handler",
+          "message": "Cache hit rate below 50% over 15m",
+          "severity": "warning",
+          "impact": "Higher backend load and slower queries during the drop",
+          "runbook_url": "https://runbooks.internal/search-platform/cache-hit-rate",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-9",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 29
+        },
+        {
+          "application": "query-router",
+          "obj": "router",
+          "message": "Upstream backend timeout rate above 2% over 10m",
+          "severity": "high",
+          "impact": "A subset of queries return errors instead of results",
+          "runbook_url": null,
+          "alert_rule_url": "https://grafana.internal/d/search-v2-10",
+          "badRule": [
+            9
+          ],
+          "severity_override": "critical",
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 34
+        },
+        {
+          "application": "search-api",
+          "obj": "query-handler",
+          "message": "Query volume spike above 3x baseline",
+          "severity": "warning",
+          "impact": null,
+          "runbook_url": "https://runbooks.internal/search-platform/volume-spike",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-11",
+          "badRule": [
+            8
+          ],
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 38
+        },
+        {
+          "application": "indexer",
+          "obj": "index-builder",
+          "message": "Index build queue depth above 200",
+          "severity": "warning",
+          "impact": "New items are delayed from appearing in search",
+          "runbook_url": "https://runbooks.internal/search-platform/build-queue",
+          "alert_rule_url": "https://grafana.internal/d/search-v2-12",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 44
+        }
+      ]
+    },
+    {
+      "name": "data-pipeline-etl",
+      "phase": "phase1",
+      "quality": "bad",
+      "schemas": [
+        "v1",
+        "v2"
+      ],
+      "v1Operators": [
+        "data-pipeline",
+        "dp-team",
+        "ETL_TEAM",
+        "pipeline"
+      ],
+      "v2Operator": "data-pipeline-etl",
+      "v1PanelQuery": "SELECT * FROM appchi_v1_hot WHERE operator IN ('data-pipeline','dp-team','ETL_TEAM','pipeline') AND node_name NOT IN ('dp-heartbeat','dp-test-node') AND message NOT LIKE '%OK%'",
+      "v2PanelQuery": "SELECT * FROM appchi_v2_hot WHERE operator = 'data-pipeline-etl' AND node_name NOT IN ('dp-heartbeat','dp-test-node')",
+      "v1Defs": [
+        {
+          "application": "ingest-worker",
+          "obj": "ingest-queue",
+          "node_name": "dp-node-1",
+          "message": "Unable to get data",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1,
+            6
+          ],
+          "refireCount": 34,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "transform-job",
+          "obj": "job-runner",
+          "node_name": "dp-node-2",
+          "message": "Error Occurred",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1,
+            6
+          ],
+          "refireCount": 30,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "load-job",
+          "obj": "job-runner",
+          "node_name": "dp-node-3",
+          "message": "Something went wrong",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1,
+            6
+          ],
+          "refireCount": 24,
+          "intervalHours": 12,
+          "recencyDays": 1
+        },
+        {
+          "application": "ingest-worker",
+          "obj": "heartbeat",
+          "node_name": "dp-heartbeat",
+          "message": "i am alive",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 20,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "transform-job",
+          "obj": "heartbeat",
+          "node_name": "dp-heartbeat",
+          "message": "OK",
+          "severity": "warning",
+          "provider": "api",
+          "badRule": [
+            2,
+            5
+          ],
+          "refireCount": 18,
+          "intervalHours": 12,
+          "recencyDays": 0
+        },
+        {
+          "application": "load-job",
+          "obj": "Unknown",
+          "node_name": "Default",
+          "message": "Unable to get data",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            1,
+            3
+          ],
+          "refireCount": 7,
+          "intervalHours": 24,
+          "recencyDays": 4
+        },
+        {
+          "application": "ingest-worker",
+          "obj": "Test",
+          "node_name": "dp-test-node",
+          "message": "Test",
+          "severity": "error",
+          "provider": "grafana",
+          "badRule": [
+            3,
+            5
+          ],
+          "refireCount": 6,
+          "intervalHours": 24,
+          "recencyDays": 7
+        },
+        {
+          "application": "transform-job",
+          "obj": "job-runner",
+          "node_name": "dp-node-4",
+          "message": "Manual escalation triggered by script",
+          "severity": "error",
+          "provider": "api",
+          "badRule": [
+            4
+          ],
+          "refireCount": 5,
+          "intervalHours": 24,
+          "recencyDays": 10
+        },
+        {
+          "application": "load-job",
+          "obj": "job-runner",
+          "node_name": "dp-node-5",
+          "message": "Warehouse load job failed with constraint violation",
+          "severity": "major",
+          "provider": "grafana",
+          "badRule": [
+            7
+          ],
+          "refireCount": 4,
+          "intervalHours": 24,
+          "recencyDays": 13
+        },
+        {
+          "application": "ingest-worker",
+          "obj": "ingest-queue",
+          "node_name": "dp-node-6",
+          "message": "Source connector authentication failure",
+          "severity": "major",
+          "provider": "grafana",
+          "alert_rule_url": "https://grafana.internal/d/dp-10",
+          "refireCount": 1,
+          "intervalHours": 24,
+          "recencyDays": 20,
+          "resolves": true
+        }
+      ],
+      "v2Defs": [
+        {
+          "application": "ingest-worker",
+          "obj": "ingest-queue",
+          "message": "Ingest queue depth above 20000 for 15m",
+          "severity": "high",
+          "impact": null,
+          "runbook_url": null,
+          "badRule": [
+            8,
+            9
+          ],
+          "refireCount": 22,
+          "resolves": false,
+          "recencyDays": 0
+        },
+        {
+          "application": "transform-job",
+          "obj": "job-runner",
+          "message": "Transform job failure rate above 10% over 15m",
+          "severity": "critical",
+          "impact": null,
+          "runbook_url": null,
+          "badRule": [
+            8,
+            9
+          ],
+          "refireCount": 18,
+          "resolves": false,
+          "recencyDays": 0
+        },
+        {
+          "application": "load-job",
+          "obj": "job-runner",
+          "message": "Warehouse load failure rate above 5% over 15m",
+          "severity": "critical",
+          "impact": null,
+          "runbook_url": null,
+          "badRule": [
+            8,
+            9
+          ],
+          "refireCount": 3,
+          "resolves": false,
+          "recencyDays": 1
+        },
+        {
+          "application": "ingest-worker",
+          "obj": "heartbeat",
+          "node_name": "dp-heartbeat",
+          "message": "i am alive",
+          "severity": "warning",
+          "impact": null,
+          "provider": "api",
+          "badRule": [
+            2,
+            5,
+            8
+          ],
+          "refireCount": 15,
+          "resolves": false,
+          "recencyDays": 0
+        },
+        {
+          "application": "transform-job",
+          "obj": "heartbeat",
+          "node_name": "dp-heartbeat",
+          "message": "healthy",
+          "severity": "warning",
+          "impact": null,
+          "provider": "api",
+          "badRule": [
+            2,
+            5,
+            8
+          ],
+          "refireCount": 13,
+          "resolves": false,
+          "recencyDays": 0
+        },
+        {
+          "application": "load-job",
+          "obj": "job-runner",
+          "message": "high cpu usage on load worker pods",
+          "severity": "warning",
+          "impact": "high cpu usage",
+          "runbook_url": "https://runbooks.internal/data-pipeline-etl/cpu",
+          "badRule": [
+            10
+          ],
+          "refireCount": 2,
+          "resolves": true,
+          "recencyDays": 5
+        },
+        {
+          "application": "ingest-worker",
+          "obj": "ingest-queue",
+          "message": "Manual escalation triggered by script",
+          "severity": "high",
+          "impact": null,
+          "runbook_url": null,
+          "provider": "api",
+          "badRule": [
+            4,
+            8,
+            9
+          ],
+          "refireCount": 3,
+          "resolves": false,
+          "recencyDays": 8
+        },
+        {
+          "application": "transform-job",
+          "obj": "job-runner",
+          "message": "Transform schema validation error rate above 3% over 10m",
+          "severity": "high",
+          "impact": "Downstream tables receive incomplete rows for affected sources",
+          "runbook_url": "https://runbooks.internal/data-pipeline-etl/schema-validation",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 11
+        },
+        {
+          "application": "load-job",
+          "obj": "job-runner",
+          "message": "Warehouse connection pool exhaustion",
+          "severity": "high",
+          "impact": "New load jobs queue and downstream tables fall behind",
+          "runbook_url": "https://runbooks.internal/data-pipeline-etl/pool-exhaustion",
+          "refireCount": 1,
+          "resolves": true,
+          "recencyDays": 17
+        },
+        {
+          "application": "ingest-worker",
+          "obj": "ingest-queue",
+          "message": "Dead-letter queue depth above 1000 for ingest jobs",
+          "severity": "critical",
+          "impact": null,
+          "runbook_url": null,
+          "badRule": [
+            8,
+            9
+          ],
+          "refireCount": 2,
+          "resolves": false,
+          "recencyDays": 3
+        }
+      ]
+    }
+  ],
+  "unattributed": {
+    "name": "Unattributed",
+    "v1": [
+      {
+        "application": "mystery-svc",
+        "obj": "unknown-flow",
+        "node_name": "ghost-node-1",
+        "message": "Unhandled exception in request pipeline",
+        "severity": "error",
+        "operator": "ghost-team-alpha",
+        "provider": "grafana",
+        "alert_rule_url": "https://grafana.internal/d/ghost-1",
+        "refireCount": 2,
+        "intervalHours": 24,
+        "recencyDays": 5
+      },
+      {
+        "application": "mystery-svc",
+        "obj": "unknown-flow",
+        "node_name": "ghost-node-2",
+        "message": "Retry budget exhausted for downstream call",
+        "severity": "major",
+        "operator": "unregistered-legacy-cron",
+        "provider": "grafana",
+        "alert_rule_url": "https://grafana.internal/d/ghost-2",
+        "refireCount": 1,
+        "intervalHours": 24,
+        "recencyDays": 15
+      }
+    ],
+    "v2": [
+      {
+        "application": "shadow-api",
+        "obj": "edge-handler",
+        "message": "Edge handler 5xx rate above 2% over 10m",
+        "severity": "high",
+        "impact": "Requests through this edge fail for an unknown subset of traffic",
+        "runbook_url": null,
+        "operator": "unmapped-svc-9",
+        "refireCount": 2,
+        "resolves": true,
+        "recencyDays": 2
+      },
+      {
+        "application": "shadow-api",
+        "obj": "edge-handler",
+        "message": "Edge handler restart loop detected",
+        "severity": "critical",
+        "impact": null,
+        "runbook_url": null,
+        "operator": "api-key-not-in-registry",
+        "refireCount": 1,
+        "resolves": false,
+        "recencyDays": 0
+      }
+    ]
+  }
+}
