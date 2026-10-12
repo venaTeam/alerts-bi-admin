@@ -6,11 +6,11 @@ from typing import cast
 from unittest.mock import Mock
 
 import pytest
-from alerts_bi_runs.api.schemas import CheckOut
 from alerts_bi_shared.db.connection import Database
 from fastapi.testclient import TestClient
 from src import app
 from src.config import AdminSettings, load_config
+from src.engine.api.schemas import CheckOut
 from src.readiness import REQUIRED_COLUMNS
 
 

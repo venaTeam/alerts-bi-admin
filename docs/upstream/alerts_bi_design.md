@@ -1,5 +1,28 @@
 # Alerts BI — Design Document
 
+## Complete runs retirement — 2026-10-12
+
+The product owner requested complete source and service consolidation into `alerts-bi-admin`.
+Admin now owns the analysis engine, persistence, sole migration chain, weekly jobs, registry,
+mock tooling, acceptance oracle, and the shared/operations library sources. The engine is
+maintained at `src/engine`, installed as `alerts_bi_admin.engine`. The existing UI stays at
+`src/`; all operational commands use `alerts-bi-admin`. There is no runs distribution,
+vendored runtime, image, checkout or separate listener in the supported application topology.
+Portal remains a standalone read-only consumer of `alerts-bi-shared`. Design retains canonical
+requirements and contracts. This decision supersedes earlier ownership and packaging boundaries;
+earlier consolidation/separation sections are historical where they conflict with this amendment.
+
+Applied SQL and revision modules 001–008, schema head `008_measurement_basis`, prompt and
+analysis versions, deterministic identities, registry content and the hand-authored oracle
+remain unchanged. The migration-only `src.db.ledger` bridge is retained. Shared/operations
+0.1.3 records the producer relocation while preserving their public namespaces and behavior.
+Admin uses its local uv workspace packages; portal pins an immutable shared wheel. The legacy
+API factory is a wire-contract test harness only, with no standalone server entry point.
+
+This change prepares source, artifacts and deployment examples. PR delivery does not deploy,
+stop a service, merge a PR or archive a repository. Follow [the retirement cutover](runs-retirement.md)
+to transfer the migration job and exactly one weekly scheduler before retiring old infrastructure.
+
 ## Accepted consolidation — 2026-10-08
 
 The user approved implementing the team-centered unified operator mock and, on 2026-10-08, explicitly requested delivery in `alerts-bi-admin`. This amendment supersedes the separate unauthenticated trigger and admin web-service boundaries in sections 7.9, 7.12 and 7.16, the original repository-separation decision, and the earlier placement of the console in the runs repository. `alerts-bi-admin serve` owns the authenticated operator console and its run API. Its editable UI source lives in the admin repository. A pinned, immutable `alerts-bi-runs-runtime` wheel supplies existing analysis/API/config adapters in-process; no sibling checkout or separate trigger listener is required. The engine code is exported from a recorded runs Git revision without scoring, prompt or migration changes. Admin may import these packaged adapters, superseding its earlier no-runs-import boundary. The runtime and full runs distributions share a Python namespace and must use separate environments. Runs retains engine, migration, registry and weekly-job ownership. Portal remains a separate read-only service.
@@ -1045,7 +1068,7 @@ as a small-input reference for parity testing. `scripts/benchmark_streaming.py`
 reuses the existing mock generator to measure repeated-event scaling without ES,
 SQL or model calls; it does not create another fixture system or acceptance oracle.
 
-### 7.16 Repository separation
+### 7.16 Historical repository separation (superseded by 2026-10-12 retirement)
 
 **Approved for implementation 2026-10-06 by the product owner.** Four repositories in
 the existing `venaTeam` GitHub organization live as siblings beneath a local, non-Git

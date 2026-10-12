@@ -12,10 +12,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from alerts_bi_runs.config import ApiSettings
-from alerts_bi_runs.config import load_config as load_runtime_config
 from alerts_bi_shared.config.env import load_dotenv, read_int, read_str
 from alerts_bi_shared.config.sql import SqlConfig, load_sql_config
+
+from .engine.config import ApiSettings
+from .engine.config import load_config as load_runtime_config
 
 __all__ = [
     "DEFAULT_ADMIN_PORT",
@@ -60,7 +61,7 @@ class AdminSettings:
     out_root: Path = Path("out")
 
     def api_settings(self) -> ApiSettings:
-        """Use the pinned execution engine in-process and preserve the admin SQL override."""
+        """Use the local execution engine in-process and preserve the admin SQL override."""
         config = replace(load_runtime_config(), sql=self.config.sql)
         return ApiSettings(
             config,

@@ -6,6 +6,13 @@ resolution-markers = [
     "python_full_version < '3.15'",
 ]
 
+[manifest]
+members = [
+    "alerts-bi-admin",
+    "alerts-bi-operations",
+    "alerts-bi-shared",
+]
+
 [[package]]
 name = "alembic"
 version = "1.20.0"
@@ -25,61 +32,6 @@ name = "alerts-bi-admin"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
-    { name = "alerts-bi-operations" },
-    { name = "alerts-bi-runs-runtime" },
-    { name = "alerts-bi-shared" },
-    { name = "fastapi" },
-    { name = "uvicorn" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "httpx" },
-    { name = "mypy" },
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alerts-bi-operations", path = "vendor/alerts_bi_operations-0.1.2-py3-none-any.whl" },
-    { name = "alerts-bi-runs-runtime", path = "vendor/alerts_bi_runs_runtime-0.1.0+admin.20261008-py3-none-any.whl" },
-    { name = "alerts-bi-shared", path = "vendor/alerts_bi_shared-0.1.2-py3-none-any.whl" },
-    { name = "fastapi", specifier = ">=0.115,<1" },
-    { name = "uvicorn", specifier = ">=0.32,<1" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "httpx", specifier = ">=0.27,<1" },
-    { name = "mypy", specifier = ">=1.13,<2" },
-    { name = "pytest", specifier = ">=8.3,<9" },
-    { name = "ruff", specifier = ">=0.8,<0.13" },
-]
-
-[[package]]
-name = "alerts-bi-operations"
-version = "0.1.2"
-source = { path = "vendor/alerts_bi_operations-0.1.2-py3-none-any.whl" }
-dependencies = [
-    { name = "alerts-bi-shared" },
-    { name = "jsonschema" },
-]
-wheels = [
-    { filename = "alerts_bi_operations-0.1.2-py3-none-any.whl", hash = "sha256:0cf4c6cb897fac2a8800b563726837bb7f2b1f49627f3bb128bdf7c64c5cdc26" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alerts-bi-shared", specifier = "==0.1.2" },
-    { name = "jsonschema", specifier = ">=4.23,<5" },
-]
-
-[[package]]
-name = "alerts-bi-runs-runtime"
-version = "0.1.0+admin.20261008"
-source = { path = "vendor/alerts_bi_runs_runtime-0.1.0+admin.20261008-py3-none-any.whl" }
-dependencies = [
     { name = "alembic" },
     { name = "alerts-bi-operations" },
     { name = "alerts-bi-shared" },
@@ -91,15 +43,21 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-wheels = [
-    { filename = "alerts_bi_runs_runtime-0.1.0+admin.20261008-py3-none-any.whl", hash = "sha256:b8182bb9d6a357d37bbe94acf8baa79460b5a62f7565660d36369a2c1c6eaa7c" },
+
+[package.dev-dependencies]
+dev = [
+    { name = "httpx" },
+    { name = "mypy" },
+    { name = "pytest" },
+    { name = "ruff" },
+    { name = "types-jsonschema" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.14,<2" },
-    { name = "alerts-bi-operations", specifier = "==0.1.2" },
-    { name = "alerts-bi-shared", specifier = "==0.1.2" },
+    { name = "alerts-bi-operations", editable = "packages/operations" },
+    { name = "alerts-bi-shared", editable = "packages/shared" },
     { name = "elasticsearch", specifier = ">=8.15,<9" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "jsonschema", specifier = ">=4.23,<5" },
@@ -109,16 +67,37 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.32,<1" },
 ]
 
+[package.metadata.requires-dev]
+dev = [
+    { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "mypy", specifier = ">=1.13,<2" },
+    { name = "pytest", specifier = ">=8.3,<9" },
+    { name = "ruff", specifier = ">=0.8,<0.13" },
+    { name = "types-jsonschema", specifier = ">=4.23" },
+]
+
+[[package]]
+name = "alerts-bi-operations"
+version = "0.1.3"
+source = { editable = "packages/operations" }
+dependencies = [
+    { name = "alerts-bi-shared" },
+    { name = "jsonschema" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alerts-bi-shared", editable = "packages/shared" },
+    { name = "jsonschema", specifier = ">=4.23,<5" },
+]
+
 [[package]]
 name = "alerts-bi-shared"
-version = "0.1.2"
-source = { path = "vendor/alerts_bi_shared-0.1.2-py3-none-any.whl" }
+version = "0.1.3"
+source = { editable = "packages/shared" }
 dependencies = [
     { name = "pymssql" },
     { name = "sqlalchemy" },
-]
-wheels = [
-    { filename = "alerts_bi_shared-0.1.2-py3-none-any.whl", hash = "sha256:570ba914268279944e0f0ca5b202077fdaba5577d94bc3a92702af9f648b25da" },
 ]
 
 [package.metadata]
@@ -1093,6 +1072,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/0d/ea/b2a5bd54b28a324dae8211928b2d730b6547500342c7e6c6dea08bd0a485/tqdm-4.70.1.tar.gz", hash = "sha256:cefd0eca11b2a37a3aee776544d4f4ae913f02688135b5556b8788dfa474afc4", size = 171846, upload-time = "2026-09-11T07:25:16.601Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a7/03/921a3d3c75785aca9ebfbfcabfbc3a1be12e2ab5265deb026d55a5a3f83e/tqdm-4.70.1-py3-none-any.whl", hash = "sha256:c293e525e6fef9c20e8728fd4612df02a0aa31bb5fe91ecd93e123b1b7bffa73", size = 80199, upload-time = "2026-09-11T07:25:14.599Z" },
+]
+
+[[package]]
+name = "types-jsonschema"
+version = "4.26.0.20261006"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "referencing" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/29/d2/1f742605f5a6d39f993134885b8de41c98af606871d3ebddaf3e776bd1eb/types_jsonschema-4.26.0.20261006.tar.gz", hash = "sha256:3eb7db61b6819d40addfdaac7173e749071a7d4a9a4394f0c844598ec84b2500", size = 16843, upload-time = "2026-10-06T08:16:07.318Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8b/a0/4f2e3c0dc3d5cad958006f2e0307065cc8fe4fbf0393ff0b69d55ee9bbe5/types_jsonschema-4.26.0.20261006-py3-none-any.whl", hash = "sha256:29301f4e65e3928540cdf5e23ad716e38bb0c0b416a48dada213edd3d70206ec", size = 16113, upload-time = "2026-10-06T08:16:06.355Z" },
 ]
 
 [[package]]

@@ -1,5 +1,7 @@
 # Alerts BI: application and design repository separation plan
 
+> Historical plan. Source/service ownership was superseded on 2026-10-12 by [runs retirement](runs-retirement.md). Do not use its old deployment commands for current installations.
+
 **Date:** 2026-10-06  
 **Status:** approved for implementation on 2026-10-06; see `../releases/` for delivered revisions and evidence.  
 **Authority:** [canonical design](alerts_bi_design.md), especially sections 7.9–7.15.  

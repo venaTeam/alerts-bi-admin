@@ -18,10 +18,6 @@ from alerts_bi_operations.registry import RegistryError, load_registry
 from alerts_bi_operations.report.render import build_run_outputs
 from alerts_bi_operations.review.decisions import DecisionRefused, record_decision
 from alerts_bi_operations.review.publication import PublicationRefused, publish_run, unpublish_run
-from alerts_bi_runs.api.negotiation import wants_html
-from alerts_bi_runs.api.routers.runs import router as runs_router
-from alerts_bi_runs.api.schemas import HealthOut, RunRequest, TeamsOut
-from alerts_bi_runs.api.service import RunGate, check_health, list_teams, start_run
 from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.logging_setup import log, redact_error
 from alerts_bi_shared.versions import APP_VERSION
@@ -35,6 +31,10 @@ from starlette.concurrency import run_in_threadpool
 from . import pages, queries, summary
 from .auth import csrf_token, identity, same_site, valid_csrf
 from .config import AdminSettings
+from .engine.api.negotiation import wants_html
+from .engine.api.routers.runs import router as runs_router
+from .engine.api.schemas import HealthOut, RunRequest, TeamsOut
+from .engine.api.service import RunGate, check_health, list_teams, start_run
 from .readiness import check_schema
 
 __all__ = ["SECURITY_HEADERS", "build_admin"]
@@ -249,7 +249,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 check_schema(db)
         except Exception as exc:
             log.error("admin.database_unavailable", error=redact_error(exc))
-            from alerts_bi_runs.api.schemas import CheckOut
+            from .engine.api.schemas import CheckOut
 
             checks["operator_schema"] = CheckOut(
                 ok=False, error="The operator schema is unavailable."

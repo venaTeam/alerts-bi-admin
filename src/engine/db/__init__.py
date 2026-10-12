@@ -1,0 +1,1 @@
+"""Alerts BI db package."""

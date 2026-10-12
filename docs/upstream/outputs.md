@@ -1,5 +1,9 @@
 # What a run produces
 
+## Source ownership amendment — 2026-10-12
+
+Admin owns execution, migrations, weekly jobs, registry and library builds under `alerts_bi_admin.engine`; commands use `alerts-bi-admin`. The previous runs ownership and runtime-wheel references below are historical. Product behavior, wire payloads, SQL contracts and outputs are unchanged. See [retirement and cutover](runs-retirement.md).
+
 ## Unified operator service amendment — 2026-10-08
 
 The accepted consolidation in `alerts_bi_design.md` supersedes the separate trigger/admin web topology described below. `alerts-bi-admin serve` now provides authenticated Teams → team run history → selected run Overview/Findings/Decisions/Activity, alongside global Schedule and Decisions pages. The approved compact overview, split findings panel and action dialogs retain trigger/publish/withdraw/decide; detailed charts, SQL, filters and exports expand under run details. It reuses the existing SQL/reporting and review operations; portal, weekly scheduling, exact 168-hour windows, migration ownership and output payloads remain unchanged. JSON triggers require proxy identity and `X-CSRF-Token` from `/csrf`. Browser writes require same-site form CSRF. The admin repository owns UI source and vendors a pinned execution-runtime wheel; no sibling checkout or separate trigger listener is required. Deploy one admin console behind the existing operator login proxy; see `unified-console-deployment.md`. The old trigger factory remains a compatibility harness only.
@@ -207,9 +211,10 @@ or a reader will see one enormous row.
 
 ## 7. The HTTP API
 
-Shapes are declared as Pydantic models, so `/openapi.json` is generated from the code. The
-interactive documentation is at `/docs`. Summarised here for anyone reading the repository
-without a running instance.
+Shapes are declared as Pydantic models and checked against the pinned wire contract. The
+unified admin listener disables public `/openapi.json` and `/docs`; the legacy API factory
+exists only for contract tests. Every supported route below requires operator identity,
+and JSON writes require a same-site CSRF token from authenticated `GET /csrf`.
 
 `POST /runs` takes a JSON body:
 
