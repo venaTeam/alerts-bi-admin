@@ -340,6 +340,7 @@ def main() -> None:
     if args.read_committed_snapshot:
         with connect(config.sql, "master", autocommit=True) as master:
             master.execute(
+                "IF (SELECT is_read_committed_snapshot_on FROM sys.databases WHERE name='alerts_bi_test')=0 "
                 "ALTER DATABASE [alerts_bi_test] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT"
             )
     portal_app = import_module("alerts_bi_portal.app")
