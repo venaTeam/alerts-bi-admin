@@ -914,8 +914,7 @@ def summary_page(user: str, summary: AdminSummary, *, shared: str) -> str:
         f'<span><span class="k">Last schedule outcome</span>{_schedule_html(summary.schedule)}</span>'
         "</section>"
         f"{_strip(run)}"
-        f'<p class="links"><a href="/runs/{h(quote(run_id, safe=""))}/scorecard">Scorecard</a> · '
-        f'<a href="/runs/{h(quote(run_id, safe=""))}/findings">Findings and decisions</a></p>'
+        f'<p class="links"><a href="/runs/{h(quote(run_id, safe=""))}/findings">Findings and decisions</a></p>'
         f"{shared}"
         '<section id="days"><div class="section-h"><h2>Day by day</h2><p>Complete UTC days '
         "only; the window's partial first and last days are left out.</p></div>"
@@ -936,7 +935,6 @@ def detailed_content(summary: AdminSummary) -> str:
     downloads = "".join(
         f'<a class="button" href="{h(base)}/{name}">{label}</a>'
         for name, label in (
-            ("scorecard.html", "Scorecard"),
             ("daily_metrics.csv", "Daily metrics CSV"),
             ("rule_counts.csv", "Rule counts CSV"),
             ("alert_worklist.csv", "Work list CSV"),

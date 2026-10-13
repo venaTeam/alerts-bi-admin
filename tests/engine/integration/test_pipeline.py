@@ -213,7 +213,7 @@ def test_suppression_findings_appear_as_core_rule_r5_and_are_counted_in_suppress
     assert payload.run_panels, "supplied panels are published with the numbers"
 
 
-def test_reports_render_from_sql_only_and_write_exactly_the_four_approved_files(
+def test_reports_render_from_sql_only_and_write_exactly_the_three_csv_files(
     run: RunFn, db: Database
 ) -> None:
     _, summary = run("checkout-api")
@@ -223,9 +223,7 @@ def test_reports_render_from_sql_only_and_write_exactly_the_four_approved_files(
     for file in files:
         assert file.exists(), str(file)
 
-    html = (OUT_DIR / "scorecard.html").read_text(encoding="utf-8")
-    assert "Alerts BI scorecard" in html
-    assert "Checkout API" in html
+    assert not (OUT_DIR / "scorecard.html").exists()
 
     lines = _csv_lines(OUT_DIR / "daily_metrics.csv")
     assert len(lines) - 1 == 16

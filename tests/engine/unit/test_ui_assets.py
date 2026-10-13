@@ -80,33 +80,18 @@ def test_every_registered_team_reaches_the_dropdown() -> None:
         assert f'<option value="{team.team_id}">' in page
 
 
-# ------------------------------------------------- what happens to a finished scorecard
+# ------------------------------------------------------------- CSV results
 
 
-def test_the_scorecard_is_downloaded_rather_than_written_over_the_page() -> None:
-    """Replacing the page destroyed the form, so a second run meant navigating back."""
-    assert "document.open()" not in SUBMIT_SCRIPT
-    assert "document.write" not in SUBMIT_SCRIPT
-    assert "createObjectURL" in SUBMIT_SCRIPT
-    assert "download.download = name" in SUBMIT_SCRIPT
-
-
-def test_the_download_is_named_after_the_team_and_run() -> None:
-    assert "'scorecard-' + team" in SUBMIT_SCRIPT
-    assert "runId.slice(0, 8)" in SUBMIT_SCRIPT
-
-
-def test_the_result_also_offers_the_run_s_own_url_in_a_new_tab() -> None:
-    """A blob cannot be reloaded or bookmarked; /runs/<id> can."""
-    assert "'/runs/' + runId" in SUBMIT_SCRIPT
-    assert "open.target = '_blank'" in SUBMIT_SCRIPT
-    assert "open.rel = 'noopener'" in SUBMIT_SCRIPT
-
-
-def test_a_refused_run_shows_its_reason_without_injecting_the_error_page() -> None:
-    assert "DOMParser" in SUBMIT_SCRIPT
+def test_completed_runs_offer_csvs_without_html_downloads() -> None:
+    assert "Accept: 'application/json'" in SUBMIT_SCRIPT
+    assert "daily_metrics.csv" in SUBMIT_SCRIPT
+    assert "rule_counts.csv" in SUBMIT_SCRIPT
+    assert "alert_worklist.csv" in SUBMIT_SCRIPT
+    assert "createObjectURL" not in SUBMIT_SCRIPT
+    assert "text/html" not in SUBMIT_SCRIPT
+    assert "innerHTML" not in SUBMIT_SCRIPT
     assert "failure.textContent" in SUBMIT_SCRIPT
-    assert "innerHTML" not in SUBMIT_SCRIPT, "error text is assigned, never parsed as markup"
 
 
 def test_the_button_is_restored_on_every_path() -> None:

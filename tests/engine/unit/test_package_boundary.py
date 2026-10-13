@@ -15,7 +15,7 @@ def test_default_prompt_and_revision_graph_work_outside_the_checkout(
     assert build_prompt().system_prompt_hash == (
         "f9754a11f4e9e0ba438c1f2d9062fa9511d57dc67789346ff01fc4e18489b794"
     )
-    assert heads() == ["009_run_deletion"]
+    assert heads() == ["011_run_job_keys"]
 
 
 @pytest.mark.parametrize(
@@ -29,6 +29,7 @@ def test_default_prompt_and_revision_graph_work_outside_the_checkout(
         ["report", "--run-id", "example"],
         ["verify-acceptance"],
         ["serve"],
+        ["run-worker", "--once"],
         ["registry", "check"],
         ["publish", "--run-id", "example"],
     ],

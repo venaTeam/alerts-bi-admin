@@ -17,10 +17,9 @@
     "/teams/{team_id}",
     "/teams/{team_id}/summary",
     "/runs/{run_id}/findings",
-    "/runs/{run_id}/scorecard",
-    "/runs/{run_id}",
     "/runs/{run_id}/{name}",
-    "/healthz"
+    "/healthz",
+    "/run-jobs/{job_id}"
   ],
   "write_routes": [
     "/teams/{team_id}/trigger",
@@ -28,7 +27,8 @@
     "/runs/{run_id}/publish",
     "/runs/{run_id}/withdraw",
     "/runs/{run_id}/delete",
-    "/runs/{run_id}/decide"
+    "/runs/{run_id}/decide",
+    "/run-jobs"
   ],
   "team_tabs": [
     "overview",
@@ -37,17 +37,47 @@
     "activity"
   ],
   "run_scope": "An explicitly selected run must belong to the selected team",
-  "payload_baseline": "trigger-openapi.json",
-  "schema_head": "009_run_deletion",
+  "payload_baseline": "console-openapi.json",
+  "schema_head": "011_run_job_keys",
   "manual_window": "Monday 00:00 UTC to the selected Monday 00:00 UTC; omitted API/CLI run_at selects the latest completed week",
   "admin_gap_override": false,
-  "execution_lock": "Database SQL session lock alerts-bi-weekly shared by manual HTTP/API and CLI runs, standalone CLI reports, weekly scheduling and deletion; held across scan, persistence and report writing, including model-off runs; standalone reports hold it before run-id/team lookup through the final file write",
+  "execution_lock": "Database SQL session lock alerts-bi-weekly shared by manual HTTP/API and CLI runs, standalone CLI reports, weekly scheduling and deletion; held across scan, persistence and report writing, including model-off runs; standalone reports hold it before run-id/team lookup through the final file write; durable manual jobs also use this full-lifecycle lock",
   "deletion": "Actor-bound same-site CSRF and confirm_delete=1; removes the run and run-owned records; shared caches remain",
-  "deployment": "One replica, one application worker; login proxy is the only service port",
+  "deployment": "One UI replica/application worker, one dedicated manual run-worker; login proxy is the only service port",
   "workspace_navigation": [
     "teams",
     "schedule",
     "decisions"
   ],
-  "execution_runtime": "Maintained alerts_bi_admin.engine source in the admin distribution; no runs package or listener"
+  "execution_runtime": "Maintained alerts_bi_admin.engine source in the admin distribution; no runs package or listener",
+  "async_contract": "../docs/async-runs.md",
+  "async_submission": {
+    "request": "Existing RunRequest; Idempotency-Key header required",
+    "response_status": 202,
+    "states": [
+      "pending",
+      "running",
+      "completed",
+      "failed"
+    ],
+    "response_fields": [
+      "job_id",
+      "team_id",
+      "run_id",
+      "status",
+      "submitted_at",
+      "started_at",
+      "completed_at",
+      "error_summary",
+      "status_url",
+      "result_url"
+    ],
+    "concurrency": "One active manual job; SQL session lock and active slot constraint; busy returns 409"
+  },
+  "exports": [
+    "daily_metrics.csv",
+    "rule_counts.csv",
+    "alert_worklist.csv"
+  ],
+  "synchronous_response": "JSON summary and three CSV links; no HTML content negotiation or scorecard field"
 }

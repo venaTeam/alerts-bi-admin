@@ -3,7 +3,7 @@
 Declared as Pydantic models so validation happens before a handler runs and the OpenAPI
 document is generated from these definitions rather than maintained beside them. The scope
 rules of design section 7.8 are expressed here as types: ``team`` has no default, and only
-the four approved output names exist.
+the three approved CSV output names exist.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ __all__ = [
     "HealthOut",
     "LlmMode",
     "OutputFile",
+    "RunJobOut",
     "RunOut",
     "RunRequest",
     "TeamOut",
@@ -32,9 +33,9 @@ __all__ = [
 #: ``fake`` matches ``--fake-llm``, ``off`` matches ``--no-llm``.
 LlmMode = Literal["live", "fake", "off"]
 
-#: Only the four approved outputs are addressable. A type rather than a runtime check, so
+#: Only the three approved CSV outputs are addressable. A type rather than a runtime check, so
 #: an unknown name is refused by validation before any handler runs.
-OutputFile = Literal["scorecard.html", "daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"]
+OutputFile = Literal["daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"]
 
 
 class TeamOut(BaseModel):
@@ -100,5 +101,19 @@ class RunOut(BaseModel):
     llm_assessed: bool
     llm_eligible: int
     out_dir: str
-    scorecard: str
     files: dict[str, str]
+
+
+class RunJobOut(BaseModel):
+    """Public submission state; private keys, actor and configuration are excluded."""
+
+    job_id: str
+    team_id: str
+    run_id: str
+    status: Literal["pending", "running", "completed", "failed"]
+    submitted_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    error_summary: str | None
+    status_url: str
+    result_url: str | None

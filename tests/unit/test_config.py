@@ -44,6 +44,8 @@ def test_operator_ui_uses_only_local_engine_adapters() -> None:
         "engine.api.routers.runs",
         "engine.api.schemas",
         "engine.api.service",
+        "engine.api.jobs",
+        "engine.run.outputs",
         "engine.cli",
     }
     modules = list(sources.glob("*.py"))

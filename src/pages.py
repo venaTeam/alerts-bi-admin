@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any
 from urllib.parse import quote, urlencode
+from uuid import uuid4
 
 from alerts_bi_operations.review.decisions import DECISION_STATES, findings_on
 from alerts_bi_shared.ui.assets import STYLESHEET as SHARED_CSS
@@ -79,12 +80,42 @@ document.addEventListener('submit', event => {
  const form = event.target;
  if (!form.matches('[data-trigger]')) return;
  const button = form.querySelector('button[type=submit]');
- button.disabled = true; button.textContent = 'Running analysis…';
- form.querySelector('[role=status]').textContent = 'Analysis is running. Keep this page open; the completed run will open here.';
+ button.disabled = true; button.textContent = 'Submitting…';
+ form.querySelector('[role=status]').textContent = 'Submitting the run. Once accepted, you can leave this page.';
 });
 window.addEventListener('pageshow', () => document.querySelectorAll('[data-trigger] button[type=submit]').forEach(b => {
  b.disabled = false; b.textContent = 'Start run';
 }));
+let polling = false;
+async function pollJobs() {
+ if (document.hidden || polling) return;
+ polling = true;
+ try {
+  for (const row of document.querySelectorAll('[data-job-url]')) {
+   const response = await fetch(row.dataset.jobUrl, {headers: {'Accept': 'application/json'}});
+   if (!response.ok) throw new Error('Status unavailable');
+   const job = await response.json();
+   const status = row.querySelector('[role=status]');
+   status.textContent = job.status === 'pending' ? 'Waiting for the worker. You can leave this page.' : 'Analysis running. You can leave this page.';
+   if (job.status !== row.dataset.jobState) {
+    const url = new URL(window.location.href);
+    if (job.status === 'completed' && url.searchParams.get('job_id') === job.job_id) {
+     window.location.assign(job.result_url);
+    } else window.location.reload();
+    return;
+   }
+  }
+ } catch (error) {
+  document.querySelectorAll('[data-job-url] [role=status]').forEach(status => {
+   status.textContent = 'Connection interrupted. Status checks will retry; this does not mean the run failed.';
+  });
+ } finally { polling = false; }
+}
+if (document.querySelector('[data-job-url]')) {
+ setInterval(pollJobs, 3000);
+ document.addEventListener('visibilitychange', pollJobs);
+ pollJobs();
+}
 })();"""
 SCRIPT_PATH = f"/assets/console-{sha256(SCRIPT.encode()).hexdigest()[:12]}.js"
 
@@ -268,6 +299,7 @@ def trigger_form(
         )
         team_field = f'<div><label for="trigger-team">Team</label><select id="trigger-team" name="team" data-team-selector>{options}</select></div>'
     content = (
+        f'<input type="hidden" name="submission_key" value="{uuid4().hex}">'
         f'{team_field}<div><label for="run-at">Window ends at · Monday 00:00 UTC</label><input id="run-at" name="run_at" type="date" min="1970-01-05" step="7" value="{end:%Y-%m-%d}" required aria-describedby="run-window-help"><p id="run-window-help" class="abi-small abi-muted abi-mt">Choose a Monday. The run covers the previous Monday at 00:00 UTC up to this Monday at 00:00 UTC.</p></div>'
         f'<div class="abi-evidence-box"><strong>Analysis window</strong><span data-window>{start:%Y-%m-%d %H:%M} → {end:%Y-%m-%d %H:%M} UTC · 168 hours</span></div>'
         '<div><label for="model-mode">Model mode</label><select id="model-mode" name="llm"><option value="live">Live · configured model</option><option value="fake">Fake · deterministic test model</option><option value="off">Off · skip assessment</option></select></div>'
@@ -379,6 +411,8 @@ def team_page(
     token: str,
     flash: str | None,
     error: bool,
+    *,
+    jobs: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     run_id = str(selected["run_id"]) if selected else None
     rows = []
@@ -399,6 +433,29 @@ def team_page(
         f'<section class="abi-panel abi-team-runs"><div class="abi-list-head"><h3>Team runs <span class="abi-muted">· {total}</span></h3><span class="abi-small abi-muted">Select a run to review below</span></div><table class="abi-table"><thead><tr><th>Reporting week / run</th><th>Analysis</th><th>Publication</th><th></th></tr></thead><tbody>{"".join(rows) or "<tr><td colspan=4>No runs yet. Start the first run above.</td></tr>"}</tbody></table>{pager(team_id, run_id, tab, run_page, total, 20, "run_page")}</section>'
     )
     dialogs = trigger_form(team_id, token, name)
+    if jobs:
+        body += '<section class="abi-panel abi-panel-pad"><h3>Run submissions</h3>'
+        for job in jobs:
+            active = job["status"] in ("pending", "running")
+            attrs = (
+                f' data-job-url="/run-jobs/{h(job["job_id"])}" data-job-state="{h(job["status"])}"'
+                if active
+                else ""
+            )
+            message = (
+                (
+                    "Waiting for the worker. You can leave this page."
+                    if job["status"] == "pending"
+                    else "Analysis running. You can leave this page."
+                )
+                if active
+                else str(job.get("error_summary") or "Analysis failed. Start a new run to retry.")
+            )
+            body += (
+                f'<div class="abi-evidence-box abi-mt"{attrs}><strong>{h(_when(job["run_at"]))} · {h(job["llm_mode"])} · {h(job["status"])}</strong>'
+                f'<p role="status" aria-live="polite">{h(message)}</p></div>'
+            )
+        body += "</section>"
     if selected:
         controls, publication_dialog = publication_controls(selected, token)
         dialogs += publication_dialog

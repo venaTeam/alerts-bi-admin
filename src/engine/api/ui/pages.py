@@ -1,16 +1,8 @@
-"""The three pages the surface renders itself.
-
-The scorecard is not among them: it comes from :mod:`alerts_bi_operations.report.html`, rendered from
-committed SQL rows, and this module never touches it. These are the index that starts a run
-and the error page a browser gets when one is refused.
-
-Every interpolated value goes through the report module's ``escape_html``, so the surface
-escapes exactly the way the scorecard does.
-"""
+"""Contract-test index and error pages, using the shared HTML escaping helper."""
 
 from __future__ import annotations
 
-from alerts_bi_operations.report.html import escape_html
+from alerts_bi_shared.ui.html import h as escape_html
 
 from ..schemas import TeamOut
 from .assets import PAGE_CSS, SUBMIT_SCRIPT
@@ -44,7 +36,7 @@ def index_page(teams: list[TeamOut]) -> str:
     )
     body = f"""
 <h1>Alerts BI</h1>
-<p class="sub">Start a run for one team. The response is that run's scorecard.</p>
+<p class="sub">Start a run for one team. The response contains its JSON summary and CSV export links.</p>
 <form method="post" action="/runs">
   <label for="team">Team</label>
   <select id="team" name="team" required>{options}</select>
@@ -60,8 +52,8 @@ def index_page(teams: list[TeamOut]) -> str:
   <p class="failure" id="failure" role="alert"></p>
   <p class="result" id="result" role="status"></p>
 </form>
-<p class="note">The finished scorecard downloads as a file, and the result line links to
-it in a new tab; this page stays as it is, so the next run is one click away. A run reads
+<p class="note">The finished run provides CSV exports, and the result line links to
+the three CSV files; this page stays usable for the next run. A run reads
 168 hours for one team and is serialized — a second request while one is running gets a
 409. The default is the latest completed Monday. Against the mock dataset select
 <code>2026-08-24</code> to cover the preceding Monday-to-Monday week.</p>

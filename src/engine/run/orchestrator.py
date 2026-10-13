@@ -114,6 +114,7 @@ def execute_run(
     llm_disabled_reason: str | None = None,
     registry_path: str | None = None,
     db: Database | None = None,
+    expected_run_id: str | None = None,
 ) -> tuple[PersistencePayload, RunSummary]:
     """Execute one run and return the payload to persist.
 
@@ -137,6 +138,8 @@ def execute_run(
         registry_sha256=loaded.file_sha256,
         model_version=model_version,
     )
+    if expected_run_id is not None and run_id != expected_run_id:
+        raise ValueError("Run inputs changed since submission; start a new run.")
 
     log.info(
         "run.started",

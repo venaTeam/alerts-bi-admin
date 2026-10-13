@@ -1,5 +1,36 @@
 # Alerts BI — Design Document
 
+## Automatic deployment migrations — accepted 2026-10-13
+
+The product owner requested migrations to run automatically with admin deployment. The
+single-replica Recreate Deployment runs `db setup` in a regular migration init container
+using the same image and SQL configuration, targeting ADMIN_DATABASE when set. Missing
+revisions apply before UI/worker/proxy startup; failure blocks those containers. Existing
+revision checksums and data-preserving migration behavior are retained. Normal rollout
+no longer requires a separately launched migration Job. See openshift-deployment.md.
+
+## Standalone HTML output removal — accepted 2026-10-13
+
+The product owner requested complete removal of standalone run HTML output. The supported
+exports are exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`.
+The authenticated team workspace still displays completed runs, metrics, findings and run
+details. No standalone scorecard renderer, route, file or download link remains. `POST /runs`
+returns JSON with three CSV links, including for `Accept: text/html`; its `scorecard` field
+is removed. Bare `GET /runs/{run_id}` and the dedicated scorecard route are removed;
+the CSV filename validator refuses `scorecard.html`. This supersedes all older standalone
+HTML/four-output requirements below. Operations 0.2.0 removes `report.html` and changes the
+public renderer to three CSV outputs; shared 0.1.3, CSV columns and portal views are unchanged.
+Existing immutable operations versions remain historical artifacts. Legacy HTML cleanup
+remains available for old output directories. See [output meanings](outputs.md).
+
+## Asynchronous manual runs — 2026-10-13
+
+The product owner approved durable background manual execution, completion polling and removal
+of generated per-run HTML. [The async run contract](async-runs.md) defines acceptance, worker
+coordination, interruption recovery, API compatibility, output storage and rollout. It supersedes
+the synchronous browser and automatic four-file writing requirements below. Migration 010 adds
+job state; SQL report data, published views, scoring and immutable migrations 001–009 are unchanged.
+
 ## Complete runs retirement — 2026-10-12
 
 The product owner requested complete source and service consolidation into `alerts-bi-admin`.
@@ -568,7 +599,7 @@ The **delta check** — running the count with and without the suppression predi
   **Local SQL Server setup** (decided 2026-08-29): extend the existing Docker Compose mock with a pinned SQL Server 2022 image, readiness health check, and persistent development volume. It hosts a persistent `alerts_bi_dev` database and a disposable `alerts_bi_test` database. Credentials come from an uncommitted `.env` with placeholders in `.env.example`. The application provides commands to apply and inspect migrations and to recreate only the explicitly named test database. Production uses the same migrations with an externally supplied connection string; tests do not substitute SQLite or another engine.
 * **Elasticsearch is the sole source** (decided 2026-08-27). The SQL Server hot-alerts table holds only currently-active alerts — a subset of what ES already carries, with no historical depth, and nothing in it that ES lacks. Its one unique property is live state, which nothing in this design measures. It is read for exactly one thing and it is not read by this tool: the teams' own Grafana panels query it, which is why section 5.2 parses those queries.
 * **Primary audience: the standardization team; output: one team scorecard** (decided 2026-08-27). Each MVP run generates the selected team's scorecard and work list. Teams do not self-serve in the MVP: the numbers are presented **by** the standardization team, including in company-wide meetings. A cross-team leaderboard is deferred because independently timed team runs do not share an identical reporting window.
-* **Output format: a generated per-team scorecard (HTML + CSV) rendered from the store** (decided 2026-08-27). Grafana can be pointed at the same table later. The store is the non-negotiable part (section 3.5); coupling the first deliverable to a dashboard build is not.
+* **Historical output format, superseded by the 2026-10-13 removal amendment: a generated per-team scorecard (HTML + CSV) rendered from the store** (decided 2026-08-27). Grafana can be pointed at the same table later. The store is the non-negotiable part (section 3.5); coupling the first deliverable to a dashboard build is not.
   **Exact MVP output contract** (approved 2026-08-29): generate one self-contained HTML scorecard with sections for run metadata; derived migration phase and completion readiness; schema-separated volume and diagnostics; deterministic quality, LLM quality, review, good, unassessed and phase-2 gaps; suppression visibility and supplied panel ids; rule/principle breakdown; actionable work list; and limitations. It contains no cross-run trend, delta, leaderboard, or combined v1/v2 volume conclusion. Generate exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`. Ordering is deterministic; CSV carries full values even when HTML shortens display text; all alert content is HTML-escaped; spreadsheet-formula prefixes (`=`, `+`, `-`, `@`) are neutralized in CSV; and every output is rendered only from committed SQL data.
 * **Grain and window** (decided 2026-08-27; storage shape resolved 2026-08-29). A run reports the exact rolling UTC window above and nothing else — no comparison against the previous run or against a baseline (section 2). SQL Server stores one run record plus one metric row per run × team × schema × UTC calendar date touched by the window. Because a rolling 168-hour range normally touches eight UTC dates, its first and last buckets may be partial. Each daily row stores its actual `bucket_start`, `bucket_end`, and `covered_hours`; rows are assigned by the UTC date of `@timestamp`. The scorecard aggregates those daily rows over the exact run window using section 3.3's formulas. Storing at a finer grain than the report keeps any future window a presentation choice rather than a data-collection one. Per section 3.3, every distinct figure is published as a **daily rate**, never as a window sum.
 
@@ -614,7 +645,7 @@ The SQL Server store has one run-level record, daily metric rows, and supporting
 * Durable LLM verdicts keyed by (`application`, `key_field`, `prompt_version`, `model_version`), including `classified_at`, verdict, principle, confidence, representative document and document hash.
 * Panel parses keyed by SQL-text hash, including the frozen interpretation and any unmeasured reason.
 
-The HTML scorecard and CSV files are rendered from these stored rows. The run record carries the phase label next to the seven-day result; the daily metric rows preserve the finer reporting grain.
+The admin workspace and three CSV files are rendered from these stored rows. The run record carries the phase label next to the seven-day result; the daily metric rows preserve the finer reporting grain.
 
 **The phase group is small because two of the three phase metrics are already other columns.** Section 3.4's phase-0 and phase-1 headlines are `distinct_alerts` and `suppressed`, both of which the daily volume and visibility rows already carry — so only `phase_derived` and `phase2_readiness_pct` belong on the run record. `phase_derived` is computed by section 3.4's rule and is a label, not a score: nothing in the report grades a team against it.
 

@@ -1,4 +1,5 @@
-# Deployment example; replace image placeholders and review before applying.
+# Optional manual maintenance job; normal admin deployment migrates through its init container.
+# Run only with UI/worker writers stopped; do not run alongside deployment initialization.
 apiVersion: batch/v1
 kind: Job
 metadata: {name: alerts-bi-migrate}
@@ -10,7 +11,9 @@ spec:
       containers:
         - name: migrate
           image: ADMIN_IMAGE_DIGEST
-          command: ["alerts-bi-admin", "db", "setup"]
+          command: ["/bin/sh", "-ec"]
+          args:
+            - 'exec alerts-bi-admin db setup --database "${ADMIN_DATABASE:-${SQL_DATABASE:-alerts_bi_dev}}"'
           envFrom:
             - configMapRef: {name: alerts-bi-config}
             - secretRef: {name: alerts-bi-secrets}

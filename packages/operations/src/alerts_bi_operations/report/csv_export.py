@@ -2,7 +2,7 @@
 
 Exactly three files: ``daily_metrics.csv``, ``rule_counts.csv`` and
 ``alert_worklist.csv``. Ordering is deterministic, CSV carries full values even where the
-HTML shortens display text, and spreadsheet-formula prefixes are neutralized.
+spreadsheet-formula prefixes are neutralized.
 """
 
 from __future__ import annotations

@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from alerts_bi_operations.report.render import render_run_report
 from alerts_bi_shared.db.connection import connect
 from alerts_bi_shared.timefmt import iso_instant
 
@@ -34,7 +34,9 @@ from ..db.repositories import (
 from ..es.client import EsClient
 from ..llm.fake import FakeLlmClient
 from ..llm.grouping import build_batches
+from ..weekly.runner import schedule_lock
 from .orchestrator import execute_run
+from .outputs import render_run_report
 
 __all__ = ["MANIFEST_PATH", "Failure", "VerificationResult", "verify_acceptance"]
 
@@ -439,11 +441,14 @@ def verify_acceptance(
     """Run acceptance verification against the mock and the manifest."""
     manifest = json.loads(Path(manifest_path or MANIFEST_PATH).read_bytes().decode("utf-8"))
     run_at = datetime.fromisoformat(str(manifest["run_at"]).replace("Z", "+00:00")).astimezone(UTC)
-    es_client = EsClient(config.es)
     check = VerificationResult()
     base_out = Path(out_dir or Path("out") / "acceptance")
 
-    with connect(config.sql, database or config.sql.database) as db:
+    with (
+        schedule_lock(config, database or config.sql.database),
+        connect(config.sql, database or config.sql.database) as db,
+        closing(EsClient(config.es)) as es_client,
+    ):
         for team_id, expected in manifest["teams"].items():
             payload, summary = execute_run(
                 team_id=team_id,

@@ -8,6 +8,11 @@ from alerts_bi_shared.db.connection import Database
 # Keep explicit columns: SELECT * would compile against an older table missing a field
 # that the renderer subsequently expects in its result. TOP 0 never fetches stored data.
 REQUIRED_COLUMNS: dict[str, str] = {
+    "run_jobs": (
+        "job_id, idempotency_key, idempotency_key_hash, requested_by, request_hash, "
+        "team_id, run_at, llm_mode, registry_sha256, run_id, status, active_slot, "
+        "submitted_at, started_at, completed_at, error_summary"
+    ),
     "runs": (
         "run_id, run_at, team_id, team_display_name, window_start, window_end, "
         "registry_version, registry_sha256, registry_entry_snapshot, ruleset_version, "
@@ -60,8 +65,12 @@ def check_schema(db: Database) -> None:
     for table, columns in REQUIRED_COLUMNS.items():
         names = ", ".join(f"[{column.strip()}]" for column in columns.split(","))
         db.query(f"SELECT TOP 0 {names} FROM [{table}]")
-    if (
-        db.query_one("SELECT 1 AS ready FROM schema_migrations WHERE version='009_run_deletion'")
-        is None
-    ):
-        raise ValueError("The operator schema needs migration 009_run_deletion.")
+    for version in ("009_run_deletion", "011_run_job_keys"):
+        if (
+            db.query_one(
+                "SELECT 1 AS ready FROM schema_migrations WHERE version=:version",
+                {"version": version},
+            )
+            is None
+        ):
+            raise ValueError(f"The operator schema needs migration {version}.")

@@ -32,7 +32,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from alerts_bi_operations.registry import TeamEntry, load_registry
-from alerts_bi_operations.report.render import render_run_report
 from alerts_bi_operations.review.publication import publish_run
 from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.logging_setup import log, redact_error
@@ -42,6 +41,7 @@ from ..db.repositories import persist_run
 from ..es.client import EsClient
 from ..llm.client import LlmClient
 from ..run.orchestrator import execute_run
+from ..run.outputs import render_run_report
 from .plan import WEEK, plan_weeks
 
 __all__ = [
@@ -99,14 +99,19 @@ def enrolled_teams(registry_path: str | None, only: Sequence[str] = ()) -> list[
 
 
 @contextmanager
-def schedule_lock(config: AppConfig, database: str) -> Iterator[None]:
+def schedule_lock(
+    config: AppConfig, database: str, *, allow_manual_job: bool = False
+) -> Iterator[None]:
     """Hold the shared run/report/schedule/deletion SQL lock, or refuse immediately.
 
     Retain the historical resource name so existing schedulers still coordinate. This
     separate SQL session survives commits and rollbacks on the run's data connection.
     Manual callers hold it from before scanning through persistence and report writing;
     standalone reports hold it from run lookup through all file writes, and deletion
-    holds it through SQL cleanup and file removal.
+    holds it through SQL cleanup and file removal. Durable pending/running jobs
+    keep their reservation after a worker exits. Job admission/reconciliation,
+    or deletion with its own transactional active-job refusal, may bypass this
+    check. Check under the lock to serialize it with admission.
     """
     with connect(config.sql, database, autocommit=True) as lock:
         row = lock.query_one(
@@ -120,6 +125,17 @@ def schedule_lock(config: AppConfig, database: str) -> Iterator[None]:
                 "another run, report, weekly schedule or deletion is already in progress"
             )
         try:
+            # Pre-job schemas still support historical CLI/weekly commands.
+            if (
+                not allow_manual_job
+                and lock.query_one(
+                    "SELECT 1 AS present WHERE OBJECT_ID('run_jobs', 'U') IS NOT NULL"
+                )
+                and lock.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1")
+            ):
+                raise WeeklyBusy(
+                    "a manual job is pending or running; let the worker complete or reconcile it first"
+                )
             yield
         finally:
             lock.execute(

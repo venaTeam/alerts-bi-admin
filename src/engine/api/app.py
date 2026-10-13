@@ -22,7 +22,7 @@ from .ui import error_page
 __all__ = ["build_app"]
 
 DESCRIPTION = (
-    "Starts one team's weekly alert-quality run and serves its scorecard. A wrapper over "
+    "Starts one team's weekly alert-quality run and serves CSV exports. A wrapper over "
     "the same pipeline the command line drives; it performs no analysis of its own, and "
     "reports are rendered only from committed SQL rows."
 )

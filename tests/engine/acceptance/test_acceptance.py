@@ -108,13 +108,13 @@ def test_the_manifest_covers_every_acceptance_path_the_design_calls_out(
     assert max(big) - min(big) <= 1
 
 
-def test_the_acceptance_scorecards_were_rendered_for_every_team(verification: Any) -> None:
+def test_the_acceptance_csv_exports_were_rendered_for_every_team(verification: Any) -> None:
     assert verification is not None
     for team_id in ACCEPTANCE_TEAMS:
         for name in (
-            "scorecard.html",
             "daily_metrics.csv",
             "rule_counts.csv",
             "alert_worklist.csv",
         ):
             assert (OUT_DIR / team_id / name).exists(), f"{team_id}/{name}"
+        assert not (OUT_DIR / team_id / "scorecard.html").exists()

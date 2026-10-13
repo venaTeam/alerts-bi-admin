@@ -18,7 +18,6 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from alerts_bi_operations.report.render import render_run_report
 from alerts_bi_shared.config.env import read_str
 from alerts_bi_shared.db.connection import connect
 from alerts_bi_shared.logging_setup import log
@@ -38,6 +37,7 @@ from .es.client import EsClient
 from .llm.client import LlmClient
 from .llm.fake import FakeLlmClient
 from .run.orchestrator import execute_run, select_llm_client
+from .run.outputs import render_run_report
 from .weekly.plan import is_week_boundary, latest_week_end
 from .weekly.runner import schedule_lock
 

@@ -131,6 +131,38 @@ this checkout and committed lockfile. Source provenance is in `docs/engine-sourc
 
 ## Local mocks and verification
 
+Manual browser runs now return immediately after saving a SQL-backed submission. Apply
+`alerts-bi-admin db migrate` before starting the updated app, then run
+`alerts-bi-admin run-worker` in a separate terminal/process with matching ADMIN_DATABASE,
+ADMIN_REGISTRY_PATH, ADMIN_OUT_DIR, SQL, Elasticsearch and model settings. The worker does not
+require ADMIN_SECRET. The shipped deploy/admin.yaml includes a dedicated worker with the
+same image, registry, SQL/ES/model configuration and output mount. Its migration init container
+automatically runs db setup before UI/worker startup, targeting ADMIN_DATABASE or SQL_DATABASE.
+Recreate stops the previous pod before initialization; migration failure blocks startup. The
+health endpoint requires the job-key digest column and migration 011 ledger entry, so a
+010-only schema returns 503 until upgraded. Migration 011 backfills
+existing submission digests without editing 001–010. Older writers cannot insert the new
+required digest. Keys differing only in case or trailing spaces request distinct attempts.
+Pending/running jobs retain their execution reservation after worker exit. CLI/weekly
+runs, reports and acceptance verification refuse until the worker completes or reconciles
+the job; use the updated image for every run writer. The verification command also holds
+the shared SQL lock through persistence and exports.
+`run-worker --once` processes at most one job and exits. The team page polls while visible;
+you can leave and return later. Failures and worker interruptions remain visible and need a
+new submission to retry. Analysis completion never publishes a review.
+
+JSON clients use authenticated `POST /run-jobs` with X-CSRF-Token and Idempotency-Key, then
+GET the returned status_url. Existing synchronous POST /runs returns JSON only and shares
+the manual SQL gate. Workers retain the shared weekly/manual CLI/report/deletion execution lock for their complete
+lifecycle. Pending/running jobs prevent permanent deletion. See docs/upstream/async-runs.md for the full contract.
+
+Run/report/weekly/acceptance output directories contain three CSV exports. Standalone HTML
+scorecards are removed entirely, including on-demand routes and download links. The normal
+team workspace remains available. POST /runs returns JSON only, without a scorecard field.
+Operations 0.2.0 removes report.html; shared 0.1.3 and CSV columns are unchanged. To clean older generated HTML, use
+`alerts-bi-admin remove-run-html --out <explicit-output-root>`; this preserves CSVs and other
+HTML files and only removes scorecard.html accompanied by all three CSV exports.
+
 The original mock generator, scripts and hand-reviewed oracle now live here. The Compose
 project defaults to `alertsbi` to reuse the existing named volumes. For an existing installation
 with another project name, set COMPOSE_PROJECT_NAME to its existing name before using Compose.
@@ -160,3 +192,19 @@ The admin image provides writable `/app/out` for its non-root user. Deployment e
 the ordered scheduler/migration transfer, rollback and eventual archival checklist are in
 `docs/upstream/openshift-deployment.md` and `docs/upstream/runs-retirement.md`. PRs do not deploy
 or stop services. Canonical requirements stay in alerts-bi-design; snapshots here are pinned.
+
+
+The Checks workflow also runs real SQL/ES integration and critical acceptance tests on
+disposable CI mocks using scripts/ci_integration.py; missing services and skipped checks fail
+that job. Local Compose supplies dependencies only; start the manual worker separately.
+For prolonged running jobs and rollback, follow docs/upstream/manual-worker-runbook.md.
+The idle worker checks for work before taking application locks. State transitions are logged.
+The committed console-openapi.json contract describes async submissions and status; the live
+console keeps public schema endpoints disabled. Operators have shared access across teams.
+
+
+For automatic deployment migrations, build the updated image and set the same digest in
+the migrate init container, admin and run-worker entries of deploy/admin.yaml, then apply
+that manifest. The configured SQL credentials must allow schema migrations. No separate
+deploy/migrate.yaml Job is needed for normal rollout; it remains an optional maintenance
+tool with UI/worker writers stopped. Do not run it alongside deployment initialization.

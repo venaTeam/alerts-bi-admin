@@ -30,6 +30,8 @@ def delete_run(db: Database, run_id: str) -> str:
             is None
         ):
             raise DeletionRefused("Apply database migration 009_run_deletion before deleting runs.")
+        if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1"):
+            raise DeletionRefused("A run is pending or active. Try deleting after it finishes.")
         locked = db.query_one(
             "DECLARE @result INT; EXEC @result = sys.sp_getapplock "
             "@Resource=:resource, @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=0; "
@@ -78,6 +80,7 @@ def delete_run(db: Database, run_id: str) -> str:
             "alert_findings",
             "llm_batch_attempts",
             "run_panels",
+            "run_jobs",
             "runs",
         ):
             db.execute(f"DELETE FROM {table} WHERE run_id=:run_id", params)

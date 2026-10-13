@@ -15,11 +15,11 @@ from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode
 
 from alerts_bi_operations.registry import RegistryError, load_registry
-from alerts_bi_operations.report.render import build_run_outputs
 from alerts_bi_operations.review.decisions import DecisionRefused, record_decision
 from alerts_bi_operations.review.publication import PublicationRefused, publish_run, unpublish_run
 from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.timefmt import iso_instant
 from alerts_bi_shared.versions import APP_VERSION
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
@@ -31,16 +31,16 @@ from starlette.concurrency import run_in_threadpool
 from . import pages, queries, summary
 from .auth import csrf_token, identity, same_site, valid_csrf
 from .config import AdminSettings
+from .engine.api.jobs import get_job, submit_job, team_jobs
 from .engine.api.negotiation import wants_html
 from .engine.api.routers.runs import router as runs_router
-from .engine.api.schemas import HealthOut, RunRequest, TeamsOut
+from .engine.api.schemas import HealthOut, RunJobOut, RunRequest, TeamsOut
 from .engine.api.service import (
     RunGate,
     WeeklyBusy,
     check_health,
     list_teams,
     schedule_lock,
-    start_run,
 )
 from .readiness import check_schema
 from .runs import DeletionRefused, delete_run, remove_run_files
@@ -50,18 +50,13 @@ __all__ = ["SECURITY_HEADERS", "build_admin"]
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; form-action 'self'; "
-        "base-uri 'none'; frame-ancestors 'none'"
+        "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
-
-#: The scorecard is self-contained with its own inline stylesheet and no script.
-SCORECARD_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'"
-)
 
 _MAX_FORM = 64 * 1024
 
@@ -84,7 +79,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         openapi_url=None,
     )
     api_settings = settings.api_settings()
-    gate = RunGate()
+    gate = RunGate(durable=True)
     app.state.settings = api_settings
     app.state.run_gate = gate
 
@@ -118,7 +113,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             # The compatibility JSON trigger uses the same identity, CSRF and RunGate.
             if (
                 request.method == "POST"
-                and request.url.path.rstrip("/") == "/runs"
+                and request.url.path.rstrip("/") in ("/runs", "/run-jobs")
                 and (
                     not same_site(request)
                     or not valid_csrf(
@@ -132,15 +127,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 response = PlainTextResponse("A same-site CSRF token is required.", status_code=403)
             else:
                 response = await call_next(request)
-        if (
-            request.url.path.startswith("/runs/")
-            and response.headers.get("content-type", "").startswith("text/html")
-            and (
-                request.url.path.endswith(("/scorecard", "/scorecard.html"))
-                or request.url.path.count("/") == 2
-            )
-        ):
-            response.headers.setdefault("Content-Security-Policy", SCORECARD_CSP)
         for name, value in SECURITY_HEADERS.items():
             response.headers.setdefault(name, value)
         return response
@@ -301,6 +287,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         done: Message = None,
         error: Message = None,
         run_id: RunId = None,
+        job_id: Annotated[str | None, Query(max_length=32, pattern=r"^[a-f0-9]{32}$")] = None,
         tab: Tab = "overview",
         run_page: Page = 1,
         state: StateFilter = "all",
@@ -313,6 +300,13 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         names = {team_id_: name for team_id_, name, _ in registry_teams()}
         enrollment = {t: e for t, _, e in registry_teams()}
         with database() as db:
+            jobs = team_jobs(db, team_id)
+            if job_id:
+                submitted = get_job(db, job_id)
+                if submitted["team_id"] != team_id:
+                    raise HTTPException(404, "No such submission for this team.")
+                if submitted["status"] == "completed" and not run_id:
+                    run_id = str(submitted["run_id"])
             count = db.query_one(
                 "SELECT COUNT(*) AS n FROM runs WHERE team_id=:team_id", {"team_id": team_id}
             )
@@ -399,6 +393,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 token_for(request),
                 error or done,
                 bool(error),
+                jobs=jobs,
             )
         )
 
@@ -419,13 +414,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             ),
             303,
         )
-
-    @app.get("/runs/{run_id}/scorecard", response_class=HTMLResponse)
-    def scorecard(run_id: str) -> HTMLResponse:
-        with database() as db:
-            run_row(db, run_id)
-            html = build_run_outputs(db, run_id)["scorecard.html"]
-        return HTMLResponse(html, headers={"Content-Security-Policy": SCORECARD_CSP})
 
     @app.get("/runs/{run_id}/findings", response_class=HTMLResponse)
     def findings(
@@ -468,7 +456,9 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 True,
             )
         try:
-            result = await run_in_threadpool(start_run, api_settings, gate, body)
+            job = await run_in_threadpool(
+                submit_job, api_settings, body, user_of(request), fields.get("submission_key", "")
+            )
         except HTTPException as exc:
             return back(pages.team_url(team_id), str(exc.detail), True)
         except Exception as exc:
@@ -483,11 +473,87 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 "The run could not finish. Check the service logs and team history before retrying.",
                 True,
             )
-        log.info("console.triggered", run_id=result.summary.run_id, operator=user_of(request))
+        log.info("console.submitted", job_id=job["job_id"], operator=user_of(request))
         return back(
-            pages.team_url(team_id, result.summary.run_id),
-            "Run completed. Review it before publishing.",
+            pages.team_url(team_id, job_id=job["job_id"]),
+            "Run accepted. You can leave this page and return later.",
         )
+
+    def job_status(row: dict[str, Any]) -> dict[str, Any]:
+        result = {
+            key: row[key]
+            for key in (
+                "job_id",
+                "team_id",
+                "run_id",
+                "status",
+                "submitted_at",
+                "started_at",
+                "completed_at",
+                "error_summary",
+            )
+        }
+        for key in ("submitted_at", "started_at", "completed_at"):
+            result[key] = iso_instant(row[key]) if row[key] is not None else None
+        return result | {
+            "status_url": f"/run-jobs/{row['job_id']}",
+            "result_url": pages.team_url(str(row["team_id"]), str(row["run_id"])) + "#selected-run"
+            if row["status"] == "completed"
+            else None,
+        }
+
+    @app.post(
+        "/run-jobs",
+        status_code=202,
+        response_model=RunJobOut,
+        summary="Accept a durable manual run submission",
+        responses={
+            400: {"description": "Invalid ASCII submission key or unknown team"},
+            401: {"description": "Operator identity required"},
+            403: {"description": "Same-site actor-bound CSRF required"},
+            409: {"description": "Another operation is active or the key has different options"},
+        },
+        openapi_extra={
+            "parameters": [
+                {
+                    "name": "Idempotency-Key",
+                    "in": "header",
+                    "required": True,
+                    "schema": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "description": "Exact ASCII key scoped to the authenticated operator",
+                },
+                {
+                    "name": "X-CSRF-Token",
+                    "in": "header",
+                    "required": True,
+                    "schema": {"type": "string"},
+                    "description": "Actor-bound token from authenticated GET /csrf",
+                },
+            ]
+        },
+    )
+    def create_job(request: Request, body: RunRequest) -> JSONResponse:
+        row = submit_job(
+            api_settings, body, user_of(request), request.headers.get("Idempotency-Key", "")
+        )
+        return JSONResponse(
+            jsonable_encoder(job_status(row)),
+            status_code=202,
+            headers={"Location": f"/run-jobs/{row['job_id']}"},
+        )
+
+    @app.get(
+        "/run-jobs/{job_id}",
+        response_model=RunJobOut,
+        summary="Read durable job state for an authenticated operator",
+        responses={
+            401: {"description": "Operator identity required"},
+            404: {"description": "Unknown submission"},
+        },
+    )
+    def read_job(job_id: str) -> JSONResponse:
+        with database() as db:
+            return JSONResponse(jsonable_encoder(job_status(get_job(db, job_id))))
 
     @app.post("/runs/{run_id}/publish")
     async def publish(request: Request, run_id: str) -> Response:
@@ -556,7 +622,9 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             if not gate.acquire():
                 raise HTTPException(409, "A run is active. Try deleting after it finishes.")
             try:
-                with schedule_lock(api_settings.config, settings.database):
+                # delete_run checks the active slot inside its own transaction;
+                # retain its browser refusal message while holding the shared lock.
+                with schedule_lock(api_settings.config, settings.database, allow_manual_job=True):
                     with database() as db:
                         run = run_row(db, run_id)
                         try:

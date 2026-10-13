@@ -9,6 +9,7 @@ Unified operator UI, execution, migrations, weekly jobs, registry and shared/ope
 - design: `docs/upstream/alerts_bi_flow.md` — Approved runtime flow.
 - design: `docs/upstream/alerts_bi_implementation_plan.md` — Implementation blueprint.
 - design: `docs/upstream/outputs.md` — Output and API meanings.
+- design: `docs/upstream/async-runs.md` — Durable manual submissions, worker/recovery, HTTP compatibility and output storage.
 
 ### Verification
 

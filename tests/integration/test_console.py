@@ -12,7 +12,7 @@ from threading import Event
 from typing import Any
 
 import pytest
-from alerts_bi_operations.report import render as report_render
+from alerts_bi_operations.report.render import build_run_outputs
 from alerts_bi_operations.review.publication import publish_run, unpublish_run
 from alerts_bi_shared.db.connection import Database, connect
 from fastapi.testclient import TestClient
@@ -24,6 +24,7 @@ from src.engine import cli as engine_cli
 from src.engine.config import load_config
 from src.engine.db.repositories import PersistencePayload, persist_run
 from src.engine.es.client import EsClient
+from src.engine.run import outputs as report_render
 from src.engine.weekly.runner import schedule_lock
 from src.pages import finding_key
 from src.queries import decision_history
@@ -190,12 +191,19 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
         ) == {"quality_state": "rule_flagged"}
 
 
-def test_existing_output_routes_remain_available(client: TestClient) -> None:
-    for name in ("scorecard.html", "daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
+def test_csv_output_routes_remain_available(client: TestClient) -> None:
+    for name in ("daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
         response = client.get(f"/runs/{RUN}/{name}")
         assert response.status_code == 200
-        if name.endswith(".csv"):
-            assert "attachment" in response.headers["content-disposition"]
+        assert "attachment" in response.headers["content-disposition"]
+    page = client.get(f"/teams/{TEAM}?run_id={RUN}")
+    assert page.status_code == 200
+    for name in ("daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
+        assert f"/runs/{RUN}/{name}" in page.text
+    assert "scorecard" not in page.text.lower()
+    assert client.get(f"/runs/{RUN}").status_code == 404
+    for suffix in ("scorecard", "scorecard.html"):
+        assert client.get(f"/runs/{RUN}/{suffix}").status_code == 422
 
 
 def test_identity_history_never_crosses_teams(client: TestClient) -> None:
@@ -232,19 +240,22 @@ def test_empty_team_and_failed_run_remain_navigable(client: TestClient) -> None:
 
 
 def test_form_and_json_trigger_share_gate(client: TestClient) -> None:
-    gate = client.app.state.run_gate  # type: ignore[attr-defined]
-    assert gate.acquire()
-    try:
+    from src.engine.api.jobs import execution_lock
+
+    with connect(CONFIG.sql, DB) as db, execution_lock(db):
         csrf = token(client)
-        data = {"csrf": csrf, "run_at": "2026-08-24", "llm": "fake"}
+        data = {
+            "csrf": csrf,
+            "run_at": "2026-08-31",
+            "llm": "fake",
+            "submission_key": "locked",
+        }
         form = client.post(f"/teams/{TEAM}/trigger", data=data)
         assert form.status_code == 303 and "error=" in form.headers["location"]
         api = client.post(
             "/runs", headers={"X-CSRF-Token": csrf}, json={"team": TEAM, "llm": "fake"}
         )
         assert api.status_code == 409
-    finally:
-        gate.release()
 
 
 def test_ui_trigger_runs_real_engine_and_stays_unpublished(client: TestClient) -> None:
@@ -255,11 +266,21 @@ def test_ui_trigger_runs_real_engine_and_stays_unpublished(client: TestClient) -
         pytest.skip(f"Elasticsearch unavailable: {exc}")
     result = client.post(
         f"/teams/{TEAM}/trigger",
-        data={"csrf": token(client), "run_at": "2026-08-31", "llm": "fake"},
+        data={
+            "csrf": token(client),
+            "run_at": "2026-08-31",
+            "llm": "fake",
+            "submission_key": "console-run",
+        },
     )
     assert result.status_code == 303 and "done=" in result.headers["location"], result.headers
     page = client.get(result.headers["location"])
-    assert page.status_code == 200 and "Run completed" in page.text
+    assert page.status_code == 200 and "Waiting for the worker" in page.text
+    subprocess.run(
+        [sys.executable, "-m", "src", "run-worker", "--database", DB, "--once"], check=True
+    )
+    page = client.get(result.headers["location"])
+    assert page.status_code == 200 and "Analysis running" not in page.text
     with connect(CONFIG.sql, DB) as db:
         run = db.query_one(
             "SELECT TOP 1 * FROM runs WHERE team_id=:team ORDER BY run_at DESC", {"team": TEAM}
@@ -371,7 +392,7 @@ def test_permanent_deletion_removes_all_run_records(
     assert "run_id=" not in deleted.headers["location"]
     assert client.get(deleted.headers["location"]).status_code == 200
     assert not directory.exists()
-    assert client.get(f"/runs/{run_id}/scorecard").status_code == 404
+    assert client.get(f"/runs/{run_id}/daily_metrics.csv").status_code == 404
     assert client.get(f"/runs/{run_id}/alert_worklist.csv").status_code == 404
     with connect(CONFIG.sql, DB) as db:
         for table in (
@@ -505,7 +526,7 @@ def test_cli_rerun_blocks_deletion_through_the_entire_lifecycle(
         )
         assert row is not None
         run_id = str(row["run_id"])
-    assert (out_root / run_id[:16] / "scorecard.html").exists()
+    assert (out_root / run_id[:16] / "daily_metrics.csv").exists()
     reached, resume = Event(), Event()
     original = getattr(engine_cli, operation_name)
 
@@ -568,7 +589,7 @@ def test_cli_report_blocks_deletion_until_files_are_written(
     arguments = ["report", selector, run_id if selector == "--run-id" else TEAM, "--database", DB]
     assert main(arguments) == 0
     reached, resume = Event(), Event()
-    original = report_render.build_run_outputs
+    original = build_run_outputs
 
     def pause_after_render(db: Database, selected_id: str) -> dict[str, str]:
         outputs = original(db, selected_id)
@@ -590,7 +611,7 @@ def test_cli_report_blocks_deletion_until_files_are_written(
         finally:
             resume.set()
             assert report.result(timeout=30) == 0
-    assert all((out_root / run_id[:16] / name).exists() for name in report_render.OUTPUT_FILES)
+    assert all((out_root / run_id[:16] / name).exists() for name in report_render.CSV_FILES)
     deleted = client.post(
         f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
     )

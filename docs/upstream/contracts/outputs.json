@@ -1,6 +1,5 @@
 {
   "files": [
-    "scorecard.html",
     "daily_metrics.csv",
     "rule_counts.csv",
     "alert_worklist.csv"
@@ -76,5 +75,13 @@
       "open_since"
     ]
   },
-  "semantics": "../docs/outputs.md"
+  "semantics": "../docs/outputs.md",
+  "stored_files": [
+    "daily_metrics.csv",
+    "rule_counts.csv",
+    "alert_worklist.csv"
+  ],
+  "on_demand": [],
+  "operations_version": "0.2.0",
+  "html_removal": "Accepted 2026-10-13: no standalone HTML renderer, response, route, file or link; normal admin workspace remains"
 }
