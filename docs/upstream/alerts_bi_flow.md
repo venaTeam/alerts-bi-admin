@@ -1,5 +1,22 @@
 # Alerts BI — Runtime Flow
 
+## Run lifecycle amendment — 2026-10-13
+
+New manual form, JSON and CLI runs select a Monday 00:00 UTC end; omission uses the
+latest completed Monday. The start is the previous Monday at 00:00 UTC, inclusive; the
+end is exclusive. Historical arbitrary-window analysis remains renderable. Admin removes
+the publication gap override and rejects forged overrides. Permanent run deletion removes
+SQL run-owned rows transactionally (including decisions in a scoped deletion allowance, with
+migration 009 and a checked parent foreign key), then cleans configured report files. Shared caches remain. Active work is
+refused; scheduler enrollment remains. See design section 7.12 and decision 004 for scope,
+failure handling and the explicit exception to retained audit history.
+
+Manual HTTP/API and CLI runs share the existing SQL session execution lock with weekly
+scheduling and deletion, from before scanning through persistence and report writing.
+Standalone CLI reports hold it before run-id/team lookup through the final file write.
+Model-off runs hold it too. Its separate connection survives data commits; contention is
+refused promptly and errors release the lock. Updated CLI clients and the app roll out together.
+
 ## Source ownership amendment — 2026-10-12
 
 Admin owns execution, migrations, weekly jobs, registry and library builds under `alerts_bi_admin.engine`; commands use `alerts-bi-admin`. The previous runs ownership and runtime-wheel references below are historical. Product behavior, wire payloads, SQL contracts and outputs are unchanged. See [retirement and cutover](runs-retirement.md).

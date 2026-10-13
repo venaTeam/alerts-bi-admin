@@ -81,3 +81,26 @@ cycle have been verified, all consumers/build pipelines/docs point to admin, out
 is transferred, and the team's agreed rollback retention period has elapsed. Confirm no active
 job or release still uses its image/package. Obtain explicit archival authorization, archive
 the repository read-only, and retain Git history and release artifacts. Do not delete it.
+
+## Removing an obsolete local checkout
+
+Local checkout cleanup is independent of deployment and GitHub archival. The maintained
+workspace contains only admin, portal and design; setup, development and builds must not
+clone or require runs. The product owner authorized removing the local runs checkout on
+2026-10-12 after the admin, portal and design merger PRs were merged.
+
+Before removal, inventory `git status`, all linked worktrees, ignored output/configuration
+and any process using the checkout. Preserve a private recovery archive of all local files,
+including uncommitted/untracked work and Git metadata; verify its contents before deletion.
+Keep a portable Git bundle when needed for independent history recovery. Do not commit or
+upload recovery archives, which can contain local configuration and data.
+
+Remove dependent runs worktrees before their owning checkout so no `.git` pointer is left
+dangling. Restrict deletion to the explicitly selected local paths; leave other repositories,
+the original development checkout, running services and persistent SQL/Elasticsearch volumes
+untouched. Remove runs from active workspace navigation and route its former commands to
+admin. Record the recovery location outside Git; archived copies are not active source inputs.
+
+Preserve historical release records, hashes and old command mappings. This local cleanup
+does not prove or authorize deployment cutover, shutting down a service, or deleting or
+archiving the GitHub repository. The operational and archival gates above still apply.

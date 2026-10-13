@@ -60,6 +60,8 @@ def test_cli_report_directories_honor_environment(
     monkeypatch.setenv("ADMIN_OUT_DIR", "mounted/reports")
     monkeypatch.setenv("ADMIN_REGISTRY_PATH", "mounted/teams.json")
     monkeypatch.setattr(cli, "connect", MagicMock())
+    # Path/registry routing is isolated from both data and execution-lock sessions.
+    monkeypatch.setattr(cli, "schedule_lock", MagicMock())
     monkeypatch.setattr(cli, "EsClient", MagicMock())
     summary = MagicMock(run_id="a" * 64)
     summary.readiness = None

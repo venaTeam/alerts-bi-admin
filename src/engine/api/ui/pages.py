@@ -48,8 +48,8 @@ def index_page(teams: list[TeamOut]) -> str:
 <form method="post" action="/runs">
   <label for="team">Team</label>
   <select id="team" name="team" required>{options}</select>
-  <label for="run_at">run_at (UTC, optional)</label>
-  <input id="run_at" name="run_at" placeholder="2026-08-25T18:00:00Z">
+  <label for="run_at">Window ends at (Monday 00:00 UTC, optional)</label>
+  <input id="run_at" name="run_at" type="date" min="1970-01-05" step="7">
   <label for="llm">Model</label>
   <select id="llm" name="llm">
     <option value="live">live — the on-prem model, if LLM_ENABLED</option>
@@ -63,8 +63,8 @@ def index_page(teams: list[TeamOut]) -> str:
 <p class="note">The finished scorecard downloads as a file, and the result line links to
 it in a new tab; this page stays as it is, so the next run is one click away. A run reads
 168 hours for one team and is serialized — a second request while one is running gets a
-409. Against the mock dataset set <code>run_at</code> to
-<code>2026-08-25T18:00:00Z</code>, which is the clock it was generated on.</p>
+409. The default is the latest completed Monday. Against the mock dataset select
+<code>2026-08-24</code> to cover the preceding Monday-to-Monday week.</p>
 <h2>Registered teams</h2>
 <table><thead><tr><th>team_id</th><th>display name</th><th>v1 operators</th>
 <th>v2 operator</th><th>panels</th></tr></thead><tbody>{rows}</tbody></table>

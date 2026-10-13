@@ -34,8 +34,16 @@ from .config import AdminSettings
 from .engine.api.negotiation import wants_html
 from .engine.api.routers.runs import router as runs_router
 from .engine.api.schemas import HealthOut, RunRequest, TeamsOut
-from .engine.api.service import RunGate, check_health, list_teams, start_run
+from .engine.api.service import (
+    RunGate,
+    WeeklyBusy,
+    check_health,
+    list_teams,
+    schedule_lock,
+    start_run,
+)
 from .readiness import check_schema
+from .runs import DeletionRefused, delete_run, remove_run_files
 
 __all__ = ["SECURITY_HEADERS", "build_admin"]
 
@@ -449,13 +457,15 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         if team_id not in {t for t, _, _ in registry_teams()}:
             raise HTTPException(404, "No such registered team.")
         try:
-            # datetime-local explicitly means UTC; the engine freezes the preceding 168 hours.
+            # A date is midnight UTC; RunRequest also rejects forged non-Monday times.
             body = RunRequest.model_validate(
                 {"team": team_id, "run_at": fields.get("run_at"), "llm": fields.get("llm")}
             )
         except ValidationError:
             return back(
-                pages.team_url(team_id), "Enter a valid UTC window end and model mode.", True
+                pages.team_url(team_id),
+                "Choose a Monday at 00:00 UTC and a valid model mode.",
+                True,
             )
         try:
             result = await run_in_threadpool(start_run, api_settings, gate, body)
@@ -494,11 +504,14 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                         published_by=user,
                         note=fields.get("note") or None,
                         replace=fields.get("replace") == "1",
-                        allow_gap=fields.get("allow_gap") == "1",
+                        allow_gap=False,
                     )
                 except PublicationRefused as exc:
+                    detail = str(exc)
+                    if "--allow-gap" in detail:
+                        detail = "Published weeks must be back to back. Publish the missing Monday week first."
                     return back(
-                        team_path(str(run["team_id"]), run_id), f"Not published: {exc}", True
+                        team_path(str(run["team_id"]), run_id), f"Not published: {detail}", True
                     )
             log.info("admin.published", run_id=run_id, operator=user)
             message = "Published."
@@ -529,6 +542,47 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 team_path(str(run["team_id"]), run_id),
                 "Withdrawn. Readers no longer see this week.",
             )
+
+        return await run_in_threadpool(act)
+
+    @app.post("/runs/{run_id}/delete")
+    async def delete(request: Request, run_id: str) -> Response:
+        fields = await form(request)
+        user = user_of(request)
+        if fields.get("confirm_delete") != "1":
+            raise HTTPException(400, "Confirm permanent deletion of this run.")
+
+        def act() -> RedirectResponse:
+            if not gate.acquire():
+                raise HTTPException(409, "A run is active. Try deleting after it finishes.")
+            try:
+                with schedule_lock(api_settings.config, settings.database):
+                    with database() as db:
+                        run = run_row(db, run_id)
+                        try:
+                            team_id = delete_run(db, run_id)
+                        except DeletionRefused as exc:
+                            return back(team_path(str(run["team_id"]), run_id), str(exc), True)
+                    log.info("admin.deleted", run_id=run_id, team_id=team_id, operator=user)
+                    try:
+                        remove_run_files(settings.out_root, run_id)
+                    except OSError as exc:
+                        log.error(
+                            "admin.delete_files_failed", run_id=run_id, error=redact_error(exc)
+                        )
+                        return back(
+                            pages.team_url(team_id),
+                            "Run deleted from the database and portal. Generated report cleanup failed; ask the service operator to remove its files.",
+                            True,
+                        )
+                    return back(pages.team_url(team_id), "Run permanently deleted.")
+            except WeeklyBusy:
+                raise HTTPException(
+                    409,
+                    "A run, report, weekly schedule or deletion is active. Try deleting after it finishes.",
+                ) from None
+            finally:
+                gate.release()
 
         return await run_in_threadpool(act)
 
