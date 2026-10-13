@@ -147,3 +147,54 @@ def test_the_reset_refuses_any_database_that_is_not_the_configured_test_one(
 ) -> None:
     with pytest.raises(ValueError, match="refusing to reset"):
         reset_test_database(CONFIG.sql, target)
+
+
+def test_exact_job_keys_upgrade_preserves_existing_submissions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from alembic import command
+    from alerts_bi_shared.hashing import sha256_text
+    from sqlalchemy.exc import DBAPIError
+    from src.engine.db import migrate as migration_module
+
+    database = CONFIG.sql.test_database
+
+    def migrate_to_jobs(sql: object, target: str) -> tuple[list[str], list[str]]:
+        command.upgrade(migration_module.alembic_config(CONFIG.sql, target), "010_run_jobs")
+        return [], []
+
+    # Build the actual pre-fix schema through the existing guarded reset entry point.
+    with monkeypatch.context() as patch:
+        patch.setattr(migration_module, "migrate", migrate_to_jobs)
+        reset_test_database(CONFIG.sql, database)
+    key = "Existing-Key "
+    with connect(CONFIG.sql, database) as db:
+        assert current_revision(db) == "010_run_jobs"
+        db.execute(
+            "INSERT INTO run_jobs (job_id,idempotency_key,requested_by,request_hash,team_id,"
+            "run_at,llm_mode,registry_sha256,run_id,status,submitted_at) "
+            "VALUES (:id,:key,'upgrade-tester',:hash,'checkout-api',SYSUTCDATETIME(),"
+            "'fake',:hash,:hash,'failed',SYSUTCDATETIME())",
+            {"id": "a" * 32, "key": key, "hash": "0" * 64},
+        )
+        db.commit()
+    newly, _ = migrate(CONFIG.sql, database)
+    assert newly == ["011_run_job_keys"]
+    digest = bytes.fromhex(sha256_text(key))
+    with connect(CONFIG.sql, database) as db:
+        assert current_revision(db) == "011_run_job_keys"
+        row = db.query_one("SELECT * FROM run_jobs WHERE job_id=:id", {"id": "a" * 32})
+        assert row is not None
+        assert row["idempotency_key"] == key and row["idempotency_key_hash"] == digest
+        assert row["requested_by"] == "upgrade-tester" and row["status"] == "failed"
+        # The database itself rejects duplicate digest identity even for another raw key.
+        with pytest.raises(DBAPIError):
+            db.execute(
+                "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,request_hash,"
+                "team_id,run_at,llm_mode,registry_sha256,run_id,status,submitted_at) "
+                "VALUES (:id,'different-raw-key',:digest,'upgrade-tester',:hash,'checkout-api',"
+                "SYSUTCDATETIME(),'fake',:hash,:hash,'failed',SYSUTCDATETIME())",
+                {"id": "b" * 32, "digest": digest, "hash": "0" * 64},
+            )
+        db.rollback()
+        assert db.query_one("SELECT COUNT(*) AS n FROM run_jobs") == {"n": 1}

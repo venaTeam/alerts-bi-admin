@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 import pytest
+from alerts_bi_operations.report.render import build_run_outputs
 from alerts_bi_shared.db.connection import connect
 from fastapi.testclient import TestClient
 from src.app import build_admin
@@ -23,7 +24,7 @@ from src.engine.config import ApiSettings, load_config
 from src.engine.db.migrate import reset_test_database
 from src.engine.db.repositories import PersistencePayload, persist_run
 
-from tests.helpers.sql import sample_run
+from tests.helpers.sql import sample_daily, sample_run
 
 pytestmark = pytest.mark.integration
 CONFIG = load_config()
@@ -126,8 +127,21 @@ def test_restart_does_not_mistake_older_result_for_interrupted_job(client: TestC
     assert "Worker interrupted" in page.text
 
 
-def test_restart_recognizes_commit_before_job_completion(client: TestClient) -> None:
-    row = submit(client, "commit-recovery").json()
+@pytest.mark.parametrize("exports", ["missing", "stale", "partial"])
+def test_restart_recognizes_commit_before_job_completion(
+    client: TestClient, settings: AdminSettings, exports: str
+) -> None:
+    row = submit(client, "commit-recovery-" + exports).json()
+    directory = settings.out_root / row["run_id"][:16]
+    directory.mkdir(exist_ok=True)
+    # Remove previous output for this deterministic ID, then reproduce each crash state.
+    for path in directory.iterdir():
+        path.unlink()
+    if exports != "missing":
+        for name in ("daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
+            (directory / name).write_text("stale or truncated")
+            if exports == "partial":
+                break
     started = datetime(2026, 10, 13)
     with connect(CONFIG.sql, DB) as db:
         db.execute(
@@ -142,11 +156,17 @@ def test_restart_recognizes_commit_before_job_completion(client: TestClient) -> 
                     run_id=row["run_id"],
                     started_at=started + timedelta(seconds=1),
                     completed_at=started + timedelta(seconds=2),
-                )
+                ),
+                daily_metrics=[sample_daily(run_id=row["run_id"], alerts=31)],
             ),
         )
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
-    assert client.get(row["status_url"]).json()["status"] == "completed"
+        expected = build_run_outputs(db, row["run_id"])
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    status = client.get(row["status_url"]).json()
+    assert status["status"] == "completed" and status["error_summary"] is None
+    assert {p.name: p.read_bytes() for p in directory.iterdir()} == {
+        name: content.encode("utf-8") for name, content in expected.items()
+    }
 
 
 def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
@@ -268,3 +288,75 @@ def test_slow_worker_keeps_status_and_navigation_responsive(
             release.set()
         assert future.result(timeout=120)
     assert client.get(row["status_url"]).json()["status"] == "completed"
+
+
+@pytest.mark.parametrize(
+    "first_key,second_key", [("Attempt-A", "attempt-a"), ("padded", "padded ")]
+)
+def test_distinct_exact_keys_create_new_attempts(
+    client: TestClient,
+    settings: AdminSettings,
+    monkeypatch: pytest.MonkeyPatch,
+    first_key: str,
+    second_key: str,
+) -> None:
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Finish the attempt without running analysis")
+
+    monkeypatch.setattr(jobs, "execute_request", fail)
+    api = ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
+    first = submit(client, first_key)
+    assert first.status_code == 202, first.text
+    assert jobs.work_once(api)
+    second = submit(client, second_key)
+    assert second.status_code == 202, second.text
+    assert second.json()["job_id"] != first.json()["job_id"]
+    assert submit(client, first_key).json()["job_id"] == first.json()["job_id"]
+    assert submit(client, second_key).json()["job_id"] == second.json()["job_id"]
+    with connect(CONFIG.sql, DB) as db:
+        # SQL's ordinary string comparison would conflate these under CI collation.
+        assert db.query_one(
+            "SELECT CASE WHEN :first COLLATE Latin1_General_100_CI_AS = :second THEN 1 ELSE 0 END AS same",
+            {"first": first_key, "second": second_key},
+        ) == {"same": 1}
+        first_row = jobs.get_job(db, first.json()["job_id"])
+        second_row = jobs.get_job(db, second.json()["job_id"])
+        assert first_row["idempotency_key"] == first_key
+        assert second_row["idempotency_key"] == second_key
+        assert first_row["idempotency_key_hash"] != second_row["idempotency_key_hash"]
+    assert jobs.work_once(api)
+
+
+def test_recovery_export_failure_remains_visible(
+    client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = submit(client, "recovery-export-warning").json()
+    started = datetime(2026, 10, 13)
+    with connect(CONFIG.sql, DB) as db:
+        db.execute(
+            "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
+            {"id": row["job_id"], "at": started},
+        )
+        db.commit()
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=row["run_id"],
+                    started_at=started + timedelta(seconds=1),
+                    completed_at=started + timedelta(seconds=2),
+                )
+            ),
+        )
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise OSError("Recovery export failed")
+
+    monkeypatch.setattr(jobs, "render_run_report", fail)
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    status = client.get(row["status_url"]).json()
+    assert status["status"] == "completed" and "CSV export failed" in status["error_summary"]
+    assert client.get(status["result_url"]).status_code == 200
+    assert "CSV export failed" in client.get("/teams/checkout-api").text
+    with connect(CONFIG.sql, DB) as db:
+        assert jobs.get_job(db, row["job_id"])["active_slot"] is None

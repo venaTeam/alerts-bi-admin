@@ -38,6 +38,17 @@ spec:
           volumeMounts:
             - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
             - {name: output, mountPath: /app/out}
+        - name: run-worker
+          image: ADMIN_IMAGE_DIGEST
+          command: ["alerts-bi-admin", "run-worker", "--registry", "/etc/alerts-bi/teams.json"]
+          env:
+            - {name: ADMIN_OUT_DIR, value: "/app/out"}
+          envFrom:
+            - configMapRef: {name: alerts-bi-config}
+            - secretRef: {name: alerts-bi-secrets}
+          volumeMounts:
+            - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
+            - {name: output, mountPath: /app/out}
         - name: oauth-proxy
           image: OAUTH_PROXY_IMAGE_DIGEST
           args:

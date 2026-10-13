@@ -135,7 +135,11 @@ Manual browser runs now return immediately after saving a SQL-backed submission.
 `alerts-bi-admin db migrate` before starting the updated app, then run
 `alerts-bi-admin run-worker` in a separate terminal/process with matching ADMIN_DATABASE,
 ADMIN_REGISTRY_PATH, ADMIN_OUT_DIR, SQL, Elasticsearch and model settings. The worker does not
-require ADMIN_SECRET. In OpenShift the example adds a dedicated worker container to the admin pod.
+require ADMIN_SECRET. The shipped deploy/admin.yaml includes a dedicated worker with the
+same image, registry, SQL/ES/model configuration and output mount. Stop UI/worker writers
+and apply through migration 011_run_job_keys before updating both processes; it backfills
+existing submission digests without editing 001–010. Older writers cannot insert the new
+required digest. Keys differing only in case or trailing spaces request distinct attempts.
 `run-worker --once` processes at most one job and exits. The team page polls while visible;
 you can leave and return later. Failures and worker interruptions remain visible and need a
 new submission to retry. Analysis completion never publishes a review.

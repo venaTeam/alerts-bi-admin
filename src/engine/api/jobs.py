@@ -21,11 +21,13 @@ from fastapi import HTTPException
 
 from ..config import ApiSettings
 from ..run.orchestrator import compute_run_id
+from ..run.outputs import render_run_report
 from ..weekly.runner import WeeklyBusy, schedule_lock
 from .schemas import RunRequest
 from .service import close_client, execute_request, latest_week_end, select_client
 
 LOCK_RESOURCE = "alerts-bi-manual-run"
+EXPORT_WARNING = "Analysis saved; CSV export failed. Regenerate exports with the report command."
 
 
 @contextmanager
@@ -90,10 +92,12 @@ def submit_job(
     if not operator or len(operator) > 256:
         raise HTTPException(400, "The operator identity is invalid.")
     request_hash = sha256_text(body.model_dump_json())
+    # Binary identity preserves case and trailing spaces regardless of SQL collation.
+    key_hash = bytes.fromhex(sha256_text(idempotency_key))
     with connect(settings.config.sql, settings.target_database) as db:
         existing = db.query_one(
-            "SELECT * FROM run_jobs WHERE requested_by=:operator AND idempotency_key=:key",
-            {"operator": operator, "key": idempotency_key},
+            "SELECT * FROM run_jobs WHERE requested_by=:operator AND idempotency_key_hash=:key_hash",
+            {"operator": operator, "key_hash": key_hash},
         )
         if existing:
             if existing["request_hash"] != request_hash:
@@ -105,8 +109,8 @@ def submit_job(
             # Recheck after acquiring the lock: a simultaneous identical submission may
             # have committed since the first lookup.
             existing = db.query_one(
-                "SELECT * FROM run_jobs WHERE requested_by=:operator AND idempotency_key=:key",
-                {"operator": operator, "key": idempotency_key},
+                "SELECT * FROM run_jobs WHERE requested_by=:operator AND idempotency_key_hash=:key_hash",
+                {"operator": operator, "key_hash": key_hash},
             )
             if existing:
                 if existing["request_hash"] != request_hash:
@@ -148,12 +152,13 @@ def submit_job(
                 )
             job_id = uuid4().hex
             db.execute(
-                "INSERT INTO run_jobs (job_id,idempotency_key,requested_by,request_hash,team_id,"
+                "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,request_hash,team_id,"
                 "run_at,llm_mode,registry_sha256,run_id,status,active_slot,submitted_at) "
-                "VALUES (:id,:key,:operator,:hash,:team,:at,:mode,:registry,:run,'pending',1,:now)",
+                "VALUES (:id,:key,:key_hash,:operator,:hash,:team,:at,:mode,:registry,:run,'pending',1,:now)",
                 {
                     "id": job_id,
                     "key": idempotency_key,
+                    "key_hash": key_hash,
                     "operator": operator,
                     "hash": request_hash,
                     "team": body.team,
@@ -200,11 +205,30 @@ def work_once(settings: ApiSettings) -> bool:
             with execution_lock(db, settings):
                 for orphan in db.query("SELECT * FROM run_jobs WHERE status='running'"):
                     completed = committed_result(db, orphan)
+                    error: str | None = "Worker interrupted. Start a new run to retry."
+                    if completed:
+                        try:
+                            # The prior worker may have died between SQL commit and the
+                            # final CSV write. Rebuild every export before clearing the job.
+                            render_run_report(
+                                db,
+                                str(orphan["run_id"]),
+                                settings.out_root / str(orphan["run_id"])[:16],
+                            )
+                            error = None
+                        except Exception as exc:
+                            db.rollback()
+                            log.error(
+                                "run.export_recovery_failed",
+                                job_id=orphan["job_id"],
+                                error=redact_error(exc),
+                            )
+                            error = EXPORT_WARNING
                     finish_job(
                         db,
                         str(orphan["job_id"]),
                         "completed" if completed else "failed",
-                        "Worker interrupted. Start a new run to retry." if not completed else None,
+                        error,
                     )
                 job = db.query_one(
                     "SELECT TOP 1 * FROM run_jobs WHERE status='pending' ORDER BY submitted_at"
@@ -240,7 +264,7 @@ def work_once(settings: ApiSettings) -> bool:
                         db,
                         str(job["job_id"]),
                         "completed" if completed else "failed",
-                        "Analysis saved; CSV export failed. Regenerate exports with the report command."
+                        EXPORT_WARNING
                         if completed
                         else "Analysis failed. Check the service logs, then start a new run to retry.",
                     )
