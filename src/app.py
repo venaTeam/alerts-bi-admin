@@ -33,7 +33,7 @@ from .config import AdminSettings
 from .engine.api.jobs import get_job, submit_job, team_jobs
 from .engine.api.negotiation import wants_html
 from .engine.api.routers.runs import router as runs_router
-from .engine.api.schemas import HealthOut, RunRequest, TeamsOut
+from .engine.api.schemas import HealthOut, RunJobOut, RunRequest, TeamsOut
 from .engine.api.service import (
     RunGate,
     WeeklyBusy,
@@ -498,7 +498,36 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             else None,
         }
 
-    @app.post("/run-jobs", status_code=202)
+    @app.post(
+        "/run-jobs",
+        status_code=202,
+        response_model=RunJobOut,
+        summary="Accept a durable manual run submission",
+        responses={
+            400: {"description": "Invalid ASCII submission key or unknown team"},
+            401: {"description": "Operator identity required"},
+            403: {"description": "Same-site actor-bound CSRF required"},
+            409: {"description": "Another operation is active or the key has different options"},
+        },
+        openapi_extra={
+            "parameters": [
+                {
+                    "name": "Idempotency-Key",
+                    "in": "header",
+                    "required": True,
+                    "schema": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "description": "Exact ASCII key scoped to the authenticated operator",
+                },
+                {
+                    "name": "X-CSRF-Token",
+                    "in": "header",
+                    "required": True,
+                    "schema": {"type": "string"},
+                    "description": "Actor-bound token from authenticated GET /csrf",
+                },
+            ]
+        },
+    )
     def create_job(request: Request, body: RunRequest) -> JSONResponse:
         row = submit_job(
             api_settings, body, user_of(request), request.headers.get("Idempotency-Key", "")
@@ -509,7 +538,15 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             headers={"Location": f"/run-jobs/{row['job_id']}"},
         )
 
-    @app.get("/run-jobs/{job_id}")
+    @app.get(
+        "/run-jobs/{job_id}",
+        response_model=RunJobOut,
+        summary="Read durable job state for an authenticated operator",
+        responses={
+            401: {"description": "Operator identity required"},
+            404: {"description": "Unknown submission"},
+        },
+    )
     def read_job(job_id: str) -> JSONResponse:
         with database() as db:
             return JSONResponse(jsonable_encoder(job_status(get_job(db, job_id))))

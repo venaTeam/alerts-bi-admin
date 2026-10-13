@@ -32,7 +32,7 @@ DB = CONFIG.sql.test_database
 BODY = {"team": "checkout-api", "run_at": "2026-08-24T00:00:00Z", "llm": "fake"}
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def settings(tmp_path_factory: pytest.TempPathFactory) -> AdminSettings:
     # Fail migration regressions when SQL is reachable instead of hiding them as skips.
     try:
@@ -83,13 +83,14 @@ def test_acceptance_is_durable_idempotent_and_does_not_execute(client: TestClien
 def test_installed_worker_completes_and_outputs_have_no_html(
     client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    row = submit(client, "installed-worker").json()
     monkeypatch.setenv("ADMIN_OUT_DIR", str(settings.out_root))
     subprocess.run(
         [sys.executable, "-m", "alerts_bi_admin", "run-worker", "--database", DB, "--once"],
         check=True,
         timeout=180,
     )
-    row = submit(client, "accepted").json()
+    row = client.get(row["status_url"]).json()
     assert row["status"] == "completed", row
     assert client.get(row["result_url"]).status_code == 200
     assert client.get(f"/runs/{row['run_id']}/scorecard.html").status_code == 422
@@ -118,13 +119,31 @@ def test_lock_protects_live_worker_and_status_stays_readable(client: TestClient)
         assert jobs.get_job(db, row["job_id"])["status"] == "running"
 
 
-def test_restart_does_not_mistake_older_result_for_interrupted_job(client: TestClient) -> None:
-    # The prior completed run has the same deterministic ID, but predates this attempt.
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
-    row = submit(client, "live-lock").json()
-    assert row["status"] == "failed" and "interrupted" in row["error_summary"]
-    page = client.get("/teams/checkout-api")
-    assert "Worker interrupted" in page.text
+def test_restart_does_not_mistake_older_result_for_interrupted_job(
+    client: TestClient, settings: AdminSettings
+) -> None:
+    row = submit(client, "older-result").json()
+    started = datetime.now(UTC).replace(tzinfo=None)
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=row["run_id"],
+                    started_at=started - timedelta(hours=1),
+                    completed_at=started - timedelta(minutes=59),
+                )
+            ),
+        )
+        db.execute(
+            "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
+            {"id": row["job_id"], "at": started},
+        )
+        db.commit()
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    status = client.get(row["status_url"]).json()
+    assert status["status"] == "failed" and "interrupted" in status["error_summary"]
+    assert "Worker interrupted" in client.get("/teams/checkout-api").text
 
 
 @pytest.mark.parametrize("exports", ["missing", "stale", "partial"])
@@ -173,6 +192,9 @@ def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
     client: TestClient, settings: AdminSettings
 ) -> None:
     row = submit(client, "pending-delete").json()
+    # Seed the older result this pending rerun would replace; first runs have no parent to delete.
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(db, PersistencePayload(run=sample_run(run_id=row["run_id"])))
     token = client.get("/csrf").json()["token"]
     response = client.post(
         f"/runs/{row['run_id']}/delete", data={"csrf": token, "confirm_delete": "1"}
@@ -360,3 +382,21 @@ def test_recovery_export_failure_remains_visible(
     assert "CSV export failed" in client.get("/teams/checkout-api").text
     with connect(CONFIG.sql, DB) as db:
         assert jobs.get_job(db, row["job_id"])["active_slot"] is None
+
+
+def test_idle_worker_never_takes_execution_locks(
+    settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unexpected(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("An empty queue must not contend for any execution lock")
+
+    monkeypatch.setattr(jobs, "execution_lock", unexpected)
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+
+
+def test_job_status_follows_operator_wide_access_model(client: TestClient) -> None:
+    row = submit(client, "operator-access").json()
+    second = client.get(row["status_url"], headers={"X-Forwarded-User": "another-operator"})
+    assert second.status_code == 200 and second.json()["team_id"] == "checkout-api"
+    assert "requested_by" not in second.json() and "idempotency_key" not in second.json()
+    assert client.get("/teams/payments-api?job_id=" + row["job_id"]).status_code == 404

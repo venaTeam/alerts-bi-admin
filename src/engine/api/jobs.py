@@ -170,6 +170,13 @@ def submit_job(
                 },
             )
             db.commit()
+            log.info(
+                "run.job_submitted",
+                job_id=job_id,
+                team_id=body.team,
+                run_id=run_id,
+                operator=operator,
+            )
             return get_job(db, job_id)
 
 
@@ -185,6 +192,12 @@ def finish_job(db: Database, job_id: str, state: str, error: str | None = None) 
         },
     )
     db.commit()
+    log.info(
+        "run.job_finished",
+        job_id=job_id,
+        status=state,
+        export_warning=state == "completed" and error is not None,
+    )
 
 
 def committed_result(db: Database, job: dict[str, Any]) -> bool:
@@ -201,6 +214,10 @@ def committed_result(db: Database, job: dict[str, Any]) -> bool:
 def work_once(settings: ApiSettings) -> bool:
     """Claim at most one job, recover orphans, then run on the lock-owning SQL session."""
     with connect(settings.config.sql, settings.target_database) as db:
+        # An idle poll must not compete with submissions, reports or weekly execution.
+        # Recheck and claim under the locks below; a new job after this read waits one poll.
+        if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1") is None:
+            return False
         try:
             with execution_lock(db, settings):
                 for orphan in db.query("SELECT * FROM run_jobs WHERE status='running'"):
@@ -243,6 +260,12 @@ def work_once(settings: ApiSettings) -> bool:
                 )
                 db.commit()
                 job["started_at"] = started
+                log.info(
+                    "run.job_started",
+                    job_id=job["job_id"],
+                    team_id=job["team_id"],
+                    run_id=job["run_id"],
+                )
                 try:
                     registry = (
                         load_registry(settings.registry_path)

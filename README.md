@@ -185,3 +185,12 @@ The admin image provides writable `/app/out` for its non-root user. Deployment e
 the ordered scheduler/migration transfer, rollback and eventual archival checklist are in
 `docs/upstream/openshift-deployment.md` and `docs/upstream/runs-retirement.md`. PRs do not deploy
 or stop services. Canonical requirements stay in alerts-bi-design; snapshots here are pinned.
+
+
+The Checks workflow also runs real SQL/ES integration and critical acceptance tests on
+disposable CI mocks using scripts/ci_integration.py; missing services and skipped checks fail
+that job. Local Compose supplies dependencies only; start the manual worker separately.
+For prolonged running jobs and rollback, follow docs/upstream/manual-worker-runbook.md.
+The idle worker checks for work before taking application locks. State transitions are logged.
+The committed console-openapi.json contract describes async submissions and status; the live
+console keeps public schema endpoints disabled. Operators have shared access across teams.

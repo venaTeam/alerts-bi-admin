@@ -20,6 +20,7 @@ __all__ = [
     "HealthOut",
     "LlmMode",
     "OutputFile",
+    "RunJobOut",
     "RunOut",
     "RunRequest",
     "TeamOut",
@@ -101,3 +102,18 @@ class RunOut(BaseModel):
     llm_eligible: int
     out_dir: str
     files: dict[str, str]
+
+
+class RunJobOut(BaseModel):
+    """Public submission state; private keys, actor and configuration are excluded."""
+
+    job_id: str
+    team_id: str
+    run_id: str
+    status: Literal["pending", "running", "completed", "failed"]
+    submitted_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    error_summary: str | None
+    status_url: str
+    result_url: str | None

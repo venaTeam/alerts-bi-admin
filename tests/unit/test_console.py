@@ -109,3 +109,26 @@ def test_non_ascii_csrf_token_is_refused_without_crashing(client: TestClient) ->
         ).status_code
         == 403
     )
+
+
+def test_console_openapi_describes_async_submission_and_status(client: TestClient) -> None:
+    schema = client.app.openapi()  # type: ignore[attr-defined]
+    post = schema["paths"]["/run-jobs"]["post"]
+    parameters = {p["name"]: p for p in post["parameters"]}
+    assert parameters["Idempotency-Key"]["required"] is True
+    assert parameters["X-CSRF-Token"]["required"] is True
+    ref = {"$ref": "#/components/schemas/RunJobOut"}
+    assert post["responses"]["202"]["content"]["application/json"]["schema"] == ref
+    assert (
+        schema["paths"]["/run-jobs/{job_id}"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+        == ref
+    )
+    assert schema["components"]["schemas"]["RunJobOut"]["properties"]["status"]["enum"] == [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+    ]
+    assert client.get("/openapi.json", headers=USER).status_code == 404
