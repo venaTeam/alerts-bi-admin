@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -21,30 +21,43 @@ from fastapi import HTTPException
 
 from ..config import ApiSettings
 from ..run.orchestrator import compute_run_id
+from ..weekly.runner import WeeklyBusy, schedule_lock
 from .schemas import RunRequest
-from .service import close_client, execute_request, select_client
+from .service import close_client, execute_request, latest_week_end, select_client
 
 LOCK_RESOURCE = "alerts-bi-manual-run"
 
 
 @contextmanager
-def execution_lock(db: Database) -> Iterator[None]:
-    row = db.query_one(
-        "SET NOCOUNT ON; DECLARE @result INT; "
-        "EXEC @result = sp_getapplock @Resource=:resource, @LockMode='Exclusive', "
-        "@LockOwner='Session', @LockTimeout=0; SELECT @result AS result",
-        {"resource": LOCK_RESOURCE},
-    )
-    if row is None or int(row["result"]) < 0:
-        raise HTTPException(409, "A run is already in progress. Try again after it finishes.")
+def execution_lock(db: Database, settings: ApiSettings | None = None) -> Iterator[None]:
+    # The existing scheduler lock lives on its own connection, protecting the complete
+    # lifecycle from CLI/report/deletion while the data session commits model audit.
     try:
-        yield
-    finally:
-        db.execute(
-            "EXEC sp_releaseapplock @Resource=:resource, @LockOwner='Session'",
-            {"resource": LOCK_RESOURCE},
-        )
-        db.commit()
+        with (
+            schedule_lock(settings.config, settings.target_database) if settings else nullcontext()
+        ):
+            row = db.query_one(
+                "SET NOCOUNT ON; DECLARE @result INT; "
+                "EXEC @result = sp_getapplock @Resource=:resource, @LockMode='Exclusive', "
+                "@LockOwner='Session', @LockTimeout=0; SELECT @result AS result",
+                {"resource": LOCK_RESOURCE},
+            )
+            if row is None or int(row["result"]) < 0:
+                raise HTTPException(
+                    409, "A run is already in progress. Try again after it finishes."
+                )
+            try:
+                yield
+            finally:
+                db.execute(
+                    "EXEC sp_releaseapplock @Resource=:resource, @LockOwner='Session'",
+                    {"resource": LOCK_RESOURCE},
+                )
+                db.commit()
+    except WeeklyBusy:
+        raise HTTPException(
+            409, "A run, report, weekly schedule or deletion is active. Try again when it finishes."
+        ) from None
 
 
 def get_job(db: Database, job_id: str) -> dict[str, Any]:
@@ -88,7 +101,7 @@ def submit_job(
                     409, "This submission key was already used with different options."
                 )
             return existing
-        with execution_lock(db):
+        with execution_lock(db, settings):
             # Recheck after acquiring the lock: a simultaneous identical submission may
             # have committed since the first lookup.
             existing = db.query_one(
@@ -111,7 +124,7 @@ def submit_job(
                 select_team(registry, body.team)
             except RegistryError as exc:
                 raise HTTPException(400, str(exc)) from None
-            run_at = body.run_at or datetime.now(UTC)
+            run_at = body.run_at or latest_week_end(datetime.now(UTC))
             run_at = run_at.replace(tzinfo=UTC) if run_at.tzinfo is None else run_at.astimezone(UTC)
             client, _ = select_client(settings.config, body.llm)
             model_version = client.model_version if client else None
@@ -184,7 +197,7 @@ def work_once(settings: ApiSettings) -> bool:
     """Claim at most one job, recover orphans, then run on the lock-owning SQL session."""
     with connect(settings.config.sql, settings.target_database) as db:
         try:
-            with execution_lock(db):
+            with execution_lock(db, settings):
                 for orphan in db.query("SELECT * FROM run_jobs WHERE status='running'"):
                     completed = committed_result(db, orphan)
                     finish_job(

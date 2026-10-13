@@ -26,22 +26,22 @@ This amendment supersedes synchronous browser triggering and automatic HTML-file
 
 ## Execution, recovery and compatibility
 
-Admin owns migration 009_run_jobs and `alerts-bi-admin run-worker`. The UI only submits and
+Admin owns migration 010_run_jobs and `alerts-bi-admin run-worker`. The UI only submits and
 reads jobs. Run one dedicated worker process using the same admin image, registry mount,
-SQL/ES/model settings and writable output configuration as the UI. No broker is required.
+SQL/ES/model settings and writable output configuration as the UI. No broker is required. Immutable migration 009_run_deletion is preserved; job state is additive revision 010.
 The worker polls SQL and claims at most one submission. States are pending, running, completed
 and failed. Completion never publishes a review. Portal views and library versions are unchanged.
 
 A SQL session application lock (`alerts-bi-manual-run`) serializes admission, execution and
 recovery. The execution connection owns that lock across LLM-journal and persistence commits.
 An active-slot constraint also prevents more than one pending/running job. The process-local
-gate remains a compatibility guard. CLI and weekly jobs retain their existing separate
-coordination; operators must continue avoiding overlapping manual/scheduled/CLI execution
-for the same team/window.
+gate remains a compatibility guard. The existing alerts-bi-weekly SQL session lock on its
+own connection protects the entire worker lifecycle from manual CLI runs, standalone reports,
+weekly scheduling and permanent deletion. Admission also refuses a busy scheduler lock.
 
 Run time/window, registry hash and deterministic run identity are captured on acceptance.
 The worker refuses changed registry/model/version inputs before Elasticsearch queries rather
-than silently analyzing different inputs. The original 168-hour window and analysis logic are
+than silently analyzing different inputs. The accepted Monday 00:00 UTC boundary, 168-hour window and analysis logic are
 unchanged. The idempotency key is scoped to the operator; retries return the same job, and
 reusing a key with different options returns 409. A new key explicitly requests another attempt.
 
@@ -52,6 +52,10 @@ becomes failed with an interruption message. No automatic re-execution of interr
 occurs. Pending jobs survive restart and execute normally. Infrastructure failures exit the
 worker for its supervisor to restart. A CSV-write failure after SQL persistence reports the
 analysis as completed with an export warning; exports can be regenerated from SQL.
+
+Permanent deletion refuses pending/running manual jobs and removes related terminal submission
+records in the same SQL transaction as the run. Their status URLs then return 404. Idempotency
+records live until explicit deletion of their parent run.
 
 ## Outputs and rollout
 
@@ -65,8 +69,8 @@ To remove existing generated HTML after rollout, use `alerts-bi-admin remove-run
 <explicit-output-root>`. It removes only scorecard.html accompanied by all three CSV exports,
 stays inside that output root, and preserves other HTML and all CSV data.
 
-Deploy in order: apply additive migration 009; deploy updated UI; start one manual worker with
+Deploy in order: apply additive migration 010; deploy updated UI; start one manual worker with
 the same settings. Verify rapid acceptance, completion/failure, duplicate submission, restart
 recovery, authentication, publication separation and exports. No cluster deployment is authorized
 by this source change. Roll back UI/worker together and preserve the additive job audit table;
-resolve pending work before reverting to synchronous submission. Do not downgrade or edit 001–008.
+resolve pending work before reverting to synchronous submission. Do not downgrade or edit 001–009.

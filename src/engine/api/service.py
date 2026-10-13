@@ -27,9 +27,22 @@ from ..llm.fake import FakeLlmClient
 from ..llm.openai_client import OpenAiLlmClient
 from ..run.orchestrator import RunSummary, execute_run, select_llm_client
 from ..run.outputs import render_run_report
+from ..weekly.plan import latest_week_end as latest_week_end
+from ..weekly.runner import WeeklyBusy as WeeklyBusy
+from ..weekly.runner import schedule_lock as schedule_lock
 from .schemas import CheckOut, LlmMode, RunRequest, TeamOut
 
-__all__ = ["RunGate", "RunResult", "check_health", "list_teams", "resolve_outputs", "start_run"]
+__all__ = [
+    "RunGate",
+    "RunResult",
+    "WeeklyBusy",
+    "check_health",
+    "latest_week_end",
+    "list_teams",
+    "resolve_outputs",
+    "schedule_lock",
+    "start_run",
+]
 
 
 class RunGate:
@@ -119,7 +132,7 @@ def execute_request(
     settings: ApiSettings, db: Database, body: RunRequest, *, expected_run_id: str | None = None
 ) -> RunResult:
     """Shared synchronous pipeline on the caller's SQL session."""
-    run_at = body.run_at or datetime.now(UTC)
+    run_at = body.run_at or latest_week_end(datetime.now(UTC))
     if run_at.tzinfo is None:
         run_at = run_at.replace(tzinfo=UTC)
     client, reason = select_client(settings.config, body.llm)
@@ -156,7 +169,10 @@ def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResu
             "the same rows",
         )
     try:
-        with connect(settings.config.sql, settings.target_database) as db:
+        with (
+            schedule_lock(settings.config, settings.target_database),
+            connect(settings.config.sql, settings.target_database) as db,
+        ):
             if gate.durable:
                 from .jobs import execution_lock, refuse_active_job
 
@@ -164,6 +180,8 @@ def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResu
                     refuse_active_job(db)
                     return execute_request(settings, db, body)
             return execute_request(settings, db, body)
+    except WeeklyBusy as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     except RegistryError as exc:
         # An unknown team or a malformed entry is the caller's mistake, not a server fault,
         # and the registry is validated before any alert is queried.

@@ -22,6 +22,7 @@ from alerts_bi_shared.ui.explain import (
 from alerts_bi_shared.ui.html import h
 
 from .assets import MOCK_CSS
+from .engine.api.service import latest_week_end
 
 EXTRA_CSS = """
 html,body{margin:0;min-height:100%;color-scheme:light}body{background:#eef1f4}
@@ -63,8 +64,11 @@ document.querySelectorAll('[data-team-selector]').forEach(select => {
 });
 function windowLabel(input) {
  const label = input.closest('form').querySelector('[data-window]');
- const end = new Date(input.value + 'Z');
- if (!label || !Number.isFinite(end.getTime())) return;
+ const end = new Date(input.value + 'T00:00:00Z');
+ const valid = Number.isFinite(end.getTime()) && end.getUTCDay() === 1;
+ input.setCustomValidity(valid ? '' : 'Choose a Monday. The window ends at 00:00 UTC.');
+ if (!label) return;
+ if (!valid) { label.textContent = 'Choose a Monday to see the analysis window.'; return; }
  const start = new Date(end.getTime() - 168 * 3600000);
  const fmt = d => d.toISOString().slice(0,16).replace('T',' ');
  label.textContent = fmt(start) + ' → ' + fmt(end) + ' UTC · 168 hours';
@@ -286,7 +290,8 @@ def dialog(
 def trigger_form(
     team_id: str, token: str, name: str = "", teams: Sequence[tuple[str, str, bool]] = ()
 ) -> str:
-    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M")
+    end = latest_week_end(datetime.now(UTC))
+    start = end - timedelta(days=7)
     team_field = f"<div><label>Team</label><p>{h(name or team_id)}</p></div>"
     if teams:
         options = "".join(
@@ -295,8 +300,8 @@ def trigger_form(
         team_field = f'<div><label for="trigger-team">Team</label><select id="trigger-team" name="team" data-team-selector>{options}</select></div>'
     content = (
         f'<input type="hidden" name="submission_key" value="{uuid4().hex}">'
-        f'{team_field}<div><label for="run-at">Window ends at · UTC</label><input id="run-at" name="run_at" type="datetime-local" value="{now}" required></div>'
-        '<div class="abi-evidence-box"><strong>Analysis window</strong><span data-window>Exactly the preceding 168 hours</span></div>'
+        f'{team_field}<div><label for="run-at">Window ends at · Monday 00:00 UTC</label><input id="run-at" name="run_at" type="date" min="1970-01-05" step="7" value="{end:%Y-%m-%d}" required aria-describedby="run-window-help"><p id="run-window-help" class="abi-small abi-muted abi-mt">Choose a Monday. The run covers the previous Monday at 00:00 UTC up to this Monday at 00:00 UTC.</p></div>'
+        f'<div class="abi-evidence-box"><strong>Analysis window</strong><span data-window>{start:%Y-%m-%d %H:%M} → {end:%Y-%m-%d %H:%M} UTC · 168 hours</span></div>'
         '<div><label for="model-mode">Model mode</label><select id="model-mode" name="llm"><option value="live">Live · configured model</option><option value="fake">Fake · deterministic test model</option><option value="off">Off · skip assessment</option></select></div>'
         '<p class="abi-small abi-muted">The completed run stays unpublished until you publish it.</p><p role="status" aria-live="polite" class="abi-small"></p>'
     )
@@ -340,13 +345,34 @@ def publication_controls(run: Mapping[str, Any], token: str) -> tuple[str, str]:
         context
         + '<div><label for="review-note">Review note · optional</label><textarea id="review-note" name="note" maxlength="4000" placeholder="Add context for this publication"></textarea></div>'
         '<label class="abi-check"><input type="checkbox" name="replace" value="1">Replace the published run for this exact week</label>'
-        '<label class="abi-check"><input type="checkbox" name="allow_gap" value="1">Allow a gap in published weeks</label>'
         '<p class="abi-small abi-muted">Publishes this 168-hour window to the reader portal. Replacing a week withdraws its previous publication.</p>'
     )
     return (
         '<button class="abi-btn abi-primary" type="button" data-dialog="publish-review">Publish review</button>',
         dialog(
             "publish-review", "Publish review", base + "/publish", token, content, "Publish review"
+        ),
+    )
+
+
+def deletion_controls(run: Mapping[str, Any], token: str) -> tuple[str, str]:
+    run_id = str(run["run_id"])
+    content = (
+        f'<div class="abi-evidence-box"><strong>{h(run.get("team_display_name") or run["team_id"])}</strong>{h(_week(run))}<p class="abi-mono">{h(run_id[:16])}</p></div>'
+        "<p>Permanently deletes this run, its results, publications, decisions and run activity. Published results also disappear from the reader portal. This cannot be undone.</p>"
+        '<p class="abi-small abi-muted">The weekly schedule may recreate a deleted week when it is due.</p>'
+        '<label class="abi-check"><input type="checkbox" name="confirm_delete" value="1" required>I understand and want to permanently delete this run</label>'
+    )
+    return (
+        '<button class="abi-btn abi-danger" type="button" data-dialog="delete-run">Delete run</button>',
+        dialog(
+            "delete-run",
+            "Delete run permanently",
+            "/runs/" + quote(run_id, safe="") + "/delete",
+            token,
+            content,
+            "Delete run permanently",
+            danger=True,
         ),
     )
 
@@ -433,6 +459,9 @@ def team_page(
     if selected:
         controls, publication_dialog = publication_controls(selected, token)
         dialogs += publication_dialog
+        delete_button, delete_dialog = deletion_controls(selected, token)
+        controls += delete_button
+        dialogs += delete_dialog
         state = publication_state(selected)
         body += (
             '<section id="selected-run" class="abi-section"><div class="abi-selected-run"><div><div class="abi-eyebrow">Selected run</div>'

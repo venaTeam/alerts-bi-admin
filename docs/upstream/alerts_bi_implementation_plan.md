@@ -2,10 +2,32 @@
 
 ## Async manual execution amendment — 2026-10-13
 
-Implement the [async run contract](async-runs.md): additive migration 009, durable admission and
+Implement the [async run contract](async-runs.md): additive migration 010, durable admission and
 idempotency, one independently supervised run-worker, shared SQL manual gate, short status reads,
 accessible completion polling and explicit restart recovery. Admin-generated run output contains
 three CSV files; authenticated HTML renders on demand. Keep synchronous POST /runs compatibility.
+## Run lifecycle amendment — 2026-10-13
+
+Implement design section 7.12's Monday-only picker and server validation on form/JSON/CLI
+entry points; default to the latest completed Monday. Remove the admin gap override while
+preserving missing-week checks and scheduler/CLI exceptions. Add authenticated CSRF-protected
+`POST /runs/{run_id}/delete` with explicit confirmation, manual/scheduler/model-review locks,
+atomic SQL run-owned cleanup and configured report cleanup. Add migration 010 permitting
+decision deletion only within a connection/run-scoped whole-run deletion allowance, with
+a checked parent foreign key preventing orphan inserts; ordinary decisions remain immutable.
+Verify published/unpublished/withdrawn/failed deletion, rollback, neighboring run preservation,
+ordinary decision protection, Monday boundaries, tampered inputs and browser workflows.
+
+Manual HTTP/API and CLI entry points must hold the existing scheduler SQL session lock
+through the entire scan/persist/report lifecycle; deletion takes the same lock. Preserve
+the historical resource name for scheduler compatibility and release on errors. Verify
+with a real CLI rerun paused before scanning, persistence and reporting on separate SQL
+connections, with assessment both disabled and fake: deletion and a competing API run
+are refused until completion, then deletion removes the stored run and reports.
+Standalone CLI `report` must acquire the same lock before run-id/team lookup and retain it
+through all file writes. Pause after SQL rendering but before writing to the configured
+output root: deletion must return 409, then succeed after reporting finishes without
+leaving recreated files. Verify both selection modes and lock release on write failure.
 
 ## Source ownership amendment — 2026-10-12
 

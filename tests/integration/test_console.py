@@ -5,17 +5,27 @@ from __future__ import annotations
 import subprocess
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Event
+from typing import Any
 
 import pytest
-from alerts_bi_shared.db.connection import connect
+from alerts_bi_operations.report.render import build_run_outputs
+from alerts_bi_operations.review.publication import publish_run, unpublish_run
+from alerts_bi_shared.db.connection import Database, connect
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import DBAPIError
 from src.app import build_admin
+from src.cli import main
 from src.config import AdminConfig, AdminSettings
+from src.engine import cli as engine_cli
 from src.engine.config import load_config
 from src.engine.db.repositories import PersistencePayload, persist_run
 from src.engine.es.client import EsClient
+from src.engine.run import outputs as report_render
+from src.engine.weekly.runner import schedule_lock
 from src.pages import finding_key
 from src.queries import decision_history
 
@@ -229,7 +239,7 @@ def test_form_and_json_trigger_share_gate(client: TestClient) -> None:
         csrf = token(client)
         data = {
             "csrf": csrf,
-            "run_at": "2026-08-25T18:00",
+            "run_at": "2026-08-31",
             "llm": "fake",
             "submission_key": "locked",
         }
@@ -251,7 +261,7 @@ def test_ui_trigger_runs_real_engine_and_stays_unpublished(client: TestClient) -
         f"/teams/{TEAM}/trigger",
         data={
             "csrf": token(client),
-            "run_at": "2026-08-25T18:00",
+            "run_at": "2026-08-31",
             "llm": "fake",
             "submission_key": "console-run",
         },
@@ -270,6 +280,8 @@ def test_ui_trigger_runs_real_engine_and_stays_unpublished(client: TestClient) -
         )
         assert run is not None and run["status"] == "completed"
         assert run["window_end"] - run["window_start"] == timedelta(hours=168)
+        assert run["window_end"] == datetime(2026, 8, 31)
+        assert run["window_start"] == datetime(2026, 8, 24)
         assert db.query_one(
             "SELECT COUNT(*) AS n FROM review_publications WHERE run_id=:id", {"id": run["run_id"]}
         ) == {"n": 0}
@@ -295,3 +307,385 @@ def test_decision_deep_link_finds_identity_beyond_first_page(client: TestClient)
     assert response.status_code == 200 and "page=2" in str(response.url)
     assert "key-050" in response.text and "Grafana alert without a rule link" in response.text
     assert "key-000" not in response.text
+
+
+@pytest.mark.parametrize(
+    "state, digit", [("unpublished", "4"), ("published", "5"), ("withdrawn", "6"), ("failed", "7")]
+)
+def test_permanent_deletion_removes_all_run_records(
+    client: TestClient, state: str, digit: str
+) -> None:
+    run_id = digit * 64
+    params = {"id": run_id}
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=run_id,
+                    team_id="payments-core",
+                    status="failed" if state == "failed" else "completed",
+                    window_start=END - timedelta(days=7),
+                    window_end=END,
+                ),
+                daily_metrics=[sample_daily(run_id=run_id)],
+                findings=[sample_finding(run_id=run_id)],
+            ),
+        )
+        if state in ("published", "withdrawn"):
+            publish_run(db, run_id, published_by="alice")
+        if state == "withdrawn":
+            unpublish_run(db, run_id, withdrawn_by="alice", reason="correction")
+        with db.transaction():
+            db.execute(
+                "INSERT INTO finding_decisions (team_id,run_id,alert_schema,application,key_field,finding_id,state,note,decided_at,decided_by) VALUES ('payments-core',:id,'v1','checkout-api','key','R1','confirmed','test decision',SYSUTCDATETIME(),'alice')",
+                params,
+            )
+            db.execute(
+                "INSERT INTO weekly_review_log (invoked_at,team_id,window_end,outcome,run_id) VALUES (SYSUTCDATETIME(),'payments-core',:end,'stored',:id)",
+                {**params, "end": END},
+            )
+            db.execute(
+                "IF NOT EXISTS (SELECT 1 FROM llm_prompt_artifacts WHERE prompt_version='delete-test') INSERT INTO llm_prompt_artifacts VALUES ('delete-test',:id,'prompt',:id,'{}')",
+                params,
+            )
+            db.execute(
+                "INSERT INTO llm_review_scopes (scope_id,scope_kind,prompt_version,model_version,settings_hash,settings_json) VALUES (:id,'run','delete-test','test',:id,'{}')",
+                params,
+            )
+            db.execute(
+                "INSERT INTO llm_review_batches (cycle_id,scope_id,batch_id,cycle_number,request_hash,request_payload,status) VALUES (:id,:id,:id,1,:id,'{}','succeeded')",
+                params,
+            )
+            db.execute(
+                "INSERT INTO llm_review_attempts (cycle_id,attempt_number,status,created_at) VALUES (:id,1,'succeeded',SYSUTCDATETIME())",
+                params,
+            )
+    # Without explicit confirmation the authenticated route must leave everything intact.
+    assert client.post(f"/runs/{run_id}/delete", data={"csrf": token(client)}).status_code == 400
+    gate = client.app.state.run_gate  # type: ignore[attr-defined]
+    assert gate.acquire()
+    try:
+        assert (
+            client.post(
+                f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+            ).status_code
+            == 409
+        )
+    finally:
+        gate.release()
+    out_root = client.app.state.settings.out_root  # type: ignore[attr-defined]
+    directory = out_root / run_id[:16]
+    directory.mkdir()
+    (directory / "scorecard.html").write_text("test report")
+    deleted = client.post(
+        f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+    )
+    assert deleted.status_code == 303 and "done=" in deleted.headers["location"]
+    assert "run_id=" not in deleted.headers["location"]
+    assert client.get(deleted.headers["location"]).status_code == 200
+    assert not directory.exists()
+    assert client.get(f"/runs/{run_id}/scorecard").status_code == 404
+    assert client.get(f"/runs/{run_id}/alert_worklist.csv").status_code == 404
+    with connect(CONFIG.sql, DB) as db:
+        for table in (
+            "runs",
+            "daily_metrics",
+            "daily_rule_counts",
+            "alert_findings",
+            "llm_batch_attempts",
+            "run_panels",
+            "review_publications",
+            "finding_decisions",
+            "weekly_review_log",
+            "portal_reviews",
+        ):
+            assert db.query_one(f"SELECT COUNT(*) AS n FROM {table} WHERE run_id=:id", params) == {
+                "n": 0
+            }
+        for table, column in (
+            ("llm_review_scopes", "scope_id"),
+            ("llm_review_batches", "scope_id"),
+            ("llm_review_attempts", "cycle_id"),
+        ):
+            assert db.query_one(
+                f"SELECT COUNT(*) AS n FROM {table} WHERE {column}=:id", params
+            ) == {"n": 0}
+        assert db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": OTHER})
+        assert db.query_one(
+            "SELECT 1 AS present FROM llm_prompt_artifacts WHERE prompt_version='delete-test'"
+        )
+
+
+def test_admin_ignores_forged_gap_override(client: TestClient) -> None:
+    run_id = "8" * 64
+    with connect(CONFIG.sql, DB) as db:
+        # The 24 August and 14 September weeks leave two unpublished weeks in between.
+        publish_run(db, RUN, published_by="alice")
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=run_id,
+                    window_start=datetime(2026, 9, 7),
+                    window_end=datetime(2026, 9, 14),
+                )
+            ),
+        )
+    try:
+        page = client.get(f"/teams/{TEAM}?run_id={run_id}")
+        assert 'name="allow_gap"' not in page.text
+        response = client.post(
+            f"/runs/{run_id}/publish", data={"csrf": token(client), "allow_gap": "1"}
+        )
+        assert response.status_code == 303 and "error=" in response.headers["location"]
+        with connect(CONFIG.sql, DB) as db:
+            assert (
+                db.query_one(
+                    "SELECT 1 AS present FROM review_publications WHERE run_id=:id", {"id": run_id}
+                )
+                is None
+            )
+    finally:
+        with connect(CONFIG.sql, DB) as db:
+            unpublish_run(db, RUN, withdrawn_by="alice", reason="test cleanup")
+
+
+def test_decisions_remain_append_only_with_existing_parent(client: TestClient) -> None:
+    with connect(CONFIG.sql, DB) as db:
+        for statement in (
+            "DELETE FROM finding_decisions WHERE run_id=:id",
+            "UPDATE finding_decisions SET note='changed' WHERE run_id=:id",
+        ):
+            with pytest.raises(DBAPIError, match="append-only"), db.transaction():
+                db.execute(statement, {"id": RUN})
+        assert db.query_one(
+            "SELECT COUNT(*) AS n FROM finding_decisions WHERE run_id=:id", {"id": RUN}
+        ) == {"n": 1}
+
+
+def test_failed_deletion_rolls_back_the_parent_and_publication(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = "9" * 64
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(db, PersistencePayload(run=sample_run(run_id=run_id, team_id="payments-core")))
+        publish_run(db, run_id, published_by="alice")
+    execute = Database.execute
+
+    def fail_final_delete(db: Database, sql: str, params: dict[str, object] | None = None) -> None:
+        if sql.startswith("DELETE FROM runs"):
+            execute(db, sql, params)
+            raise RuntimeError("injected transaction failure")
+        execute(db, sql, params)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(Database, "execute", fail_final_delete)
+        with pytest.raises(RuntimeError, match="injected transaction failure"):
+            client.post(
+                f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+            )
+    with connect(CONFIG.sql, DB) as db:
+        assert db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id})
+        assert db.query_one(
+            "SELECT 1 AS present FROM portal_reviews WHERE run_id=:id", {"id": run_id}
+        )
+    assert (
+        client.post(
+            f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+        ).status_code
+        == 303
+    )
+
+
+@pytest.mark.parametrize("mode", ["--no-llm", "--fake-llm"])
+@pytest.mark.parametrize("operation_name", ["execute_run", "persist_run", "render_run_report"])
+def test_cli_rerun_blocks_deletion_through_the_entire_lifecycle(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mode: str, operation_name: str
+) -> None:
+    """Pause the real CLI path on its own SQL sessions, before scan/store/report.
+
+    The existing row stays completed during the rerun, and model audit locks are absent
+    or already released in the latter stages. Deletion must still refuse immediately.
+    """
+    out_root = client.app.state.settings.out_root  # type: ignore[attr-defined]
+    monkeypatch.setenv("ADMIN_OUT_DIR", str(out_root))
+    arguments = ["run", "--team", TEAM, "--run-at", "2026-08-24", "--database", DB, mode]
+    assert main(arguments) == 0
+    with connect(CONFIG.sql, DB) as db:
+        row = db.query_one(
+            "SELECT TOP 1 run_id FROM runs WHERE team_id=:team AND run_at=:end ORDER BY completed_at DESC",
+            {"team": TEAM, "end": END},
+        )
+        assert row is not None
+        run_id = str(row["run_id"])
+    assert (out_root / run_id[:16] / "daily_metrics.csv").exists()
+    reached, resume = Event(), Event()
+    original = getattr(engine_cli, operation_name)
+
+    def paused_operation(*args: Any, **kwargs: Any) -> Any:
+        reached.set()
+        assert resume.wait(30), "The CLI rerun was never resumed"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(engine_cli, operation_name, paused_operation)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        rerun = pool.submit(main, arguments)
+        try:
+            assert reached.wait(30), "The CLI did not reach the paused operation"
+            with connect(CONFIG.sql, DB) as db:
+                assert db.query_one("SELECT status FROM runs WHERE run_id=:id", {"id": run_id}) == {
+                    "status": "completed"
+                }
+            csrf = token(client)
+            refused = client.post(
+                f"/runs/{run_id}/delete", data={"csrf": csrf, "confirm_delete": "1"}
+            )
+            assert refused.status_code == 409
+            assert "done=" not in refused.headers.get("location", "")
+            # The HTTP manual path must use the same SQL lock as the external CLI.
+            assert (
+                client.post(
+                    "/runs",
+                    headers={"X-CSRF-Token": csrf},
+                    json={"team": TEAM, "run_at": "2026-08-24", "llm": "off"},
+                ).status_code
+                == 409
+            )
+        finally:
+            resume.set()
+            assert rerun.result(timeout=30) == 0
+    deleted = client.post(
+        f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+    )
+    assert deleted.status_code == 303 and "done=" in deleted.headers["location"]
+    with connect(CONFIG.sql, DB) as db:
+        assert (
+            db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id}) is None
+        )
+    assert not (out_root / run_id[:16]).exists()
+
+
+@pytest.mark.parametrize("selector", ["--run-id", "--team"])
+def test_cli_report_blocks_deletion_until_files_are_written(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, selector: str
+) -> None:
+    """Pause after SQL rendering, before mkdir/write, using the configured output root."""
+    run_id = "c" * 64
+    out_root = client.app.state.settings.out_root  # type: ignore[attr-defined]
+    monkeypatch.setenv("ADMIN_OUT_DIR", str(out_root))
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(run=sample_run(run_id=run_id, run_at=datetime(2026, 9, 7))),
+        )
+    arguments = ["report", selector, run_id if selector == "--run-id" else TEAM, "--database", DB]
+    assert main(arguments) == 0
+    reached, resume = Event(), Event()
+    original = build_run_outputs
+
+    def pause_after_render(db: Database, selected_id: str) -> dict[str, str]:
+        outputs = original(db, selected_id)
+        assert selected_id == run_id
+        reached.set()
+        assert resume.wait(30), "The CLI report was never resumed"
+        return outputs
+
+    monkeypatch.setattr(report_render, "build_run_outputs", pause_after_render)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        report = pool.submit(main, arguments)
+        try:
+            assert reached.wait(30), "The CLI report did not finish reading SQL"
+            refused = client.post(
+                f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+            )
+            assert refused.status_code == 409
+            assert "done=" not in refused.headers.get("location", "")
+        finally:
+            resume.set()
+            assert report.result(timeout=30) == 0
+    assert all((out_root / run_id[:16] / name).exists() for name in report_render.CSV_FILES)
+    deleted = client.post(
+        f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+    )
+    assert deleted.status_code == 303 and "done=" in deleted.headers["location"]
+    with connect(CONFIG.sql, DB) as db:
+        assert (
+            db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id}) is None
+        )
+    assert not (out_root / run_id[:16]).exists()
+
+
+@pytest.mark.usefixtures("client")
+def test_cli_report_failure_releases_shared_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_render(*args: Any, **kwargs: Any) -> Any:
+        raise OSError("injected report write failure")
+
+    monkeypatch.setattr(engine_cli, "render_run_report", fail_render)
+    with pytest.raises(OSError, match="injected report write failure"):
+        main(["report", "--run-id", RUN, "--database", DB])
+    with schedule_lock(CONFIG, DB):
+        pass
+
+
+@pytest.mark.usefixtures("client")
+def test_cli_failure_releases_shared_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_execute(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("injected manual run failure")
+
+    monkeypatch.setattr(engine_cli, "execute_run", fail_execute)
+    with pytest.raises(RuntimeError, match="injected manual run failure"):
+        main(["run", "--team", TEAM, "--run-at", "2026-08-24", "--database", DB, "--no-llm"])
+    # A new SQL session can acquire the lifecycle lock immediately after failure.
+    with schedule_lock(CONFIG, DB):
+        pass
+
+
+def test_decisions_cannot_reference_a_deleted_parent(client: TestClient) -> None:
+    with (
+        connect(CONFIG.sql, DB) as db,
+        pytest.raises(DBAPIError, match="fk_finding_decisions_run"),
+        db.transaction(),
+    ):
+        db.execute(
+            "INSERT INTO finding_decisions (team_id,run_id,alert_schema,application,key_field,finding_id,state,note,decided_at,decided_by) VALUES ('checkout-api',:id,'v1','app','key','R1','confirmed','orphan',SYSUTCDATETIME(),'alice')",
+            {"id": "0" * 64},
+        )
+
+
+@pytest.mark.parametrize("resource", ["alerts-bi-weekly", "llm-review:"])
+def test_deletion_refuses_active_schedule_or_model_review(
+    client: TestClient, resource: str
+) -> None:
+    run_id = "b" * 64
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(db, PersistencePayload(run=sample_run(run_id=run_id)))
+        name = resource + run_id if resource.endswith(":") else resource
+        locked = db.query_one(
+            "DECLARE @result INT; EXEC @result = sys.sp_getapplock @Resource=:resource, @LockMode='Exclusive', @LockOwner='Session', @LockTimeout=0; SELECT @result AS result",
+            {"resource": name},
+        )
+        db.commit()
+        assert locked is not None and locked["result"] >= 0
+        try:
+            response = client.post(
+                f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+            )
+            assert (
+                response.status_code == 409
+                if resource == "alerts-bi-weekly"
+                else response.status_code == 303 and "error=" in response.headers["location"]
+            )
+            assert db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id})
+        finally:
+            db.execute(
+                "EXEC sys.sp_releaseapplock @Resource=:resource, @LockOwner='Session'",
+                {"resource": name},
+            )
+            db.commit()
+    assert (
+        client.post(
+            f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+        ).status_code
+        == 303
+    )

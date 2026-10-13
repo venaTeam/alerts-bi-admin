@@ -20,6 +20,7 @@ import httpx
 import pytest
 import uvicorn
 from alerts_bi_operations.report.render import OUTPUT_FILES
+from alerts_bi_shared.db.connection import connect
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from src.engine.api import build_app
@@ -32,8 +33,8 @@ pytestmark = pytest.mark.integration
 
 CONFIG = load_config()
 
-#: The mock dataset is generated against this fixed clock.
-RUN_AT = "2026-08-25T18:00:00Z"
+#: A Monday boundary inside the existing fixed-clock mock's historical data.
+RUN_AT = "2026-08-24T00:00:00Z"
 TEAM = "checkout-api"
 JSON = {"Accept": "application/json"}
 
@@ -159,14 +160,24 @@ def test_a_json_caller_gets_the_summary_and_links_instead_of_html(client: TestCl
     payload = client.post("/runs", json=run_body(), headers=JSON).json()
     assert payload["team_id"] == TEAM
     assert payload["phase"] == "phase_1"
-    assert payload["v1"] == {"rows": 875, "distinct": 5}
+    with connect(CONFIG.sql, CONFIG.sql.test_database) as db:
+        rows = db.query_one(
+            "SELECT SUM(alerts) AS n FROM daily_metrics WHERE run_id=:id AND alert_schema='v1'",
+            {"id": payload["run_id"]},
+        )
+        distinct = db.query_one(
+            "SELECT COUNT(*) AS n FROM alert_findings WHERE run_id=:id AND alert_schema='v1'",
+            {"id": payload["run_id"]},
+        )
+        assert rows is not None and distinct is not None
+        assert payload["v1"] == {"rows": rows["n"], "distinct": distinct["n"]}
     assert payload["llm_assessed"] is True
     assert payload["scorecard"] == f"/runs/{payload['run_id']}"
     assert set(payload["files"]) == set(OUTPUT_FILES)
 
 
-def test_run_at_may_be_omitted_and_defaults_to_now(client: TestClient) -> None:
-    """A production run omits it; only the fixed-clock mock needs it pinned."""
+def test_run_at_may_be_omitted_and_defaults_to_latest_monday(client: TestClient) -> None:
+    """Omitted boundaries cover the most recent completed Monday week."""
     payload = client.post("/runs", json={"team": TEAM, "llm": "off"}, headers=JSON).json()
     assert payload["team_id"] == TEAM
     assert payload["llm_assessed"] is False
@@ -264,7 +275,7 @@ def test_latest_resolves_that_team_s_most_recent_run(client: TestClient) -> None
     """
     team = "payments-core"
     newer = client.post("/runs", json=run_body(team=team, run_at=RUN_AT))
-    client.post("/runs", json=run_body(team=team, run_at="2026-08-24T18:00:00Z"))
+    client.post("/runs", json=run_body(team=team, run_at="2026-08-17T00:00:00Z"))
 
     response = client.get(f"/runs/latest?team={team}")
     assert response.status_code == 200

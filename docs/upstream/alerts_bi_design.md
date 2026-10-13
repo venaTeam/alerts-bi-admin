@@ -6,7 +6,7 @@ The product owner approved durable background manual execution, completion polli
 of generated per-run HTML. [The async run contract](async-runs.md) defines acceptance, worker
 coordination, interruption recovery, API compatibility, output storage and rollout. It supersedes
 the synchronous browser and automatic four-file writing requirements below. Migration 009 adds
-job state; SQL report data, published views, scoring and immutable migrations 001–008 are unchanged.
+job state; SQL report data, published views, scoring and immutable migrations 001–009 are unchanged.
 
 ## Complete runs retirement — 2026-10-12
 
@@ -846,12 +846,54 @@ Scheduling is otherwise unchanged from the design: the CronJob is the only trigg
 **What still needs judgment gets a web screen instead of a pod shell: the operator admin app** (`alerts-bi admin`). It is a third application, beside the reader portal and the trigger surface, for the standardization team only:
 
 * It shows every registered team, whether it is on the schedule, its latest published week and the schedule's last outcome; every run of a team with its publication state; each run's full scorecard, rendered from SQL; and a published week's findings with their decision history.
-* It lets an operator publish a run (with a note, `replace` or `allow gap`), withdraw a published week with a reason, and record a decision on a finding. Each action calls the same `src.review` functions as the command line and follows the section 7.10 rules exactly.
+* It lets an operator publish a run (with a note or `replace`), withdraw a published week with a reason, permanently delete a run, and record a decision on a finding. Publication, withdrawal and decisions use the same operations as the command line and follow section 7.10.
 * **Every action is recorded under the signed-in person's identity**, from the login proxy.
 
 **Access.** The app has no login of its own. It sits behind OpenShift's `oauth-proxy`, which signs the person in and admits only the standardization team (a SubjectAccessReview that only that group's role satisfies), and passes their name in `X-Forwarded-User`. The app trusts that header, which is safe only because nothing else can reach the app: it binds to loopback and refuses any other address, and the proxy is a sidecar sharing the pod's loopback. Every write is a POST carrying an HMAC token of the user and date under `ADMIN_SECRET`, and a browser-declared cross-site request is refused, so a page elsewhere on the network cannot act through a signed-in operator's browser. It runs with the owning SQL credential, has its own internal-only Route, and is never mounted on the portal or the trigger surface.
 
 No alerting was added: problems surface as failed CronJob runs and on the admin app's team list.
+
+**Amended 2026-10-13 (product owner): Monday windows and permanent deletion.** New manual
+runs through the admin form, JSON trigger and supported CLI cover Monday 00:00 UTC inclusive
+to the selected Monday 00:00 UTC exclusive. The form picks a date only, with a seven-day
+step anchored on a Monday. Server validation rejects other weekdays and non-midnight
+instants, including forged submissions. Omitted API/CLI boundaries use the most recent
+completed Monday week. Historical stored windows and the fixed-clock analysis oracle are
+unchanged; the engine can still read and render those runs.
+
+The admin publication dialog has no `allow gap` option, and forged values cannot override
+the server's missing-week check. Monday alignment does not prevent skipped weeks or gaps
+caused by withdrawal/deletion. CLI recovery and the scheduler's expired-week exception in
+sections 7.10–7.11 retain their existing explicit gap policy.
+
+An operator can permanently delete any stored run, published, withdrawn, unpublished or
+failed, after an explicit confirmation that identifies the team, week and run. This removes
+the parent run, metrics, findings, panels, batch records, publications, human decisions,
+schedule rows for that run, and its run-scoped model audit in one SQL transaction. This is
+an explicit exception to section 7.10's retained publication/decision history: decisions
+remain append-only while their parent run exists. Migration `009_run_deletion` permits
+decision cleanup only in the owning connection's explicit whole-run deletion scope;
+a checked parent foreign key rejects orphan inserts, and updates remain forbidden. Deletion
+uses the manual gate, scheduler lock, model-review lock and run-row lock; active work is
+refused. The authenticated actor and run id are logged without alert content.
+
+**Concurrency clarified 2026-10-13:** manual HTTP/API runs, manual CLI runs and reports, the weekly
+schedule and deletion share the database's existing `alerts-bi-weekly` SQL session lock.
+Manual runs hold it before the Elasticsearch scan through persistence and all report
+writing, including with model assessment disabled. Standalone CLI `report` holds the same
+lock before run-id/team lookup through the final file write, preventing reports from
+reappearing after deletion succeeds. The lock uses its own connection, so
+data-connection commits and model-audit lock release cannot end this protection early.
+Contending HTTP runs/deletion return 409; the CLI fails with a busy message. Both success
+and failure release the lock. Roll out updated manual CLI clients alongside the app;
+an older CLI that does not take the shared lock cannot coordinate with deletion.
+
+Generated reports in the configured manual and weekly output locations are removed after
+SQL commit; a cleanup failure is reported distinctly. Custom CLI export locations are not
+tracked and need separate cleanup. Shared prompt artifacts, verdict caches and panel parses
+remain because other runs can use them. Deleting a published run removes it from the portal
+and all its download routes. The weekly schedule may recreate a deleted due week; deletion
+does not disable enrollment. No stored run is deleted as part of installing this change.
 
 ### 7.13 LLM review quality, evaluation and durable audit
 

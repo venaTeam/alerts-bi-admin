@@ -2,8 +2,8 @@
 
 from src.db.ledger import apply_sql
 
-revision = "009_run_jobs"
-down_revision = "008_measurement_basis"
+revision = "010_run_jobs"
+down_revision = "009_run_deletion"
 branch_labels = None
 depends_on = None
 

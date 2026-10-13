@@ -28,7 +28,7 @@ from tests.helpers.sql import sample_run
 pytestmark = pytest.mark.integration
 CONFIG = load_config()
 DB = CONFIG.sql.test_database
-BODY = {"team": "checkout-api", "run_at": "2026-08-25T18:00:00Z", "llm": "fake"}
+BODY = {"team": "checkout-api", "run_at": "2026-08-24T00:00:00Z", "llm": "fake"}
 
 
 @pytest.fixture(scope="module")
@@ -149,6 +149,25 @@ def test_restart_recognizes_commit_before_job_completion(client: TestClient) -> 
     assert client.get(row["status_url"]).json()["status"] == "completed"
 
 
+def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
+    client: TestClient, settings: AdminSettings
+) -> None:
+    row = submit(client, "pending-delete").json()
+    token = client.get("/csrf").json()["token"]
+    response = client.post(
+        f"/runs/{row['run_id']}/delete", data={"csrf": token, "confirm_delete": "1"}
+    )
+    assert response.status_code == 303 and "error=" in response.headers["location"]
+    assert client.get(row["status_url"]).json()["status"] == "pending"
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root))
+    response = client.post(
+        f"/runs/{row['run_id']}/delete", data={"csrf": token, "confirm_delete": "1"}
+    )
+    assert response.status_code == 303 and "done=" in response.headers["location"]
+    assert client.get(row["status_url"]).status_code == 404
+    assert not (settings.out_root / row["run_id"][:16]).exists()
+
+
 def test_execution_failure_is_visible_and_releases_slot(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -219,7 +238,7 @@ def test_export_failure_preserves_committed_analysis_and_shows_warning(
 def test_slow_worker_keeps_status_and_navigation_responsive(
     client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    row = submit(client, "slow-worker", {**BODY, "run_at": "2026-08-25T18:03:00Z"}).json()
+    row = submit(client, "slow-worker", {**BODY, "run_at": "2026-08-17T00:00:00Z"}).json()
     entered, release = Event(), Event()
     actual = service.execute_request
 
@@ -239,7 +258,7 @@ def test_slow_worker_keeps_status_and_navigation_responsive(
             assert client.get("/teams/checkout-api").status_code == 200
             assert client.get("/").status_code == 200
             assert (
-                submit(client, "slow-worker", {**BODY, "run_at": "2026-08-25T18:03:00Z"}).json()[
+                submit(client, "slow-worker", {**BODY, "run_at": "2026-08-17T00:00:00Z"}).json()[
                     "job_id"
                 ]
                 == row["job_id"]

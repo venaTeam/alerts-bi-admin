@@ -38,7 +38,7 @@ registry_version, and preserve immutable snapshots in stored runs. Do not use --
 ## Migration job
 
 Run `alerts-bi-admin db status` first, then this job using the existing SQL_DATABASE. It must
-apply additive revision 009_run_jobs after verifying the immutable 001–008 ledger. Ledger drift
+apply additive revision 010_run_jobs after verifying the immutable 001–009 ledger. Ledger drift
 is a hard error. Never reset-test, downgrade, stamp over a problem or recreate production data.
 
 ```yaml

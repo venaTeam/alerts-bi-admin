@@ -23,3 +23,8 @@ Current producer: admin owns registry artifacts, execution adapters and the unch
 The 2026-10-13 async amendment adds migration 009 and console run-jobs routes, preserving the
 synchronous trigger baseline. outputs.json distinguishes stored CSV files from on-demand HTML;
 the operations library renderer retains its public four-file interface. See docs/async-runs.md.
+The approved 2026-10-13 lifecycle adds Monday-only manual run boundaries and the admin
+delete POST, removes the admin gap override, and appends migration 009 without modifying
+001–008. Decisions remain append-only while their parent run exists; permanent run deletion
+is the explicit whole-run exception. Portal views and shared/operations library interfaces
+are unchanged. `trigger-openapi.json` now records the approved Monday/default description.

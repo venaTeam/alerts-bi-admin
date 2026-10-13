@@ -1,6 +1,6 @@
 {
   "source_commit": "c518eeaeb5a3ecb35b5348828300454379e7d535",
-  "schema_head": "009_run_jobs",
+  "schema_head": "010_run_jobs",
   "files": {
     "001_initial_schema.sql": "7c4f43ce0aa698bcf82b1694143fe9dd5f68a35430c1a8461c7296f958dde41a",
     "002_review_portal.sql": "593539fb7f5e3b458f107b79e348ee62a5d74841a220be97e0bd01fcbae012c6",
@@ -18,8 +18,10 @@
     "versions/006_r6_episodes.py": "4ad68accfd8c04efe3a13beaea6ff49cdd4ebe11ec87dde553bc0f9902eda761",
     "versions/007_portal_daily.py": "8b6f4e0c50ef1442eab8399aeb3d2336ab296ccbd65adebeeaa0443ec3658dfb",
     "versions/008_measurement_basis.py": "c88c2e073e9a110df863bba3590311e765fd574b05256425bcf40ee110785f93",
-    "009_run_jobs.sql": "f718ebae61f00c5b5d9cc0d51f4ede025fb81e48d27147452cbc52960b81f6dd",
-    "versions/009_run_jobs.py": "35ef26af0b175b73e56f3ed7cbb3b2e4d1a77d800caf70cfa6198f7b19614f32"
+    "009_run_deletion.sql": "bf54c07e9cb9e160837b82df77fb4bbacf47468522f36de16c5e5b93d8f1214b",
+    "versions/009_run_deletion.py": "1d8d04e52839eb3ba6f40ed7b1047d14cdd7cdbbc531d035ea1ba48d02881243",
+    "010_run_jobs.sql": "f718ebae61f00c5b5d9cc0d51f4ede025fb81e48d27147452cbc52960b81f6dd",
+    "versions/010_run_jobs.py": "af389163cc798a59c2973a697af16195e2dbeb0f6a84279199f5ff45399a925c"
   },
   "amended": "2026-10-13"
 }

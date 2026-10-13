@@ -38,6 +38,8 @@ from .llm.client import LlmClient
 from .llm.fake import FakeLlmClient
 from .run.orchestrator import execute_run, select_llm_client
 from .run.outputs import render_run_report
+from .weekly.plan import is_week_boundary, latest_week_end
+from .weekly.runner import schedule_lock
 
 __all__ = ["ENGINE_COMMANDS", "add_commands", "dispatch"]
 
@@ -45,7 +47,7 @@ __all__ = ["ENGINE_COMMANDS", "add_commands", "dispatch"]
 def add_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     run = subparsers.add_parser("run", help="analyse one team, persist, and render")
     run.add_argument("--team", required=True, help="registry team_id; never defaults")
-    run.add_argument("--run-at", help="freeze run_at (ISO 8601 UTC); defaults to now")
+    run.add_argument("--run-at", help="Monday 00:00 UTC; defaults to the latest completed Monday")
     run.add_argument("--out", help="output directory; default out/<run id prefix>")
     run.add_argument("--registry", help="registry path; default config/teams.json")
     run.add_argument("--database", help="target database; default SQL_DATABASE")
@@ -136,7 +138,7 @@ def _target_database(args: argparse.Namespace, config: AppConfig) -> str:
 
 
 def _command_run(args: argparse.Namespace, config: AppConfig) -> int:
-    run_at = datetime.now(UTC)
+    run_at = latest_week_end(datetime.now(UTC))
     if args.run_at:
         try:
             parsed = datetime.fromisoformat(str(args.run_at).replace("Z", "+00:00"))
@@ -144,6 +146,9 @@ def _command_run(args: argparse.Namespace, config: AppConfig) -> int:
             sys.stderr.write(f"--run-at {args.run_at!r} is not a valid ISO 8601 instant\n")
             return 2
         run_at = parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+        if not is_week_boundary(run_at):
+            sys.stderr.write("--run-at must be a Monday at 00:00 UTC\n")
+            return 2
 
     # The deterministic fake is opt-in and explicit, so a mock run can never be mistaken
     # for a live one: it stamps its own model_version onto the run record.
@@ -155,7 +160,10 @@ def _command_run(args: argparse.Namespace, config: AppConfig) -> int:
         client, reason = select_llm_client(config, use_llm=not args.no_llm)
 
     es_client = EsClient(config.es)
-    with connect(config.sql, _target_database(args, config)) as db:
+    with (
+        schedule_lock(config, _target_database(args, config)),
+        connect(config.sql, _target_database(args, config)) as db,
+    ):
         payload, summary = execute_run(
             team_id=args.team,
             run_at=run_at,
@@ -205,7 +213,10 @@ def _command_report(args: argparse.Namespace, config: AppConfig) -> int:
         sys.stderr.write("--run-id or --team is required\n")
         return 2
 
-    with connect(config.sql, _target_database(args, config)) as db:
+    with (
+        schedule_lock(config, _target_database(args, config)),
+        connect(config.sql, _target_database(args, config)) as db,
+    ):
         run_id = args.run_id
         if not run_id:
             latest = get_latest_run(db, args.team)
