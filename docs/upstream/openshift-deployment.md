@@ -89,6 +89,7 @@ kind: Deployment
 metadata: {name: alerts-bi-admin}
 spec:
   replicas: 1
+  strategy: {type: Recreate}
   selector: {matchLabels: {app: alerts-bi-admin}}
   template:
     metadata: {labels: {app: alerts-bi-admin}}

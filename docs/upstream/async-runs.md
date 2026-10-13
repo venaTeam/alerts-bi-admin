@@ -14,6 +14,9 @@ This amendment supersedes synchronous browser triggering. The subsequent accepte
   `status_url`, `result_url` (null until completed) and a Location pointing to status.
 - Authenticated `GET /run-jobs/{job_id}` returns current durable state. Unknown jobs return 404.
   The status response never exposes configuration, submission keys or full error payloads.
+  Authenticated standardization operators can inspect any team's job; there is no per-team
+  operator ACL. The team workspace still rejects a selected job from another team.
+  The complete console HTTP schema is pinned in contracts/console-openapi.json.
 - Pending/running submissions appear above the selected analysis in the team workspace.
   Same-origin polling every three seconds updates state; it pauses while the page is hidden.
   Completion of the job selected through `job_id` opens its completed run. Other selections
@@ -38,7 +41,10 @@ and failed. Completion never publishes a review. Portal views and shared 0.1.3 a
 
 A SQL session application lock (`alerts-bi-manual-run`) serializes admission, execution and
 recovery. The execution connection owns that lock across LLM-journal and persistence commits.
-An active-slot constraint also prevents more than one pending/running job. The process-local
+An active-slot constraint also prevents more than one pending/running job. The idle worker
+checks that slot without taking execution locks, then rechecks/claims under the locks.
+Submission deliberately refuses active manual/CLI/report/weekly operations with 409; it
+does not create a queue behind them. Removing admission locks would violate this contract. The process-local
 gate remains a compatibility guard. The existing alerts-bi-weekly SQL session lock on its
 own connection protects the entire worker lifecycle from manual CLI runs, standalone reports,
 weekly scheduling and permanent deletion. Admission also refuses a busy scheduler lock.
@@ -85,3 +91,25 @@ writers do not supply the required key digest introduced by 011. Verify rapid ac
 recovery, authentication, publication separation and exports. No cluster deployment is authorized
 by this source change. Preserve the additive job audit table and exact key identities during rollback; use a
 compatible writer or forward repair. Do not downgrade or edit applied revisions 001–011.
+
+
+## Operations, monitoring and interrupted rollout
+
+Run one UI/worker pod with the Recreate strategy; the shipped YAML and canonical example
+match. Docker Compose remains the existing local mock dependency stack: developers start
+the separate worker command from the README. It does not deploy either application.
+Submission, start and terminal transitions emit run.job_submitted, run.job_started and
+run.job_finished logs with job/run identity; raw keys and model payloads are excluded.
+Whole-run deletion intentionally removes its terminal job records, as part of the approved
+permanent deletion contract, and remains audited through the existing admin.deleted event.
+
+Use [the worker incident runbook](manual-worker-runbook.md) for prolonged running age,
+lost worker processes and rollback. Per-request SQL/ES/model timeouts already exist; there
+is no global job deadline or automatic age-based cancellation. Production monitoring must
+choose an age threshold and invoke the runbook. An old job must never be marked failed
+while its SQL lock-owning worker is still running. This is operational guidance; no monitor,
+cluster restart or production SQL action has been performed by this source change.
+
+The CI integration job starts the pinned SQL Server/ES mocks, loads the fixed-clock fixture,
+and executes the actual job, migration and critical acceptance tests. Preflight and a
+zero-skip guard turn missing services or hidden fixture failures into CI failures.

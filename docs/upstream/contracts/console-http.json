@@ -37,7 +37,7 @@
     "activity"
   ],
   "run_scope": "An explicitly selected run must belong to the selected team",
-  "payload_baseline": "trigger-openapi.json",
+  "payload_baseline": "console-openapi.json",
   "schema_head": "011_run_job_keys",
   "manual_window": "Monday 00:00 UTC to the selected Monday 00:00 UTC; omitted API/CLI run_at selects the latest completed week",
   "admin_gap_override": false,

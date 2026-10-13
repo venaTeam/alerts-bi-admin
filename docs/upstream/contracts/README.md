@@ -34,3 +34,8 @@ are unchanged; the later HTML-removal amendment changes operations to 0.2.0. `tr
 Review fixes add 011_run_job_keys for collation-independent exact submission identity.
 Migration 009 remains deletion; 010 remains jobs. Recovery regenerates all three CSVs
 from committed SQL before reporting clean completion. See docs/async-runs.md for rollout.
+
+console-openapi.json is generated from the actual authenticated console and includes the
+run-jobs request body, required Idempotency-Key/CSRF headers and typed status responses.
+trigger-openapi.json remains the legacy synchronous factory baseline. The live console still
+disables public OpenAPI/docs routes; the committed artifact supports API consumers and checks.
