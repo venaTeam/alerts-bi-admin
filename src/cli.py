@@ -7,6 +7,7 @@ import getpass
 import sys
 from datetime import datetime
 
+from alerts_bi_shared.config.env import read_str
 from alerts_bi_shared.db.connection import connect
 from alerts_bi_shared.logging_setup import log, redact_error
 from alerts_bi_shared.timefmt import iso_instant
@@ -213,7 +214,8 @@ def _command_registry(args: argparse.Namespace, config: AdminConfig) -> int:
     from alerts_bi_operations.registry import RegistryError, load_registry
 
     try:
-        loaded = load_registry(args.registry) if args.registry else load_registry()
+        registry_path = args.registry or read_str("ADMIN_REGISTRY_PATH") or None
+        loaded = load_registry(registry_path) if registry_path else load_registry()
     except RegistryError as exc:
         sys.stderr.write(f"registry is invalid: {exc}\n")
         for detail in exc.details:

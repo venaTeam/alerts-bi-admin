@@ -25,17 +25,12 @@ from ..domain.normalize import AlertRecord, normalize_row
 from .client import ElasticsearchError, EsClient
 
 __all__ = [
-    "V1_INDEX",
-    "V2_INDEX",
     "ReadResult",
     "build_query",
     "read_schema",
     "read_team_alerts",
     "scan_schema",
 ]
-
-V1_INDEX = "appchi-v1"
-V2_INDEX = "appchi-v2"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,7 +103,9 @@ def scan_schema(
     publish partial results: count reconciliation happens after the last page. The PIT
     is closed even if consumption fails. No callback retains a response page here.
     """
-    index = V1_INDEX if schema == "v1" else V2_INDEX
+    if schema not in {"v1", "v2"}:
+        raise ValueError(f"unknown alert schema: {schema!r}")
+    index = client.config.v1_index if schema == "v1" else client.config.v2_index
     size = page_size if page_size is not None else client.config.page_size
     if size <= 0:
         raise ValueError("Elasticsearch page size must be positive")
@@ -141,7 +138,7 @@ def scan_schema(
                 # document is skipped or repeated across pages even when timestamps
                 # collide.
                 "sort": [{"@timestamp": "asc"}, {"_shard_doc": "asc"}],
-                "pit": {"id": pit_id, "keep_alive": "2m"},
+                "pit": {"id": pit_id, "keep_alive": client.config.pit_keep_alive},
             }
             if search_after is not None:
                 body["search_after"] = search_after

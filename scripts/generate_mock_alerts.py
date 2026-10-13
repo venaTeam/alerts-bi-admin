@@ -38,12 +38,15 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from src.engine.config import load_dotenv, load_es_config
 from src.engine.domain.severity import code_for_name
 
 from scripts._jsrandom import Random
 from scripts.acceptance_teams import acceptance_teams
 
-ES_URL = os.environ.get("ES_URL", "http://localhost:9200").rstrip("/")
+load_dotenv()
+ES_CONFIG = load_es_config()
+ES_URL = ES_CONFIG.url
 NOW = datetime(2026, 8, 25, 18, 0, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
@@ -175,7 +178,7 @@ def expand_v1(team: dict[str, Any], definition: dict[str, Any]) -> list[dict[str
 
         rows.append(
             {
-                "index": "appchi-v1",
+                "index": ES_CONFIG.v1_index,
                 "doc": {
                     "id": str(uuid.uuid4()),
                     "@timestamp": _iso(timestamp),
@@ -227,7 +230,7 @@ def expand_v2(team: dict[str, Any], definition: dict[str, Any]) -> list[dict[str
         doc = {**base, "status": status}
         rows.append(
             {
-                "index": "appchi-v2",
+                "index": ES_CONFIG.v2_index,
                 "doc": {
                     "id": str(uuid.uuid4()),
                     "@timestamp": _iso(timestamp),
@@ -280,7 +283,7 @@ def review_documents(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # case-sensitive term matching - the whole ownership model rests on that.
 _TEXT_WITH_RAW = {"type": "text", "fields": {"raw": {"type": "keyword", "ignore_above": 1024}}}
 INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
-    "appchi-v1": {
+    ES_CONFIG.v1_index: {
         "@timestamp": {"type": "date"},
         "id": {"type": "keyword"},
         "application": {"type": "keyword"},
@@ -295,7 +298,7 @@ INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
         "alert_rule_url": {"type": "keyword"},
         "provider": {"type": "keyword"},
     },
-    "appchi-v2": {
+    ES_CONFIG.v2_index: {
         "@timestamp": {"type": "date"},
         "id": {"type": "keyword"},
         "application": {"type": "keyword"},
@@ -338,7 +341,17 @@ def _request(
     return json.loads(text) if text else None
 
 
+def _validate_write_targets() -> None:
+    """Validate writer targets without restricting imports of pure fixture helpers."""
+    for index in (ES_CONFIG.v1_index, ES_CONFIG.v2_index):
+        if index.startswith(("_", "-", "+", ".")) or re.search(r'[\\/*?"<>|,#:]', index):
+            raise ValueError("mock ES_V1_INDEX and ES_V2_INDEX must be concrete index names")
+    if ES_CONFIG.v1_index == ES_CONFIG.v2_index:
+        raise ValueError("mock ES_V1_INDEX and ES_V2_INDEX must be distinct")
+
+
 def reset_indices() -> None:
+    _validate_write_targets()
     if not LOCAL_ES.match(ES_URL):
         raise SystemExit(
             f"refusing to reset indices at {ES_URL}: RESET=1 is only allowed against an "
@@ -357,6 +370,7 @@ def reset_indices() -> None:
 
 
 def bulk_load(rows: list[dict[str, Any]]) -> None:
+    _validate_write_targets()
     chunk_size = 300
     for start in range(0, len(rows), chunk_size):
         lines = []
@@ -427,7 +441,7 @@ def main() -> None:
             unattributed_v1 += 1
             rows.append(
                 {
-                    "index": "appchi-v1",
+                    "index": ES_CONFIG.v1_index,
                     "doc": {
                         "id": str(uuid.uuid4()),
                         "@timestamp": _iso(timestamp),
@@ -477,7 +491,7 @@ def main() -> None:
             unattributed_v2 += 1
             rows.append(
                 {
-                    "index": "appchi-v2",
+                    "index": ES_CONFIG.v2_index,
                     "doc": {
                         "id": str(uuid.uuid4()),
                         "@timestamp": _iso(timestamp),

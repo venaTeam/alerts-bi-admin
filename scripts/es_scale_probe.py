@@ -39,7 +39,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-ES = os.environ.get("ES_URL", "http://localhost:9200").rstrip("/")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from alerts_bi_shared.config.env import read_str
+from src.engine.config import load_dotenv, load_es_config
+
+load_dotenv()
+ES_CONFIG = load_es_config()
+ES = ES_CONFIG.url
 DAYS = int(os.environ.get("DAYS", "7"))
 AUTH = os.environ.get("ES_AUTH")
 PRECISION = 40000
@@ -303,10 +310,13 @@ def main() -> None:
 
     operators: dict[str, list[str]] = {"v1": [], "v2": []}
     if options.team:
-        registry = json.loads((REPO_ROOT / "config" / "teams.json").read_text(encoding="utf-8"))
+        registry_path = Path(
+            read_str("ADMIN_REGISTRY_PATH", str(REPO_ROOT / "config" / "teams.json"))
+        )
+        registry = json.loads(registry_path.read_text(encoding="utf-8"))
         entry = next((t for t in registry["teams"] if t["team_id"] == options.team), None)
         if entry is None:
-            print(f'team "{options.team}" is not in config/teams.json', file=sys.stderr)
+            print(f'team "{options.team}" is not in {registry_path}', file=sys.stderr)
             raise SystemExit(2)
         operators = {
             "v1": entry.get("v1_operators") or [],
@@ -314,7 +324,7 @@ def main() -> None:
         }
 
     probe(
-        "appchi-v1",
+        ES_CONFIG.v1_index,
         "object",
         operators["v1"],
         team=options.team,
@@ -323,7 +333,7 @@ def main() -> None:
         window=window,
     )
     probe(
-        "appchi-v2",
+        ES_CONFIG.v2_index,
         "component",
         operators["v2"],
         team=options.team,

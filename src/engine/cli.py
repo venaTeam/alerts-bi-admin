@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from alerts_bi_operations.report.render import render_run_report
+from alerts_bi_shared.config.env import read_str
 from alerts_bi_shared.db.connection import connect
 from alerts_bi_shared.logging_setup import log
 from alerts_bi_shared.timefmt import iso_instant
@@ -162,14 +163,18 @@ def _command_run(args: argparse.Namespace, config: AppConfig) -> int:
             es_client=es_client,
             llm_client=client,
             llm_disabled_reason=reason,
-            registry_path=args.registry,
+            registry_path=args.registry or read_str("ADMIN_REGISTRY_PATH") or None,
             db=db,
         )
 
         persist_run(db, payload)
         log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
 
-        out_dir = Path(args.out) if args.out else Path("out") / summary.run_id[:16]
+        out_dir = (
+            Path(args.out)
+            if args.out
+            else Path(read_str("ADMIN_OUT_DIR", "out")) / summary.run_id[:16]
+        )
         files = render_run_report(db, summary.run_id, out_dir)
 
     readiness = (
@@ -209,7 +214,9 @@ def _command_report(args: argparse.Namespace, config: AppConfig) -> int:
                 return 1
             run_id = str(latest["run_id"])
 
-        out_dir = Path(args.out) if args.out else Path("out") / run_id[:16]
+        out_dir = (
+            Path(args.out) if args.out else Path(read_str("ADMIN_OUT_DIR", "out")) / run_id[:16]
+        )
         files = render_run_report(db, run_id, out_dir)
 
     sys.stdout.write("\n".join(f"wrote {path}" for path in files) + "\n")
@@ -322,9 +329,11 @@ def _command_weekly(args: argparse.Namespace, config: AppConfig) -> int:
             database=_target_database(args, config),
             llm_client=client,
             llm_disabled_reason=reason,
-            registry_path=args.registry,
+            registry_path=args.registry or read_str("ADMIN_REGISTRY_PATH") or None,
             teams=args.team,
-            out_root=Path(args.out) if args.out else Path("out") / "weekly",
+            out_root=Path(args.out)
+            if args.out
+            else Path(read_str("ADMIN_OUT_DIR", "out")) / "weekly",
             dry_run=args.dry_run,
         )
     except WeeklyBusy as exc:
@@ -345,7 +354,7 @@ def _command_weekly(args: argparse.Namespace, config: AppConfig) -> int:
 def _command_weekly_status(args: argparse.Namespace, config: AppConfig) -> int:
     from .weekly.runner import enrolled_teams, next_due
 
-    teams = enrolled_teams(args.registry)
+    teams = enrolled_teams(args.registry or read_str("ADMIN_REGISTRY_PATH") or None)
     if not teams:
         sys.stdout.write("no team is enrolled for the weekly review\n")
         return 0

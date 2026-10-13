@@ -14,6 +14,9 @@ ENV_NAMES = [
     "ES_CA_CERT",
     "ES_PAGE_SIZE",
     "ES_REQUEST_TIMEOUT_MS",
+    "ES_V1_INDEX",
+    "ES_V2_INDEX",
+    "ES_PIT_KEEP_ALIVE",
     "SQL_HOST",
     "SQL_PORT",
     "SQL_USER",
@@ -61,6 +64,9 @@ def test_defaults_are_sane_without_any_environment() -> None:
     config = load_config()
     assert config.es.url == "http://localhost:9200"
     assert config.es.page_size == 1000
+    assert config.es.v1_index == "appchi-v1"
+    assert config.es.v2_index == "appchi-v2"
+    assert config.es.pit_keep_alive == "2m"
     assert config.sql.database == "alerts_bi_dev"
     assert config.sql.test_database == "alerts_bi_test"
     assert config.llm.enabled is False
@@ -70,11 +76,43 @@ def test_defaults_are_sane_without_any_environment() -> None:
 def test_environment_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ES_URL", "https://eck.internal:9200/")
     monkeypatch.setenv("ES_PAGE_SIZE", "250")
+    monkeypatch.setenv("ES_V1_INDEX", "legacy-alerts-*")
+    monkeypatch.setenv("ES_V2_INDEX", "current-alerts")
+    monkeypatch.setenv("ES_PIT_KEEP_ALIVE", "5m")
     monkeypatch.setenv("SQL_PORT", "1444")
     config = load_config()
     assert config.es.url == "https://eck.internal:9200", "a trailing slash is stripped"
     assert config.es.page_size == 250
+    assert config.es.v1_index == "legacy-alerts-*"
+    assert config.es.v2_index == "current-alerts"
+    assert config.es.pit_keep_alive == "5m"
     assert config.sql.port == 1444
+
+
+def test_index_settings_load_from_dotenv_with_environment_precedence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / ".env").write_text("ES_V1_INDEX=file-v1\nES_V2_INDEX=file-v2\n", encoding="utf-8")
+    monkeypatch.setenv("ES_V2_INDEX", "env-v2")
+    config = load_config()
+    assert (config.es.v1_index, config.es.v2_index) == ("file-v1", "env-v2")
+
+
+@pytest.mark.parametrize("name", ["ES_V1_INDEX", "ES_V2_INDEX"])
+@pytest.mark.parametrize("value", [" ", "alerts v1", "alerts\n"])
+def test_whitespace_index_settings_fail_at_load(
+    monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError, match=name):
+        load_config()
+
+
+@pytest.mark.parametrize("value", ["0m", "-1m", "forever", "5", " 2m"])
+def test_invalid_pit_lifetime_fails_at_load(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
+    monkeypatch.setenv("ES_PIT_KEEP_ALIVE", value)
+    with pytest.raises(ValueError, match="ES_PIT_KEEP_ALIVE"):
+        load_config()
 
 
 @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])

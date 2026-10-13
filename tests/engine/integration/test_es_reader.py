@@ -12,7 +12,7 @@ from alerts_bi_operations.registry import load_registry, select_team
 from alerts_bi_shared.window import build_run_window
 from src.engine.config import load_config
 from src.engine.es.client import EsClient
-from src.engine.es.reader import V1_INDEX, build_query, read_schema, read_team_alerts
+from src.engine.es.reader import build_query, read_schema, read_team_alerts
 
 pytestmark = pytest.mark.integration
 
@@ -25,7 +25,7 @@ WINDOW = build_run_window(MOCK_NOW)
 @pytest.fixture(scope="module")
 def client() -> EsClient:
     es = EsClient(CONFIG.es)
-    if not es.index_exists(V1_INDEX):
+    if not es.index_exists(CONFIG.es.v1_index):
         pytest.skip(
             "mock Elasticsearch is not reachable; run: docker compose up -d && "
             "RESET=1 poetry run python scripts/generate_mock_alerts.py"
@@ -42,6 +42,11 @@ def test_the_query_is_scoped_to_exact_operators_and_the_half_open_window() -> No
     assert filters[1]["range"]["@timestamp"]["gte"] == "2026-08-18T18:00:00.000Z"
     assert filters[1]["range"]["@timestamp"]["lt"] == "2026-08-25T18:00:00.000Z"
     assert "lte" not in filters[1]["range"]["@timestamp"]
+
+
+def test_existence_check_requires_a_wildcard_match(client: EsClient) -> None:
+    assert client.index_exists(CONFIG.es.v1_index + "*")
+    assert not client.index_exists("alerts-bi-review-4256308540-no-source-*")
 
 
 def test_reads_only_the_selected_team_operators(client: EsClient) -> None:
