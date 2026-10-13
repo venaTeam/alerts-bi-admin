@@ -31,10 +31,11 @@ from starlette.concurrency import run_in_threadpool
 from . import pages, queries, summary
 from .auth import csrf_token, identity, same_site, valid_csrf
 from .config import AdminSettings
+from .engine.api.jobs import get_job, submit_job, team_jobs
 from .engine.api.negotiation import wants_html
 from .engine.api.routers.runs import router as runs_router
 from .engine.api.schemas import HealthOut, RunRequest, TeamsOut
-from .engine.api.service import RunGate, check_health, list_teams, start_run
+from .engine.api.service import RunGate, check_health, list_teams
 from .readiness import check_schema
 
 __all__ = ["SECURITY_HEADERS", "build_admin"]
@@ -42,7 +43,7 @@ __all__ = ["SECURITY_HEADERS", "build_admin"]
 SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; form-action 'self'; "
-        "base-uri 'none'; frame-ancestors 'none'"
+        "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
     ),
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -76,7 +77,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         openapi_url=None,
     )
     api_settings = settings.api_settings()
-    gate = RunGate()
+    gate = RunGate(durable=True)
     app.state.settings = api_settings
     app.state.run_gate = gate
 
@@ -110,7 +111,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             # The compatibility JSON trigger uses the same identity, CSRF and RunGate.
             if (
                 request.method == "POST"
-                and request.url.path.rstrip("/") == "/runs"
+                and request.url.path.rstrip("/") in ("/runs", "/run-jobs")
                 and (
                     not same_site(request)
                     or not valid_csrf(
@@ -293,6 +294,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         done: Message = None,
         error: Message = None,
         run_id: RunId = None,
+        job_id: Annotated[str | None, Query(max_length=32, pattern=r"^[a-f0-9]{32}$")] = None,
         tab: Tab = "overview",
         run_page: Page = 1,
         state: StateFilter = "all",
@@ -305,6 +307,13 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         names = {team_id_: name for team_id_, name, _ in registry_teams()}
         enrollment = {t: e for t, _, e in registry_teams()}
         with database() as db:
+            jobs = team_jobs(db, team_id)
+            if job_id:
+                submitted = get_job(db, job_id)
+                if submitted["team_id"] != team_id:
+                    raise HTTPException(404, "No such submission for this team.")
+                if submitted["status"] == "completed" and not run_id:
+                    run_id = str(submitted["run_id"])
             count = db.query_one(
                 "SELECT COUNT(*) AS n FROM runs WHERE team_id=:team_id", {"team_id": team_id}
             )
@@ -391,6 +400,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 token_for(request),
                 error or done,
                 bool(error),
+                jobs=jobs,
             )
         )
 
@@ -458,7 +468,9 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 pages.team_url(team_id), "Enter a valid UTC window end and model mode.", True
             )
         try:
-            result = await run_in_threadpool(start_run, api_settings, gate, body)
+            job = await run_in_threadpool(
+                submit_job, api_settings, body, user_of(request), fields.get("submission_key", "")
+            )
         except HTTPException as exc:
             return back(pages.team_url(team_id), str(exc.detail), True)
         except Exception as exc:
@@ -473,11 +485,47 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 "The run could not finish. Check the service logs and team history before retrying.",
                 True,
             )
-        log.info("console.triggered", run_id=result.summary.run_id, operator=user_of(request))
+        log.info("console.submitted", job_id=job["job_id"], operator=user_of(request))
         return back(
-            pages.team_url(team_id, result.summary.run_id),
-            "Run completed. Review it before publishing.",
+            pages.team_url(team_id, job_id=job["job_id"]),
+            "Run accepted. You can leave this page and return later.",
         )
+
+    def job_status(row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: row[key]
+            for key in (
+                "job_id",
+                "team_id",
+                "run_id",
+                "status",
+                "submitted_at",
+                "started_at",
+                "completed_at",
+                "error_summary",
+            )
+        } | {
+            "status_url": f"/run-jobs/{row['job_id']}",
+            "result_url": pages.team_url(str(row["team_id"]), str(row["run_id"])) + "#selected-run"
+            if row["status"] == "completed"
+            else None,
+        }
+
+    @app.post("/run-jobs", status_code=202)
+    def create_job(request: Request, body: RunRequest) -> JSONResponse:
+        row = submit_job(
+            api_settings, body, user_of(request), request.headers.get("Idempotency-Key", "")
+        )
+        return JSONResponse(
+            jsonable_encoder(job_status(row)),
+            status_code=202,
+            headers={"Location": f"/run-jobs/{row['job_id']}"},
+        )
+
+    @app.get("/run-jobs/{job_id}")
+    def read_job(job_id: str) -> JSONResponse:
+        with database() as db:
+            return JSONResponse(jsonable_encoder(job_status(get_job(db, job_id))))
 
     @app.post("/runs/{run_id}/publish")
     async def publish(request: Request, run_id: str) -> Response:

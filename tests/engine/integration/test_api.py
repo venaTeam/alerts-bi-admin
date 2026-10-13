@@ -143,12 +143,16 @@ def test_a_run_returns_the_scorecard_html_for_that_run(client: TestClient) -> No
     assert len(response.headers["x-alerts-bi-run-id"]) == 64
 
 
-def test_a_run_writes_the_four_approved_files_exactly_as_the_cli_does(
+def test_a_run_writes_csvs_and_keeps_html_available_from_sql(
     client: TestClient,
 ) -> None:
     response = client.post("/runs", json=run_body())
     out_dir = Path(response.headers["x-alerts-bi-out-dir"])
-    assert sorted(p.name for p in out_dir.iterdir()) == sorted(OUTPUT_FILES)
+    assert sorted(p.name for p in out_dir.iterdir()) == sorted(
+        name for name in OUTPUT_FILES if name.endswith(".csv")
+    )
+    run_id = response.headers["x-alerts-bi-run-id"]
+    assert client.get(f"/runs/{run_id}/scorecard.html").status_code == 200
 
 
 def test_a_json_caller_gets_the_summary_and_links_instead_of_html(client: TestClient) -> None:

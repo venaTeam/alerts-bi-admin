@@ -38,7 +38,7 @@ registry_version, and preserve immutable snapshots in stored runs. Do not use --
 ## Migration job
 
 Run `alerts-bi-admin db status` first, then this job using the existing SQL_DATABASE. It must
-report the same schema head 008 and apply nothing for an already current database. Ledger drift
+apply additive revision 009_run_jobs after verifying the immutable 001–008 ledger. Ledger drift
 is a hard error. Never reset-test, downgrade, stamp over a problem or recreate production data.
 
 ```yaml
@@ -62,10 +62,10 @@ spec:
 ## Authenticated admin
 
 Preserve the existing oauth-proxy identity, authorization, cookie and TLS configuration. The
-Service targets only proxy port 8443; no Service exposes application port 8200. One worker and
-one replica are required by the process-local manual-run gate. Review the example 30-minute
-Route timeout against actual worst-case analysis duration; a timeout can leave a run completing
-in the background, so check history before retrying. Configure health probes through a trusted
+Service targets only proxy port 8443; no Service exposes application port 8200. Keep one UI worker,
+one replica and one dedicated manual worker. Browser submissions and status checks return promptly;
+analysis duration is independent of the Route timeout. The compatibility POST /runs is still
+synchronous and retains its existing timeout considerations. Configure health probes through a trusted
 authenticated path; an unauthenticated /healthz request correctly returns 401.
 
 ```yaml
@@ -105,6 +105,17 @@ spec:
             - configMapRef: {name: alerts-bi-config}
             - secretRef: {name: alerts-bi-secrets}
             - secretRef: {name: alerts-bi-admin-secrets}
+          volumeMounts:
+            - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
+            - {name: output, mountPath: /app/out}
+        - name: run-worker
+          image: ADMIN_IMAGE_DIGEST
+          command: ["alerts-bi-admin", "run-worker", "--registry", "/etc/alerts-bi/teams.json"]
+          env:
+            - {name: ADMIN_OUT_DIR, value: "/app/out"}
+          envFrom:
+            - configMapRef: {name: alerts-bi-config}
+            - secretRef: {name: alerts-bi-secrets}
           volumeMounts:
             - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
             - {name: output, mountPath: /app/out}

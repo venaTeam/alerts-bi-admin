@@ -223,19 +223,22 @@ def test_empty_team_and_failed_run_remain_navigable(client: TestClient) -> None:
 
 
 def test_form_and_json_trigger_share_gate(client: TestClient) -> None:
-    gate = client.app.state.run_gate  # type: ignore[attr-defined]
-    assert gate.acquire()
-    try:
+    from src.engine.api.jobs import execution_lock
+
+    with connect(CONFIG.sql, DB) as db, execution_lock(db):
         csrf = token(client)
-        data = {"csrf": csrf, "run_at": "2026-08-25T18:00", "llm": "fake"}
+        data = {
+            "csrf": csrf,
+            "run_at": "2026-08-25T18:00",
+            "llm": "fake",
+            "submission_key": "locked",
+        }
         form = client.post(f"/teams/{TEAM}/trigger", data=data)
         assert form.status_code == 303 and "error=" in form.headers["location"]
         api = client.post(
             "/runs", headers={"X-CSRF-Token": csrf}, json={"team": TEAM, "llm": "fake"}
         )
         assert api.status_code == 409
-    finally:
-        gate.release()
 
 
 def test_ui_trigger_runs_real_engine_and_stays_unpublished(client: TestClient) -> None:
@@ -246,11 +249,21 @@ def test_ui_trigger_runs_real_engine_and_stays_unpublished(client: TestClient) -
         pytest.skip(f"Elasticsearch unavailable: {exc}")
     result = client.post(
         f"/teams/{TEAM}/trigger",
-        data={"csrf": token(client), "run_at": "2026-08-25T18:00", "llm": "fake"},
+        data={
+            "csrf": token(client),
+            "run_at": "2026-08-25T18:00",
+            "llm": "fake",
+            "submission_key": "console-run",
+        },
     )
     assert result.status_code == 303 and "done=" in result.headers["location"], result.headers
     page = client.get(result.headers["location"])
-    assert page.status_code == 200 and "Run completed" in page.text
+    assert page.status_code == 200 and "Waiting for the worker" in page.text
+    subprocess.run(
+        [sys.executable, "-m", "src", "run-worker", "--database", DB, "--once"], check=True
+    )
+    page = client.get(result.headers["location"])
+    assert page.status_code == 200 and "Analysis running" not in page.text
     with connect(CONFIG.sql, DB) as db:
         run = db.query_one(
             "SELECT TOP 1 * FROM runs WHERE team_id=:team ORDER BY run_at DESC", {"team": TEAM}

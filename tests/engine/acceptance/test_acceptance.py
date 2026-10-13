@@ -112,9 +112,9 @@ def test_the_acceptance_scorecards_were_rendered_for_every_team(verification: An
     assert verification is not None
     for team_id in ACCEPTANCE_TEAMS:
         for name in (
-            "scorecard.html",
             "daily_metrics.csv",
             "rule_counts.csv",
             "alert_worklist.csv",
         ):
             assert (OUT_DIR / team_id / name).exists(), f"{team_id}/{name}"
+        assert not (OUT_DIR / team_id / "scorecard.html").exists()

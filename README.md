@@ -113,6 +113,25 @@ this checkout and committed lockfile. Source provenance is in `docs/engine-sourc
 
 ## Local mocks and verification
 
+Manual browser runs now return immediately after saving a SQL-backed submission. Apply
+`alerts-bi-admin db migrate` before starting the updated app, then run
+`alerts-bi-admin run-worker` in a separate terminal/process with matching ADMIN_DATABASE,
+ADMIN_REGISTRY_PATH, ADMIN_OUT_DIR, SQL, Elasticsearch and model settings. The worker does not
+require ADMIN_SECRET. In OpenShift the example adds a dedicated worker container to the admin pod.
+`run-worker --once` processes at most one job and exits. The team page polls while visible;
+you can leave and return later. Failures and worker interruptions remain visible and need a
+new submission to retry. Analysis completion never publishes a review.
+
+JSON clients use authenticated `POST /run-jobs` with X-CSRF-Token and Idempotency-Key, then
+GET the returned status_url. Existing synchronous POST /runs remains compatible and shares
+the manual SQL gate. Weekly/CLI execution retains its existing separate coordination; avoid
+overlap for the same team/window. See docs/upstream/async-runs.md for the full contract.
+
+Run/report/weekly/acceptance output directories now contain three CSV exports. Scorecard HTML
+renders from SQL at the existing authenticated routes. To clean older generated HTML, use
+`alerts-bi-admin remove-run-html --out <explicit-output-root>`; this preserves CSVs and other
+HTML files and only removes scorecard.html accompanied by all three CSV exports.
+
 The original mock generator, scripts and hand-reviewed oracle now live here. The Compose
 project defaults to `alertsbi` to reuse the existing named volumes. For an existing installation
 with another project name, set COMPOSE_PROJECT_NAME to its existing name before using Compose.

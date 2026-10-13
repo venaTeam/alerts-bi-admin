@@ -30,6 +30,14 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--dev-user", help="local development only: identity when no proxy is present"
     )
+    worker = subparsers.add_parser("run-worker", help="execute durable manual run submissions")
+    worker.add_argument("--database", help="ADMIN_DATABASE, else SQL_DATABASE")
+    worker.add_argument("--registry", help="ADMIN_REGISTRY_PATH, else the packaged registry")
+    worker.add_argument("--once", action="store_true", help="process at most one job and exit")
+    cleanup = subparsers.add_parser(
+        "remove-run-html", help="remove legacy run HTML, preserving CSVs"
+    )
+    cleanup.add_argument("--out", required=True, help="explicit existing run output root")
     publish = subparsers.add_parser(
         "publish", help="publish a completed run as its team's weekly review"
     )
@@ -273,7 +281,37 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(arguments)
     if args.command in ENGINE_COMMANDS:
         return dispatch(args)
+    if args.command == "remove-run-html":
+        from pathlib import Path
+
+        from .engine.run.outputs import remove_run_html
+
+        removed = remove_run_html(Path(args.out))
+        sys.stdout.write(
+            f"Removed {len(removed)} generated run HTML files; CSV exports preserved.\n"
+        )
+        return 0
     config = load_config()
+    if args.command == "run-worker":
+        from dataclasses import replace
+        from pathlib import Path
+
+        from alerts_bi_shared.config.env import read_str
+
+        from .engine.api.jobs import run_worker
+        from .engine.config import ApiSettings
+        from .engine.config import load_config as load_engine_config
+
+        run_worker(
+            ApiSettings(
+                replace(load_engine_config(), sql=config.sql),
+                database=args.database or read_str("ADMIN_DATABASE") or config.sql.database,
+                registry_path=args.registry or read_str("ADMIN_REGISTRY_PATH") or None,
+                out_root=Path(read_str("ADMIN_OUT_DIR", "out")),
+            ),
+            once=args.once,
+        )
+        return 0
     handlers = {
         "serve": _command_admin,
         "publish": _command_publish,

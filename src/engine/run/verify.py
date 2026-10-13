@@ -19,7 +19,6 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from alerts_bi_operations.report.render import render_run_report
 from alerts_bi_shared.db.connection import connect
 from alerts_bi_shared.timefmt import iso_instant
 
@@ -35,6 +34,7 @@ from ..es.client import EsClient
 from ..llm.fake import FakeLlmClient
 from ..llm.grouping import build_batches
 from .orchestrator import execute_run
+from .outputs import render_run_report
 
 __all__ = ["MANIFEST_PATH", "Failure", "VerificationResult", "verify_acceptance"]
 

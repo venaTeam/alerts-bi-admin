@@ -8,6 +8,7 @@ from alerts_bi_shared.db.connection import Database
 # Keep explicit columns: SELECT * would compile against an older table missing a field
 # that the renderer subsequently expects in its result. TOP 0 never fetches stored data.
 REQUIRED_COLUMNS: dict[str, str] = {
+    "run_jobs": "job_id, team_id, run_at, llm_mode, run_id, status, active_slot, submitted_at, started_at, completed_at, error_summary",
     "runs": (
         "run_id, run_at, team_id, team_display_name, window_start, window_end, "
         "registry_version, registry_sha256, registry_entry_snapshot, ruleset_version, "

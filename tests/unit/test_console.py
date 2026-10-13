@@ -31,6 +31,7 @@ def client() -> TestClient:
         "/teams/checkout-api",
         "/runs/id",
         "/runs/id/findings",
+        "/run-jobs/id",
     ],
 )
 def test_every_read_requires_identity(client: TestClient, path: str) -> None:
@@ -43,6 +44,7 @@ def test_every_read_requires_identity(client: TestClient, path: str) -> None:
     "path",
     [
         "/runs",
+        "/run-jobs",
         "/teams/checkout-api/trigger",
         "/runs/id/publish",
         "/runs/id/withdraw",

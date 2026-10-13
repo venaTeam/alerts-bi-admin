@@ -14,8 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from alerts_bi_operations.registry import RegistryError, load_registry
-from alerts_bi_operations.report.render import build_run_outputs, render_run_report
-from alerts_bi_shared.db.connection import connect
+from alerts_bi_operations.report.render import build_run_outputs
+from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.logging_setup import log, redact_error
 from fastapi import HTTPException, status
 
@@ -24,7 +24,9 @@ from ..db.repositories import get_latest_run, persist_run
 from ..es.client import EsClient
 from ..llm.client import LlmClient
 from ..llm.fake import FakeLlmClient
+from ..llm.openai_client import OpenAiLlmClient
 from ..run.orchestrator import RunSummary, execute_run, select_llm_client
+from ..run.outputs import render_run_report
 from .schemas import CheckOut, LlmMode, RunRequest, TeamOut
 
 __all__ = ["RunGate", "RunResult", "check_health", "list_teams", "resolve_outputs", "start_run"]
@@ -42,8 +44,9 @@ class RunGate:
     :mod:`alerts_bi_admin.engine.config.api`.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, durable: bool = False) -> None:
         self._lock = threading.Lock()
+        self.durable = durable
 
     def acquire(self) -> bool:
         return self._lock.acquire(blocking=False)
@@ -107,12 +110,44 @@ def select_client(config: AppConfig, mode: LlmMode) -> tuple[LlmClient | None, s
     return select_llm_client(config, use_llm=mode == "live")
 
 
-def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResult:
-    """Execute one run, persist it, write its files and render its outputs."""
+def close_client(client: LlmClient | None) -> None:
+    if isinstance(client, OpenAiLlmClient):
+        client.client.close()
+
+
+def execute_request(
+    settings: ApiSettings, db: Database, body: RunRequest, *, expected_run_id: str | None = None
+) -> RunResult:
+    """Shared synchronous pipeline on the caller's SQL session."""
     run_at = body.run_at or datetime.now(UTC)
     if run_at.tzinfo is None:
         run_at = run_at.replace(tzinfo=UTC)
     client, reason = select_client(settings.config, body.llm)
+    es_client = EsClient(settings.config.es)
+    try:
+        payload, summary = execute_run(
+            team_id=body.team,
+            run_at=run_at,
+            config=settings.config,
+            es_client=es_client,
+            llm_client=client,
+            llm_disabled_reason=reason,
+            registry_path=settings.registry_path,
+            db=db,
+            expected_run_id=expected_run_id,
+        )
+        persist_run(db, payload)
+        log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
+        out_dir = settings.out_root / summary.run_id[:16]
+        render_run_report(db, summary.run_id, out_dir)
+        return RunResult(summary, build_run_outputs(db, summary.run_id), out_dir)
+    finally:
+        es_client.close()
+        close_client(client)
+
+
+def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResult:
+    """Compatibility API: retain completed-result responses under the shared manual lock."""
 
     if not gate.acquire():
         raise HTTPException(
@@ -121,26 +156,14 @@ def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResu
             "the same rows",
         )
     try:
-        es_client = EsClient(settings.config.es)
         with connect(settings.config.sql, settings.target_database) as db:
-            payload, summary = execute_run(
-                team_id=body.team,
-                run_at=run_at,
-                config=settings.config,
-                es_client=es_client,
-                llm_client=client,
-                llm_disabled_reason=reason,
-                registry_path=settings.registry_path,
-                db=db,
-            )
-            persist_run(db, payload)
-            log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
+            if gate.durable:
+                from .jobs import execution_lock, refuse_active_job
 
-            # The file contract is the same whether a run is started here or from the
-            # command line: the four approved files, written once, under out/.
-            out_dir = settings.out_root / summary.run_id[:16]
-            render_run_report(db, summary.run_id, out_dir)
-            return RunResult(summary, build_run_outputs(db, summary.run_id), out_dir)
+                with execution_lock(db):
+                    refuse_active_job(db)
+                    return execute_request(settings, db, body)
+            return execute_request(settings, db, body)
     except RegistryError as exc:
         # An unknown team or a malformed entry is the caller's mistake, not a server fault,
         # and the registry is validated before any alert is queried.

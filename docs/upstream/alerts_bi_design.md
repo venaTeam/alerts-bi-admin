@@ -1,5 +1,13 @@
 # Alerts BI — Design Document
 
+## Asynchronous manual runs — 2026-10-13
+
+The product owner approved durable background manual execution, completion polling and removal
+of generated per-run HTML. [The async run contract](async-runs.md) defines acceptance, worker
+coordination, interruption recovery, API compatibility, output storage and rollout. It supersedes
+the synchronous browser and automatic four-file writing requirements below. Migration 009 adds
+job state; SQL report data, published views, scoring and immutable migrations 001–008 are unchanged.
+
 ## Complete runs retirement — 2026-10-12
 
 The product owner requested complete source and service consolidation into `alerts-bi-admin`.
@@ -1151,3 +1159,24 @@ when the reader clicks outside the open dropdown. Opening either selector closes
 other; Escape also dismisses it. Interacting with application checkboxes keeps that
 dropdown open until Apply or dismissal. Use native automatic HTML popovers so the portal
 continues to work without scripts and retains its existing CSP and GET-only forms.
+
+**Application selector usability, requested 2026-10-13:** add a case-insensitive search
+within the dropdown. Search only hides nonmatching options; checked values outside the
+search still apply. Show an empty-search message when nothing matches. Cancel dismisses
+the dropdown and discards pending edits without navigation; outside-click and Escape
+dismissal also discard edits. Applying an unchanged all-applications view retains
+**All applications** and its unfiltered URL, including after temporary checkbox edits
+are undone. An explicitly chosen subset remains explicit, even if it contains every
+currently available application. Empty selections and unknown values retain their meanings.
+
+Show the first three selected-application chips. When more are selected, use an accessible
+**Show more** / **Show less** disclosure for the rest; expanding it never navigates or changes
+the selection. Preserve individual chip removal and **Show all**.
+
+This request permits one local external script for the application selector, superseding
+the script-free constraint only for these interactions. Allow same-origin scripts in CSP;
+continue to forbid inline scripts, inline event handlers, eval, third-party scripts and
+inline styles. GET-only forms, publication isolation and all SQL contracts remain unchanged.
+Without scripting, the GET selection form, native Cancel dismissal and chip disclosure
+remain usable; live search, discarding pending edits and unchanged-all submission are
+progressive enhancements. Search Enter must not accidentally apply pending selections.

@@ -1,5 +1,12 @@
 # Alerts BI — Implementation Blueprint
 
+## Async manual execution amendment — 2026-10-13
+
+Implement the [async run contract](async-runs.md): additive migration 009, durable admission and
+idempotency, one independently supervised run-worker, shared SQL manual gate, short status reads,
+accessible completion polling and explicit restart recovery. Admin-generated run output contains
+three CSV files; authenticated HTML renders on demand. Keep synchronous POST /runs compatibility.
+
 ## Source ownership amendment — 2026-10-12
 
 Admin owns execution, migrations, weekly jobs, registry and library builds under `alerts_bi_admin.engine`; commands use `alerts-bi-admin`. The previous runs ownership and runtime-wheel references below are historical. Product behavior, wire payloads, SQL contracts and outputs are unchanged. See [retirement and cutover](runs-retirement.md).
@@ -317,7 +324,7 @@ Build the interactive frontend first, using the persisted run data and pipeline 
 
 - Migration `002_review_portal`: `review_publications`, the append-only `finding_decisions`, the four `portal_*` views and the `alerts_bi_reader` role.
 - `src.review`: publication rules (no overlap; a gap needs `--allow-gap`; `--replace` withdraws rather than deletes) and the decision record. Operator CLI only.
-- `src.portal`: a separate FastAPI application with GET routes only, a client-network allowlist, a script-free Content-Security-Policy, and the same `SQL_*` connection and database as the pipeline. It queries only the `portal_*` views and does not audit the login's permissions at startup.
+- `src.portal`: a separate FastAPI application with GET routes only, a client-network allowlist, and the same `SQL_*` connection and database as the pipeline. CSP permits the local external application-selector script (2026-10-13 usability amendment), while forbidding inline scripts/styles, eval and third-party scripts. It queries only the `portal_*` views and does not audit the login's permissions at startup.
 - `persist_run` refuses to replace a run that is currently published.
 - Tests: publication rules, shared SQL configuration, GET-only access, SQL pagination, alert-detail accuracy, earlier-row evidence against the latest firing, advisory and readiness labels, decision history, and portal totals against the stored metrics and CSV exports.
 

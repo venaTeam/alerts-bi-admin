@@ -34,7 +34,7 @@ def test_healthy_schema_checks_all_operator_tables_without_fetching_rows(
         response = client.get("/healthz")
     assert response.status_code == 200 and response.json()["ok"] is True
     statements = [call.args[0] for call in db.query.call_args_list]
-    assert len(statements) == 9
+    assert len(statements) == 10
     assert all(statement.startswith("SELECT TOP 0 ") for statement in statements)
     assert {statement.rsplit(" FROM ", 1)[1] for statement in statements} == {
         f"[{table}]" for table in REQUIRED_COLUMNS

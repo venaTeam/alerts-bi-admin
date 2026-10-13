@@ -1,5 +1,13 @@
 # Alerts BI — Runtime Flow
 
+## Async manual execution amendment — 2026-10-13
+
+Browser triggers persist a durable job and return immediately. A dedicated admin run-worker
+executes the same pipeline independently of the HTTP request; the team workspace polls job status
+and displays the completed result. See [async-runs.md](async-runs.md) for failure/recovery semantics.
+Admin execution/report commands write three CSVs; scorecard HTML renders on demand from SQL.
+The pipeline steps below retain their analysis, persistence and publication meanings.
+
 ## Source ownership amendment — 2026-10-12
 
 Admin owns execution, migrations, weekly jobs, registry and library builds under `alerts_bi_admin.engine`; commands use `alerts-bi-admin`. The previous runs ownership and runtime-wheel references below are historical. Product behavior, wire payloads, SQL contracts and outputs are unchanged. See [retirement and cutover](runs-retirement.md).

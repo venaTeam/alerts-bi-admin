@@ -76,5 +76,14 @@
       "open_since"
     ]
   },
-  "semantics": "../docs/outputs.md"
+  "semantics": "../docs/outputs.md",
+  "stored_files": [
+    "daily_metrics.csv",
+    "rule_counts.csv",
+    "alert_worklist.csv"
+  ],
+  "on_demand": [
+    "scorecard.html"
+  ],
+  "legacy_operations_renderer": "Public explicit renderer retains all four files; admin command output storage follows stored_files"
 }

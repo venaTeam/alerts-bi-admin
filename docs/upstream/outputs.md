@@ -10,8 +10,10 @@ The accepted consolidation in `alerts_bi_design.md` supersedes the separate trig
 
 **Last updated:** 2026-10-01
 
-A run writes exactly four files and no others: `scorecard.html`, `daily_metrics.csv`,
-`rule_counts.csv`, `alert_worklist.csv`. This document says what is in each of them, column
+Admin writes three CSV files: `daily_metrics.csv`, `rule_counts.csv`, `alert_worklist.csv`.
+The `scorecard.html` representation is rendered on demand from SQL instead of stored per run
+(accepted 2026-10-13; [async run contract](async-runs.md)). All four remain addressable through
+the authenticated output API. This document says what is in each representation, column
 by column and section by section.
 
 It is a reference, not a rationale. *Why* each metric is defined the way it is lives in
@@ -256,6 +258,11 @@ Refusals: `400` unknown team, `409` a run is already in progress, `404` unknown 
 `422` a malformed request body.
 
 ---
+
+The asynchronous operator API (`POST /run-jobs`, `GET /run-jobs/{job_id}`) returns durable
+submission state separately from completed report data. Its status/response fields, idempotency
+and error semantics are defined in [async-runs.md](async-runs.md). Existing synchronous
+`POST /runs` and the four output routes retain their wire meanings.
 
 ## 8. Severity
 

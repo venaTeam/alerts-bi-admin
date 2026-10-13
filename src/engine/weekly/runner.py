@@ -32,7 +32,6 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from alerts_bi_operations.registry import TeamEntry, load_registry
-from alerts_bi_operations.report.render import render_run_report
 from alerts_bi_operations.review.publication import publish_run
 from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.logging_setup import log, redact_error
@@ -42,6 +41,7 @@ from ..db.repositories import persist_run
 from ..es.client import EsClient
 from ..llm.client import LlmClient
 from ..run.orchestrator import execute_run
+from ..run.outputs import render_run_report
 from .plan import WEEK, plan_weeks
 
 __all__ = [

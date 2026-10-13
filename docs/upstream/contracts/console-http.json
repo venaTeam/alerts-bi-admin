@@ -1,5 +1,5 @@
 {
-  "approved": "2026-10-08",
+  "approved": "2026-10-13",
   "owner": "alerts-bi-admin",
   "entrypoint": "alerts-bi-admin serve",
   "authentication": "Loopback-only application behind trusted operator identity proxy; explicit --dev-user for local development only",
@@ -20,14 +20,16 @@
     "/runs/{run_id}/scorecard",
     "/runs/{run_id}",
     "/runs/{run_id}/{name}",
-    "/healthz"
+    "/healthz",
+    "/run-jobs/{job_id}"
   ],
   "write_routes": [
     "/teams/{team_id}/trigger",
     "/runs",
     "/runs/{run_id}/publish",
     "/runs/{run_id}/withdraw",
-    "/runs/{run_id}/decide"
+    "/runs/{run_id}/decide",
+    "/run-jobs"
   ],
   "team_tabs": [
     "overview",
@@ -37,12 +39,36 @@
   ],
   "run_scope": "An explicitly selected run must belong to the selected team",
   "payload_baseline": "trigger-openapi.json",
-  "schema_head": "008_measurement_basis",
-  "deployment": "One replica, one application worker; login proxy is the only service port",
+  "schema_head": "009_run_jobs",
+  "deployment": "One UI replica/application worker, one dedicated manual run-worker; login proxy is the only service port",
   "workspace_navigation": [
     "teams",
     "schedule",
     "decisions"
   ],
-  "execution_runtime": "Maintained alerts_bi_admin.engine source in the admin distribution; no runs package or listener"
+  "execution_runtime": "Maintained alerts_bi_admin.engine source in the admin distribution; no runs package or listener",
+  "async_contract": "../docs/async-runs.md",
+  "async_submission": {
+    "request": "Existing RunRequest; Idempotency-Key header required",
+    "response_status": 202,
+    "states": [
+      "pending",
+      "running",
+      "completed",
+      "failed"
+    ],
+    "response_fields": [
+      "job_id",
+      "team_id",
+      "run_id",
+      "status",
+      "submitted_at",
+      "started_at",
+      "completed_at",
+      "error_summary",
+      "status_url",
+      "result_url"
+    ],
+    "concurrency": "One active manual job; SQL session lock and active slot constraint; busy returns 409"
+  }
 }
