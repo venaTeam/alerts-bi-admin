@@ -210,6 +210,51 @@ def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
     assert not (settings.out_root / row["run_id"][:16]).exists()
 
 
+@pytest.mark.parametrize("state", ["pending", "running"])
+@pytest.mark.parametrize("command", ["run", "weekly", "verify-acceptance", "report"])
+def test_orphan_blocks_installed_writers_until_recovery(
+    client: TestClient, settings: AdminSettings, command: str, state: str
+) -> None:
+    row = submit(client, "orphan-before-persist-" + command).json()
+    # The worker claimed the job, then died without committing analysis. Its SQL
+    # locks are gone, but the durable active slot must still reserve the result.
+    if state == "running":
+        with connect(CONFIG.sql, DB) as db:
+            db.execute(
+                "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
+                {"id": row["job_id"], "at": datetime.now(UTC).replace(tzinfo=None)},
+            )
+            db.commit()
+    arguments = [sys.executable, "-m", "alerts_bi_admin", command, "--database", DB]
+    if command == "run":
+        arguments += ["--team", BODY["team"], "--run-at", BODY["run_at"], "--fake-llm"]
+    elif command == "weekly":
+        arguments += ["--as-of", "2026-08-25T18:00:00Z", "--fake-llm"]
+    elif command == "report":
+        arguments += ["--run-id", row["run_id"]]
+    arguments += ["--out", str(settings.out_root / command)]
+    refused = subprocess.run(arguments, capture_output=True, text=True, timeout=180)
+    assert refused.returncode != 0, refused.stdout
+    assert "manual job" in refused.stderr, refused.stderr
+    with connect(CONFIG.sql, DB) as db:
+        assert db.query_one("SELECT run_id FROM runs") is None
+        assert db.query_one("SELECT log_id FROM weekly_review_log") is None
+    api = ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
+    assert jobs.work_once(api) is (state == "pending")
+    status = client.get(row["status_url"]).json()
+    if state == "pending":
+        assert status["status"] == "completed" and status["error_summary"] is None
+    else:
+        assert status["status"] == "failed" and "interrupted" in status["error_summary"]
+    if command == "run" and state == "running":
+        # Reconciliation releases both the durable reservation and SQL locks.
+        retried = subprocess.run(arguments, capture_output=True, text=True, timeout=180)
+        assert retried.returncode == 0, retried.stderr
+        with connect(CONFIG.sql, DB) as db:
+            assert db.query_one("SELECT run_id FROM runs") == {"run_id": row["run_id"]}
+        assert client.get(row["status_url"]).json()["status"] == "failed"
+
+
 def test_execution_failure_is_visible_and_releases_slot(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

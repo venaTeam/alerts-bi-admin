@@ -48,6 +48,13 @@ does not create a queue behind them. Removing admission locks would violate this
 gate remains a compatibility guard. The existing alerts-bi-weekly SQL session lock on its
 own connection protects the entire worker lifecycle from manual CLI runs, standalone reports,
 weekly scheduling and permanent deletion. Admission also refuses a busy scheduler lock.
+The durable pending/running slot reserves execution even after a worker's SQL sessions
+close: CLI runs, weekly runs, reports and acceptance verification check the slot while
+holding the shared lock and refuse until the worker completes or reconciles it. The
+verification command holds that lock through all persistence and CSV writes. Job
+admission and worker recovery bypass the slot check to recheck/claim/reconcile under
+their existing locks; deletion retains its own transactional refusal and browser message.
+All run-writing entry points must use the updated implementation before enabling jobs.
 
 Run time/window, registry hash and deterministic run identity are captured on acceptance.
 The worker refuses changed registry/model/version inputs before Elasticsearch queries rather
@@ -57,7 +64,9 @@ reusing a key with different options returns 409. A new exact key explicitly req
 or trailing spaces. Lookup and uniqueness both use the binary key digest.
 
 After the previous SQL session releases its lock, a replacement worker reconciles running
-jobs. A completed run counts only when its started_at belongs to this attempt, not an older
+jobs. Other run writers remain refused while that durable reservation exists, so they
+cannot replace the deterministic run ID between a worker's exit and reconciliation.
+A completed run counts only when its started_at belongs to this attempt, not an older
 run with the same deterministic ID. A committed result has all three CSV exports regenerated from SQL under the existing
 execution locks before it becomes completed. If export recovery fails, completion carries
 the same visible export warning as a live CSV-write failure. Otherwise an uncommitted job

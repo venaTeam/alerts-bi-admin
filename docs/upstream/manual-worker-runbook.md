@@ -36,7 +36,11 @@ three model attempts per batch, so these are not a whole-job deadline or heartbe
 3. Verify the old SQL session released alerts-bi-manual-run and alerts-bi-weekly. If SQL still
    holds the session after process termination, ask the database operator to investigate and
    terminate the confirmed abandoned session; do not kill unrelated database sessions.
-4. The replacement worker reconciles running jobs only after acquiring those locks. A result
+4. The durable pending/running slot continues to refuse CLI/weekly runs, reports and
+   acceptance verification after those sessions close. Do not clear it to run another
+   writer; let the compatible worker reconcile first. All run-writing entry points must
+   use the updated version. The replacement worker reconciles running jobs only after
+   acquiring those locks. A result
    committed by this attempt has all CSVs regenerated and becomes completed. CSV regeneration
    failure remains completed with a visible export warning. An uncommitted attempt becomes
    failed with an interruption message. Pending work proceeds normally.

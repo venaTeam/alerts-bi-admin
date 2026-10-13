@@ -618,7 +618,9 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             if not gate.acquire():
                 raise HTTPException(409, "A run is active. Try deleting after it finishes.")
             try:
-                with schedule_lock(api_settings.config, settings.database):
+                # delete_run checks the active slot inside its own transaction;
+                # retain its browser refusal message while holding the shared lock.
+                with schedule_lock(api_settings.config, settings.database, allow_manual_job=True):
                     with database() as db:
                         run = run_row(db, run_id)
                         try:

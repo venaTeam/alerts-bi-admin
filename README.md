@@ -143,6 +143,10 @@ health endpoint requires the job-key digest column and migration 011 ledger entr
 010-only schema returns 503 until upgraded. Migration 011 backfills
 existing submission digests without editing 001–010. Older writers cannot insert the new
 required digest. Keys differing only in case or trailing spaces request distinct attempts.
+Pending/running jobs retain their execution reservation after worker exit. CLI/weekly
+runs, reports and acceptance verification refuse until the worker completes or reconciles
+the job; use the updated image for every run writer. The verification command also holds
+the shared SQL lock through persistence and exports.
 `run-worker --once` processes at most one job and exits. The team page polls while visible;
 you can leave and return later. Failures and worker interruptions remain visible and need a
 new submission to retry. Analysis completion never publishes a review.

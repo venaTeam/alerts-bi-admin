@@ -18,6 +18,7 @@ from src.app import build_admin
 from src.config import AdminConfig, AdminSettings
 from src.engine.config import load_config
 from src.engine.db import migrate as migrations
+from src.engine.weekly.runner import schedule_lock
 
 pytestmark = pytest.mark.integration
 CONFIG = load_config()
@@ -110,3 +111,27 @@ def test_init_command_fails_when_sql_is_unavailable(tmp_path: Path) -> None:
         )
     assert result.returncode != 0
     assert "database is up to date" not in result.stdout
+
+
+def test_execution_lock_supports_schema_before_durable_jobs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def before_jobs(sql: object, database: str) -> tuple[list[str], list[str]]:
+        command.upgrade(migrations.alembic_config(CONFIG.sql, database), "009_run_deletion")
+        return [], []
+
+    with monkeypatch.context() as patch:
+        patch.setattr(migrations, "migrate", before_jobs)
+        migrations.reset_test_database(CONFIG.sql, DB)
+    try:
+        with schedule_lock(CONFIG, DB), connect(CONFIG.sql, DB) as db:
+            assert db.query_one("SELECT OBJECT_ID('run_jobs', 'U') AS table_id") == {
+                "table_id": None
+            }
+            assert migrations.current_revision(db) == "009_run_deletion"
+        # A released lock can be acquired again; the new slot query isn't required
+        # by historical schemas with no durable manual-job feature.
+        with schedule_lock(CONFIG, DB):
+            pass
+    finally:
+        migrations.migrate(CONFIG.sql, DB)

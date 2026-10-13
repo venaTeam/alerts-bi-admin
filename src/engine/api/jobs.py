@@ -36,7 +36,9 @@ def execution_lock(db: Database, settings: ApiSettings | None = None) -> Iterato
     # lifecycle from CLI/report/deletion while the data session commits model audit.
     try:
         with (
-            schedule_lock(settings.config, settings.target_database) if settings else nullcontext()
+            schedule_lock(settings.config, settings.target_database, allow_manual_job=True)
+            if settings
+            else nullcontext()
         ):
             row = db.query_one(
                 "SET NOCOUNT ON; DECLARE @result INT; "
