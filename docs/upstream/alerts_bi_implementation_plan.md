@@ -1,5 +1,17 @@
 # Alerts BI — Implementation Blueprint
 
+## Run lifecycle amendment — 2026-10-13
+
+Implement design section 7.12's Monday-only picker and server validation on form/JSON/CLI
+entry points; default to the latest completed Monday. Remove the admin gap override while
+preserving missing-week checks and scheduler/CLI exceptions. Add authenticated CSRF-protected
+`POST /runs/{run_id}/delete` with explicit confirmation, manual/scheduler/model-review locks,
+atomic SQL run-owned cleanup and configured report cleanup. Add migration 009 permitting
+decision deletion only within a connection/run-scoped whole-run deletion allowance, with
+a checked parent foreign key preventing orphan inserts; ordinary decisions remain immutable.
+Verify published/unpublished/withdrawn/failed deletion, rollback, neighboring run preservation,
+ordinary decision protection, Monday boundaries, tampered inputs and browser workflows.
+
 ## Source ownership amendment — 2026-10-12
 
 Admin owns execution, migrations, weekly jobs, registry and library builds under `alerts_bi_admin.engine`; commands use `alerts-bi-admin`. The previous runs ownership and runtime-wheel references below are historical. Product behavior, wire payloads, SQL contracts and outputs are unchanged. See [retirement and cutover](runs-retirement.md).
@@ -317,7 +329,7 @@ Build the interactive frontend first, using the persisted run data and pipeline 
 
 - Migration `002_review_portal`: `review_publications`, the append-only `finding_decisions`, the four `portal_*` views and the `alerts_bi_reader` role.
 - `src.review`: publication rules (no overlap; a gap needs `--allow-gap`; `--replace` withdraws rather than deletes) and the decision record. Operator CLI only.
-- `src.portal`: a separate FastAPI application with GET routes only, a client-network allowlist, a script-free Content-Security-Policy, and the same `SQL_*` connection and database as the pipeline. It queries only the `portal_*` views and does not audit the login's permissions at startup.
+- `src.portal`: a separate FastAPI application with GET routes only, a client-network allowlist, and the same `SQL_*` connection and database as the pipeline. CSP permits the local external application-selector script (2026-10-13 usability amendment), while forbidding inline scripts/styles, eval and third-party scripts. It queries only the `portal_*` views and does not audit the login's permissions at startup.
 - `persist_run` refuses to replace a run that is currently published.
 - Tests: publication rules, shared SQL configuration, GET-only access, SQL pagination, alert-detail accuracy, earlier-row evidence against the latest firing, advisory and readiness labels, decision history, and portal totals against the stored metrics and CSV exports.
 

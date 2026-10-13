@@ -319,7 +319,7 @@
               }
             ],
             "title": "Run At",
-            "description": "freeze run_at (ISO 8601 UTC); defaults to now"
+            "description": "Monday 00:00 UTC window end; defaults to the latest completed Monday"
           },
           "llm": {
             "type": "string",

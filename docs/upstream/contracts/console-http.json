@@ -1,5 +1,5 @@
 {
-  "approved": "2026-10-08",
+  "approved": "2026-10-13",
   "owner": "alerts-bi-admin",
   "entrypoint": "alerts-bi-admin serve",
   "authentication": "Loopback-only application behind trusted operator identity proxy; explicit --dev-user for local development only",
@@ -27,6 +27,7 @@
     "/runs",
     "/runs/{run_id}/publish",
     "/runs/{run_id}/withdraw",
+    "/runs/{run_id}/delete",
     "/runs/{run_id}/decide"
   ],
   "team_tabs": [
@@ -37,7 +38,10 @@
   ],
   "run_scope": "An explicitly selected run must belong to the selected team",
   "payload_baseline": "trigger-openapi.json",
-  "schema_head": "008_measurement_basis",
+  "schema_head": "009_run_deletion",
+  "manual_window": "Monday 00:00 UTC to the selected Monday 00:00 UTC; omitted API/CLI run_at selects the latest completed week",
+  "admin_gap_override": false,
+  "deletion": "Actor-bound same-site CSRF and confirm_delete=1; removes the run and run-owned records; shared caches remain",
   "deployment": "One replica, one application worker; login proxy is the only service port",
   "workspace_navigation": [
     "teams",

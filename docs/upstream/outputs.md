@@ -219,12 +219,22 @@ and JSON writes require a same-site CSRF token from authenticated `GET /csrf`.
 `POST /runs` takes a JSON body:
 
 ```json
-{ "team": "checkout-api", "run_at": "2026-08-25T18:00:00Z", "llm": "fake" }
+{ "team": "checkout-api", "run_at": "2026-08-24T00:00:00Z", "llm": "fake" }
 ```
 
-`team` is required and never defaults. `run_at` defaults to now — pin it only against the
-fixed-clock mock. `llm` is `live` (the default), `fake` or `off`, mirroring the CLI's
+`team` is required and never defaults. **Amended 2026-10-13:** `run_at` is a Monday
+00:00 UTC boundary and defaults to the latest completed Monday; other instants are refused.
+The admin form chooses the Monday date only, covering exactly the preceding Monday week.
+The summary below illustrates the historical fixed-clock mock's output shape; its numbers
+are not expected totals for the newly selected Monday window.
+`llm` is `live` (the default), `fake` or `off`, mirroring the CLI's
 default, `--fake-llm` and `--no-llm`.
+
+Admin's `POST /runs/{run_id}/delete` requires same-site actor-bound form CSRF and
+`confirm_delete=1`. It permanently removes that run and its publications/decisions/results;
+all its GET report and download routes then return 404. The redirect selects the team
+without the deleted run id. SQL views and CSV columns are unchanged. See design section
+7.12 for generated file cleanup, retained shared caches and scheduler recreation.
 
 The response is the **scorecard HTML**, or with `Accept: application/json` a summary:
 
