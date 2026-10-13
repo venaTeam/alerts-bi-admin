@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import os
 import runpy
+import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
@@ -46,12 +51,70 @@ def test_mock_rows_mappings_and_reset_use_configured_names(
 
 
 @pytest.mark.parametrize("value", ["alerts-*", "_all", "a,b", "a/b", "mock-custom-v2"])
+@pytest.mark.parametrize("operation", ["reset_indices", "bulk_load"])
 def test_mock_rejects_unsafe_or_colliding_write_targets(
-    script_environment: None, monkeypatch: pytest.MonkeyPatch, value: str
+    script_environment: None, monkeypatch: pytest.MonkeyPatch, value: str, operation: str
 ) -> None:
     monkeypatch.setenv("ES_V1_INDEX", value)
+    module = runpy.run_path(str(ROOT / "scripts/generate_mock_alerts.py"))
+    request = Mock()
+    monkeypatch.setitem(module[operation].__globals__, "_request", request)
     with pytest.raises(ValueError, match="mock ES_V1_INDEX"):
-        runpy.run_path(str(ROOT / "scripts/generate_mock_alerts.py"))
+        module[operation](*([[]] if operation == "bulk_load" else []))
+    request.assert_not_called()
+
+
+@pytest.mark.parametrize("source", ["environment", "dotenv"])
+def test_pure_tools_run_with_wildcard_sources(
+    script_environment: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, source: str
+) -> None:
+    if source == "environment":
+        monkeypatch.setenv("ES_V1_INDEX", "legacy-alerts-*")
+        monkeypatch.setenv("ES_V2_INDEX", "current-alerts-*")
+    else:
+        monkeypatch.delenv("ES_V1_INDEX")
+        monkeypatch.delenv("ES_V2_INDEX")
+        (tmp_path / ".env").write_text(
+            "ES_V1_INDEX=legacy-alerts-*\nES_V2_INDEX=current-alerts-*\n", encoding="utf-8"
+        )
+    # New processes exercise helper imports rather than reusing pytest's module cache.
+    # Give the benchmark its existing repository-relative fixture and registry inputs.
+    for relative in ("scripts/mock_teams.json", "config/teams.json"):
+        target = tmp_path / relative
+        target.parent.mkdir(exist_ok=True)
+        shutil.copyfile(ROOT / relative, target)
+    report = tmp_path / "evaluation.json"
+    commands = [
+        [
+            sys.executable,
+            str(ROOT / "scripts/evaluate_llm.py"),
+            "--mode",
+            "fake",
+            "--caps",
+            "200",
+            "--representations",
+            "factored",
+            "--orders",
+            "normal",
+            "--out",
+            str(report),
+        ],
+        [
+            sys.executable,
+            str(ROOT / "scripts/benchmark_streaming.py"),
+            "--events",
+            "10",
+            "--mode",
+            "streaming",
+        ],
+    ]
+    for command in commands:
+        result = subprocess.run(
+            command, cwd=tmp_path, env=os.environ.copy(), capture_output=True, text=True, timeout=60
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    summary = json.loads(report.read_text(encoding="utf-8"))
+    assert summary["mode"] == "fake" and len(summary["trials"]) == 1
 
 
 def test_kibana_resolves_configured_index_titles(

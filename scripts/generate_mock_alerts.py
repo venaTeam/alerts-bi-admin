@@ -47,12 +47,6 @@ from scripts.acceptance_teams import acceptance_teams
 load_dotenv()
 ES_CONFIG = load_es_config()
 ES_URL = ES_CONFIG.url
-# This writer needs concrete targets; read aliases/patterns remain valid in the service.
-for index in (ES_CONFIG.v1_index, ES_CONFIG.v2_index):
-    if index.startswith(("_", "-", "+", ".")) or re.search(r'[\\/*?"<>|,#:]', index):
-        raise ValueError("mock ES_V1_INDEX and ES_V2_INDEX must be concrete index names")
-if ES_CONFIG.v1_index == ES_CONFIG.v2_index:
-    raise ValueError("mock ES_V1_INDEX and ES_V2_INDEX must be distinct")
 NOW = datetime(2026, 8, 25, 18, 0, 0, tzinfo=UTC)
 HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
@@ -347,7 +341,17 @@ def _request(
     return json.loads(text) if text else None
 
 
+def _validate_write_targets() -> None:
+    """Validate writer targets without restricting imports of pure fixture helpers."""
+    for index in (ES_CONFIG.v1_index, ES_CONFIG.v2_index):
+        if index.startswith(("_", "-", "+", ".")) or re.search(r'[\\/*?"<>|,#:]', index):
+            raise ValueError("mock ES_V1_INDEX and ES_V2_INDEX must be concrete index names")
+    if ES_CONFIG.v1_index == ES_CONFIG.v2_index:
+        raise ValueError("mock ES_V1_INDEX and ES_V2_INDEX must be distinct")
+
+
 def reset_indices() -> None:
+    _validate_write_targets()
     if not LOCAL_ES.match(ES_URL):
         raise SystemExit(
             f"refusing to reset indices at {ES_URL}: RESET=1 is only allowed against an "
@@ -366,6 +370,7 @@ def reset_indices() -> None:
 
 
 def bulk_load(rows: list[dict[str, Any]]) -> None:
+    _validate_write_targets()
     chunk_size = 300
     for start in range(0, len(rows), chunk_size):
         lines = []
