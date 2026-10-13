@@ -73,7 +73,10 @@ confirmation. It removes the run's SQL results, publications, decisions, schedul
 model audit transactionally, then removes the four generated reports from configured
 manual/weekly output folders. It retains shared caches and prompt artifacts, and reports
 file-cleanup failure separately. Custom CLI output paths require manual cleanup. Active
-manual/model/weekly work blocks deletion. The scheduler can recreate a deleted due week.
+manual/model/weekly work blocks deletion. Manual HTTP and CLI runs take the same SQL
+execution lock as scheduling and deletion, covering scanning, persistence and report
+writing even with assessment off. Roll out the updated manual CLI alongside the app;
+older CLI versions do not take this lock. The scheduler can recreate a deleted due week.
 The admin publication dialog has no gap override; missing weeks still block publication.
 CLI recovery and scheduler retention exceptions retain their existing gap handling.
 

@@ -578,7 +578,8 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     return back(pages.team_url(team_id), "Run permanently deleted.")
             except WeeklyBusy:
                 raise HTTPException(
-                    409, "The weekly schedule is active. Try deleting after it finishes."
+                    409,
+                    "A run, weekly schedule or deletion is active. Try deleting after it finishes.",
                 ) from None
             finally:
                 gate.release()

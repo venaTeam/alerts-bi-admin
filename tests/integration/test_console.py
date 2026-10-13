@@ -5,8 +5,11 @@ from __future__ import annotations
 import subprocess
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Event
+from typing import Any
 
 import pytest
 from alerts_bi_operations.review.publication import publish_run, unpublish_run
@@ -14,10 +17,13 @@ from alerts_bi_shared.db.connection import Database, connect
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import DBAPIError
 from src.app import build_admin
+from src.cli import main
 from src.config import AdminConfig, AdminSettings
+from src.engine import cli as engine_cli
 from src.engine.config import load_config
 from src.engine.db.repositories import PersistencePayload, persist_run
 from src.engine.es.client import EsClient
+from src.engine.weekly.runner import schedule_lock
 from src.pages import finding_key
 from src.queries import decision_history
 
@@ -475,6 +481,87 @@ def test_failed_deletion_rolls_back_the_parent_and_publication(
         ).status_code
         == 303
     )
+
+
+@pytest.mark.parametrize("mode", ["--no-llm", "--fake-llm"])
+@pytest.mark.parametrize("operation_name", ["execute_run", "persist_run", "render_run_report"])
+def test_cli_rerun_blocks_deletion_through_the_entire_lifecycle(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, mode: str, operation_name: str
+) -> None:
+    """Pause the real CLI path on its own SQL sessions, before scan/store/report.
+
+    The existing row stays completed during the rerun, and model audit locks are absent
+    or already released in the latter stages. Deletion must still refuse immediately.
+    """
+    out_root = client.app.state.settings.out_root  # type: ignore[attr-defined]
+    monkeypatch.setenv("ADMIN_OUT_DIR", str(out_root))
+    arguments = ["run", "--team", TEAM, "--run-at", "2026-08-24", "--database", DB, mode]
+    assert main(arguments) == 0
+    with connect(CONFIG.sql, DB) as db:
+        row = db.query_one(
+            "SELECT TOP 1 run_id FROM runs WHERE team_id=:team AND run_at=:end ORDER BY completed_at DESC",
+            {"team": TEAM, "end": END},
+        )
+        assert row is not None
+        run_id = str(row["run_id"])
+    assert (out_root / run_id[:16] / "scorecard.html").exists()
+    reached, resume = Event(), Event()
+    original = getattr(engine_cli, operation_name)
+
+    def paused_operation(*args: Any, **kwargs: Any) -> Any:
+        reached.set()
+        assert resume.wait(30), "The CLI rerun was never resumed"
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(engine_cli, operation_name, paused_operation)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        rerun = pool.submit(main, arguments)
+        try:
+            assert reached.wait(30), "The CLI did not reach the paused operation"
+            with connect(CONFIG.sql, DB) as db:
+                assert db.query_one("SELECT status FROM runs WHERE run_id=:id", {"id": run_id}) == {
+                    "status": "completed"
+                }
+            csrf = token(client)
+            refused = client.post(
+                f"/runs/{run_id}/delete", data={"csrf": csrf, "confirm_delete": "1"}
+            )
+            assert refused.status_code == 409
+            assert "done=" not in refused.headers.get("location", "")
+            # The HTTP manual path must use the same SQL lock as the external CLI.
+            assert (
+                client.post(
+                    "/runs",
+                    headers={"X-CSRF-Token": csrf},
+                    json={"team": TEAM, "run_at": "2026-08-24", "llm": "off"},
+                ).status_code
+                == 409
+            )
+        finally:
+            resume.set()
+            assert rerun.result(timeout=30) == 0
+    deleted = client.post(
+        f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+    )
+    assert deleted.status_code == 303 and "done=" in deleted.headers["location"]
+    with connect(CONFIG.sql, DB) as db:
+        assert (
+            db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id}) is None
+        )
+    assert not (out_root / run_id[:16]).exists()
+
+
+@pytest.mark.usefixtures("client")
+def test_cli_failure_releases_shared_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_execute(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("injected manual run failure")
+
+    monkeypatch.setattr(engine_cli, "execute_run", fail_execute)
+    with pytest.raises(RuntimeError, match="injected manual run failure"):
+        main(["run", "--team", TEAM, "--run-at", "2026-08-24", "--database", DB, "--no-llm"])
+    # A new SQL session can acquire the lifecycle lock immediately after failure.
+    with schedule_lock(CONFIG, DB):
+        pass
 
 
 def test_decisions_cannot_reference_a_deleted_parent(client: TestClient) -> None:

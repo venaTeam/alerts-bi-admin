@@ -135,7 +135,10 @@ def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResu
         )
     try:
         es_client = EsClient(settings.config.es)
-        with connect(settings.config.sql, settings.target_database) as db:
+        with (
+            schedule_lock(settings.config, settings.target_database),
+            connect(settings.config.sql, settings.target_database) as db,
+        ):
             payload, summary = execute_run(
                 team_id=body.team,
                 run_at=run_at,
@@ -154,6 +157,8 @@ def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResu
             out_dir = settings.out_root / summary.run_id[:16]
             render_run_report(db, summary.run_id, out_dir)
             return RunResult(summary, build_run_outputs(db, summary.run_id), out_dir)
+    except WeeklyBusy as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
     except RegistryError as exc:
         # An unknown team or a malformed entry is the caller's mistake, not a server fault,
         # and the registry is validated before any alert is queried.

@@ -39,6 +39,7 @@ from .llm.client import LlmClient
 from .llm.fake import FakeLlmClient
 from .run.orchestrator import execute_run, select_llm_client
 from .weekly.plan import is_week_boundary, latest_week_end
+from .weekly.runner import schedule_lock
 
 __all__ = ["ENGINE_COMMANDS", "add_commands", "dispatch"]
 
@@ -159,7 +160,10 @@ def _command_run(args: argparse.Namespace, config: AppConfig) -> int:
         client, reason = select_llm_client(config, use_llm=not args.no_llm)
 
     es_client = EsClient(config.es)
-    with connect(config.sql, _target_database(args, config)) as db:
+    with (
+        schedule_lock(config, _target_database(args, config)),
+        connect(config.sql, _target_database(args, config)) as db,
+    ):
         payload, summary = execute_run(
             team_id=args.team,
             run_at=run_at,
