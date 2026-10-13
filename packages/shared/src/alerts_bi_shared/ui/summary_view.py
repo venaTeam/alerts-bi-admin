@@ -32,6 +32,7 @@ from alerts_bi_shared.catalogs import (
 )
 from alerts_bi_shared.insights import AlertRow, Estimate, FireRow, SchemaTotals, TeamSummary
 from alerts_bi_shared.insights.aggregate import primary_rule_counts
+from alerts_bi_shared.insights.stored import fact, patterns
 from alerts_bi_shared.ui.charts import TIMES, Segment, level_bar, stacked_bar
 from alerts_bi_shared.ui.explain import (
     QUALITY_STATE_LABELS,
@@ -147,11 +148,22 @@ def _next_step(rule_id: str) -> str:
     return rule_explanation(rule_id, None).next_step
 
 
-def _rule_step(rule_id: str, alerts: Iterable[AlertRow]) -> str:
+def _rule_step(
+    rule_id: str,
+    alerts: Iterable[AlertRow],
+    summary: TeamSummary | None = None,
+    schema: str | None = None,
+) -> str:
     """The next step for a rule across these alerts. R6's depends on the firing pattern, so it
     is the step of the pattern most of the rule's alerts carry (send-once only for spamming)."""
     if rule_id != "R6":
         return _next_step(rule_id)
+    if summary is not None and summary.inputs.facts is not None:
+        return r6_next_step(
+            dominant_r6_pattern(
+                (p, pair[1]) for p, pair in patterns(summary.inputs, schema).items()
+            )
+        )
     return r6_next_step(
         dominant_r6_pattern(
             (a.fire_pattern, a.row_count) for a in alerts if "R6" in a.core_rule_ids
@@ -335,7 +347,13 @@ def _share(n: int, total: int) -> str:
 
 def _donut(summary: TeamSummary, schema: str, rule_link: RuleLink) -> str:
     """One schema's rule-flagged alerts by primary rule. Never combined with the other."""
-    counts = primary_rule_counts(summary.inputs.alerts, schema)
+    counts = (
+        sorted(
+            fact(summary.inputs, schema, "primary").items(), key=lambda item: _rule_order(item[0])
+        )
+        if summary.inputs.facts
+        else primary_rule_counts(summary.inputs.alerts, schema)
+    )
     total = sum(n for _, n in counts)
     if not total:
         return (
@@ -427,6 +445,15 @@ def _why(summary: TeamSummary, rule_link: RuleLink) -> str:
             model.items(), key=lambda item: (_rule_order(item[0][0]), item[0][1])
         )
     ]
+    if summary.inputs.facts is not None:
+        model_rows = sorted(
+            [
+                (h(principle_title(p)), s, p, pair[0], pair[1], None)
+                for s in SCHEMAS
+                for p, pair in fact(summary.inputs, s, "model").items()
+            ],
+            key=lambda row: (_rule_order(row[2]), row[1]),
+        )
     readiness_and_model = (
         f'<div><div class="eyebrow">Phase-2 readiness</div>'
         f"{_bars(rule_rows(True), css='f-ready', admin=admin)}</div>"
@@ -470,7 +497,7 @@ def _key_findings(summary: TeamSummary, rule_link: RuleLink) -> str:
     for finding in summary.key_findings:
         step = finding.fix
         if step is None and finding.rule_filter:
-            step = _rule_step(finding.rule_filter, summary.inputs.alerts) or None
+            step = _rule_step(finding.rule_filter, summary.inputs.alerts, summary) or None
         action = f'<div class="next"><b>Next step:</b> {h(step)}</div>' if step else ""
         show = (
             f'<a class="more" href="{rule_link(finding.rule_filter)}">Show these alerts</a>'
@@ -683,13 +710,17 @@ def _biggest(summary: TeamSummary, rule_link: RuleLink) -> str:
 # ------------------------------------------------------------------ 9: flagged by rule
 
 
-def _top_applications(alerts: Sequence[AlertRow], schema: str, rule_id: str) -> str:
+def _top_applications(
+    alerts: Sequence[AlertRow], schema: str, rule_id: str, summary: TeamSummary | None = None
+) -> str:
     events: dict[str, int] = defaultdict(int)
     for alert in alerts:
         if alert.schema == schema and (
             rule_id in alert.core_rule_ids or rule_id in alert.readiness_rule_ids
         ):
             events[alert.application] += alert.row_count
+    if summary is not None and summary.inputs.facts is not None:
+        events = fact(summary.inputs, schema, "rule_apps").get(rule_id, {})
     top = sorted(events.items(), key=lambda item: (-item[1], item[0]))[:TOP_RULE_APPLICATIONS]
     return ", ".join(h(app) for app, _ in top) or "—"
 
@@ -714,8 +745,8 @@ def _by_rule(summary: TeamSummary, rule_link: RuleLink) -> str:
             f'<tr><td><a href="{rule_link(rule.rule_id)}">{h(rule.rule_id)}</a></td>'
             f"<td>{h(_rule_title(rule.rule_id))} {kind}</td><td>{_chip(rule.schema)}</td>"
             f'<td class="num">{rule.events:,}</td><td class="num">{rule.alerts:,}</td>{per_day}'
-            f"<td>{_top_applications(summary.inputs.alerts, rule.schema, rule.rule_id)}</td>"
-            f'<td class="step">{h(_rule_step(rule.rule_id, schema_alerts(rule.schema)))}</td></tr>'
+            f"<td>{_top_applications(summary.inputs.alerts, rule.schema, rule.rule_id, summary)}</td>"
+            f'<td class="step">{h(_rule_step(rule.rule_id, schema_alerts(rule.schema), summary, rule.schema))}</td></tr>'
         )
     head = ["Rule", "What it means", "Schema", "Events", "Alerts"]
     if admin:
@@ -732,18 +763,17 @@ def _by_rule(summary: TeamSummary, rule_link: RuleLink) -> str:
 # ------------------------------------------------------------------ 10-11: visibility
 
 
-def _listed(alerts: Sequence[AlertRow]) -> str:
+def _listed(alerts: Sequence[AlertRow], totals: dict[str, int] | None = None) -> str:
     ordered = sorted(alerts, key=lambda a: (-a.row_count, a.schema, a.application, a.key_field))
     items = "".join(
         f'<li>{_alert_line(alert)}<span class="cnt">{_plural(alert.row_count, "event")}</span></li>'
         for alert in ordered[:TOP_LISTED]
     )
     more = ""
-    if len(ordered) > TOP_LISTED:
+    totals = totals or {s: sum(a.schema == s for a in ordered) for s in SCHEMAS}
+    if sum(totals.values()) > TOP_LISTED:
         per_schema = " and ".join(
-            f"{sum(1 for alert in ordered if alert.schema == schema):,} {schema}"
-            for schema in SCHEMAS
-            if any(alert.schema == schema for alert in ordered)
+            f"{totals[schema]:,} {schema}" for schema in SCHEMAS if totals[schema]
         )
         more = (
             f'<p class="sub">The {TOP_LISTED} with the most events; the work list has all of '
@@ -789,6 +819,10 @@ def _hidden(summary: TeamSummary, rule_link: RuleLink) -> str:
             )
         lines.append(f"<li>{_chip(schema)} {text}</li>")
     hidden = [a for a in summary.inputs.alerts if "R5" in a.core_rule_ids]
+    hidden_totals = {
+        s: sum(r.alerts for r in summary.inputs.rules if r.schema == s and r.rule_id == "R5")
+        for s in SCHEMAS
+    }
     fix = (
         f'<div class="next"><b>Next step:</b> {h(_next_step("R5"))}</div>'
         f'<a class="more" href="{rule_link("R5")}">Show these alerts</a>'
@@ -799,7 +833,7 @@ def _hidden(summary: TeamSummary, rule_link: RuleLink) -> str:
         "hidden",
         "Hidden by your own panels",
         "Alerts you still send that a filter in every one of your dashboards hides (R5).",
-        f'<ul class="vis">{"".join(lines)}</ul>{_listed(hidden)}{fix}',
+        f'<ul class="vis">{"".join(lines)}</ul>{_listed(hidden, hidden_totals)}{fix}',
     )
 
 
@@ -826,12 +860,13 @@ def _unseen(summary: TeamSummary) -> str:
             )
         lines.append(f"<li>{_chip(schema)} {text}</li>")
     unseen = [a for a in summary.inputs.alerts if a.unseen]
+    unseen_totals = {s: summary.inputs.schemas[s].unseen_alerts or 0 for s in SCHEMAS}
     return _card(
         "unseen",
         "Not on any of your dashboards",
         "Alerts you own that no panel's narrowing includes, so on-call never sees them. "
         "Counted apart from the hidden ones.",
-        f'<ul class="vis">{"".join(lines)}</ul>{_listed(unseen)}',
+        f'<ul class="vis">{"".join(lines)}</ul>{_listed(unseen, unseen_totals)}',
     )
 
 
@@ -903,7 +938,7 @@ def _progress(summary: TeamSummary) -> str:
     left = (
         '<dl class="facts">'
         f'<dt>v1 alerts</dt><dd class="num">{inputs.schemas["v1"].distinct_alerts:,}</dd>'
-        f'<dt>v1 applications</dt><dd class="num">{len({a.application for a in v1}):,}</dd>'
+        f'<dt>v1 applications</dt><dd class="num">{fact(inputs, "v1", "applications", len({a.application for a in v1})):,}</dd>'
         f'<dt>v1 alert rules</dt><dd class="num">{summary.estimate.rules_left:,}</dd>'
         "</dl>"
     )
@@ -916,10 +951,11 @@ def _progress(summary: TeamSummary) -> str:
     critical_no_runbook = sum(
         1 for a in v2 if (a.severity or "").lower() == "critical" and "R9" in a.readiness_rule_ids
     )
+    critical_no_runbook = fact(inputs, "v2", "critical", critical_no_runbook)
     readiness = (
         '<dl class="facts">'
-        f'<dt>Phase-2 ready</dt><dd class="num">{sum(ready(a) for a in v2):,} of '
-        f"{len(v2):,} v2 alerts</dd>"
+        f'<dt>Phase-2 ready</dt><dd class="num">{fact(inputs, "v2", "ready", sum(ready(a) for a in v2)):,} of '
+        f"{inputs.schemas['v2'].distinct_alerts:,} v2 alerts</dd>"
         f'<dt>Critical without a runbook</dt><dd class="num">{critical_no_runbook:,}</dd>'
         "</dl>"
         if v2

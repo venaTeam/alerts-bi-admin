@@ -18,7 +18,9 @@ now live under admin's `src/engine`; the installed namespace is `alerts_bi_admin
 | design | docs, decisions, contracts, releases | Requirements and compatibility evidence |
 
 Supported executables are `alerts-bi-admin` and `alerts-bi-portal`. Admin is independently
-buildable using its local uv workspace; portal pins an immutable shared wheel produced by
-admin. Shared 0.1.3 is unchanged. Operations 0.2.0 removes `report.html` and restricts
+buildable using its committed Poetry lock; portal pins an immutable shared wheel produced by
+admin. Shared 0.1.4 adds pooled web SQL and bounded summary readers; operations 0.2.1 pins it. The earlier operations 0.2.0 removes `report.html` and restricts
 the public report renderer to the three CSV exports. No supported
 consumer imports or installs a runs package. The old repository remains historical.
+
+Performance work: [bounded read contract](read-path-performance.md). Admin owns migrations 012–013, src/engine/db/read_models.py, src/engine/run/checkpoint.py, and scripts/benchmark_reads.py. Shared owns read/paging contracts; portal consumes only published views.

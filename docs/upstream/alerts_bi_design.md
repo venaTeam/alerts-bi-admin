@@ -1,5 +1,12 @@
 # Alerts BI — Design Document
 
+## Read-path performance — 2026-10-13
+
+Approved bounded SQL summaries, application daily facts, pooled web reads, indexed
+detail navigation and reuse of valid scheduled results are defined in
+[read-path-performance.md](read-path-performance.md). Execution concurrency,
+retention and deployment/operations UX remain unchanged.
+
 ## Automatic deployment migrations — accepted 2026-10-13
 
 The product owner requested migrations to run automatically with admin deployment. The

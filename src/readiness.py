@@ -8,6 +8,12 @@ from alerts_bi_shared.db.connection import Database
 # Keep explicit columns: SELECT * would compile against an older table missing a field
 # that the renderer subsequently expects in its result. TOP 0 never fetches stored data.
 REQUIRED_COLUMNS: dict[str, str] = {
+    "run_summaries": "run_id,scope_kind,application,payload",
+    "run_alert_list": "finding_id,run_id,alert_schema,application,key_field,row_count,attention_rank,quality_state,core_rule_ids,readiness_rule_ids",
+    "run_rule_membership": "run_id,finding_id,rule_id,matched_rows",
+    "run_application_daily": "run_id,alert_schema,application,snapshot_date,covered_hours,events,distinct_alerts,flagged_rows,flagged_by_rule_distinct,suppressed,unseen",
+    "run_v1_rules": "run_id,application,rule_hash",
+    "run_analysis_checkpoints": "run_id,source_hash,format_version,payload",
     "run_jobs": (
         "job_id, idempotency_key, idempotency_key_hash, requested_by, request_hash, "
         "team_id, run_at, llm_mode, registry_sha256, run_id, status, active_slot, "
@@ -65,7 +71,12 @@ def check_schema(db: Database) -> None:
     for table, columns in REQUIRED_COLUMNS.items():
         names = ", ".join(f"[{column.strip()}]" for column in columns.split(","))
         db.query(f"SELECT TOP 0 {names} FROM [{table}]")
-    for version in ("009_run_deletion", "011_run_job_keys"):
+    for version in (
+        "009_run_deletion",
+        "011_run_job_keys",
+        "012_read_models",
+        "013_analysis_checkpoints",
+    ):
         if (
             db.query_one(
                 "SELECT 1 AS ready FROM schema_migrations WHERE version=:version",

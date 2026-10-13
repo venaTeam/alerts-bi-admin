@@ -40,7 +40,7 @@ from ..config import AppConfig
 from ..db.repositories import persist_run
 from ..es.client import EsClient
 from ..llm.client import LlmClient
-from ..run.orchestrator import execute_run
+from ..run.orchestrator import compute_run_id, execute_run
 from ..run.outputs import render_run_report
 from .plan import WEEK, plan_weeks
 
@@ -263,27 +263,43 @@ def _run_team(
     allow_gap = bool(plan.expired)
     publishing = True
     held_week: datetime | None = None
+    loaded = load_registry(registry_path) if registry_path else load_registry()
     for end in plan.due:
         try:
-            payload, summary = execute_run(
+            run_id = compute_run_id(
                 team_id=team.team_id,
                 run_at=end,
-                config=config,
-                es_client=es_client,
-                llm_client=llm_client,
-                llm_disabled_reason=llm_disabled_reason,
-                registry_path=registry_path,
-                db=db,
+                window_start=end - WEEK,
+                registry_sha256=loaded.file_sha256,
+                model_version=llm_client.model_version if llm_client else None,
             )
-            persist_run(db, payload)
-            render_run_report(db, summary.run_id, out_root / summary.run_id[:16])
+            # Only an exact, complete, healthy result is reusable. Unhealthy weeks
+            # still get their normal audited retry. Current publication is checked
+            # below, under the unchanged full-invocation scheduler lock.
+            if run_health(db, run_id):
+                payload, summary = execute_run(
+                    team_id=team.team_id,
+                    run_at=end,
+                    config=config,
+                    es_client=es_client,
+                    llm_client=llm_client,
+                    llm_disabled_reason=llm_disabled_reason,
+                    registry_path=registry_path,
+                    db=db,
+                    expected_run_id=run_id,
+                    resume_analysis=True,
+                )
+                persist_run(db, payload)
+                run_id = summary.run_id
+            else:
+                log.info("weekly.reused_run", team_id=team.team_id, run_id=run_id)
+            render_run_report(db, run_id, out_root / run_id[:16])
         except Exception as exc:
             log.error("weekly.run_failed", team_id=team.team_id, error=redact_error(exc))
             outcomes.append(Outcome(team.team_id, end, "failed", detail=redact_error(exc)))
             publishing = False
             continue
 
-        run_id = summary.run_id
         problems = run_health(db, run_id)
         note: str | None = None
         if problems:

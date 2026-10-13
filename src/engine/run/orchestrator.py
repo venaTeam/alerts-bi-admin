@@ -32,6 +32,7 @@ from ..llm.client import LlmClient
 from ..llm.openai_client import OpenAiLlmClient
 from ..llm.prompt import build_prompt
 from ..rules.readiness import phase2_readiness_pct
+from . import checkpoint
 from .streaming import SchemaAccumulator, StreamIdentity, analyze_team
 
 __all__ = ["RunSummary", "compute_run_id", "execute_run", "select_llm_client"]
@@ -115,6 +116,7 @@ def execute_run(
     registry_path: str | None = None,
     db: Database | None = None,
     expected_run_id: str | None = None,
+    resume_analysis: bool = False,
 ) -> tuple[PersistencePayload, RunSummary]:
     """Execute one run and return the payload to persist.
 
@@ -151,7 +153,17 @@ def execute_run(
     )
 
     # 2-5. Read pages and aggregate exact facts without retaining raw event documents.
-    evaluation = analyze_team(es_client, team, window)
+    evaluation = (
+        checkpoint.load(db, run_id, config, team, window)
+        if resume_analysis and db is not None
+        else None
+    )
+    if evaluation is None:
+        evaluation = analyze_team(es_client, team, window)
+        if resume_analysis and db is not None:
+            checkpoint.save(db, run_id, config, evaluation)
+    else:
+        log.info("run.analysis_resumed", run_id=run_id)
     suppression = {schema: evaluation[schema].suppression for schema in SCHEMAS}
 
     # 6. Assess the identities that carry no core finding.
@@ -333,6 +345,55 @@ def execute_run(
                     None,
                 )
             )
+
+        # Disjoint application identities retain exact daily unions before the
+        # event stream is discarded. These are facts, not reconstructed rule sums.
+        application_days: dict[tuple[str, str], dict[str, Any]] = {}
+        for identity in evaluation[schema].identities.values():
+            for day_key, facts in identity.days.items():
+                bucket = next(b for b in window.buckets if b.snapshot_date == day_key)
+                item = application_days.setdefault(
+                    (identity.application, day_key),
+                    {
+                        "run_id": run_id,
+                        "alert_schema": schema,
+                        "application": identity.application,
+                        "snapshot_date": date.fromisoformat(day_key),
+                        "covered_hours": bucket.covered_hours,
+                        "events": 0,
+                        "distinct_alerts": 0,
+                        "flagged_rows": 0,
+                        "flagged_by_rule_distinct": 0,
+                        "suppressed": 0,
+                        "unseen": 0 if team.panels_for(schema) else None,
+                    },
+                )
+                item["events"] += facts.count
+                item["distinct_alerts"] += 1
+                item["flagged_rows"] += facts.flagged
+                item["flagged_by_rule_distinct"] += bool(facts.flagged)
+                item["suppressed"] += facts.suppressed
+                if item["unseen"] is not None:
+                    item["unseen"] += facts.unseen
+        for app in {identity.application for identity in evaluation[schema].identities.values()}:
+            for bucket in window.buckets:
+                application_days.setdefault(
+                    (app, bucket.snapshot_date),
+                    {
+                        "run_id": run_id,
+                        "alert_schema": schema,
+                        "application": app,
+                        "snapshot_date": date.fromisoformat(bucket.snapshot_date),
+                        "covered_hours": bucket.covered_hours,
+                        "events": 0,
+                        "distinct_alerts": 0,
+                        "flagged_rows": 0,
+                        "flagged_by_rule_distinct": 0,
+                        "suppressed": 0,
+                        "unseen": 0 if team.panels_for(schema) else None,
+                    },
+                )
+        payload.application_daily.extend(application_days.values())
 
         for interpretation in suppression[schema].interpretations:
             suppression_leaves = sum(

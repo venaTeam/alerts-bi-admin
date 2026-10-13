@@ -1,5 +1,9 @@
 # What a run produces
 
+## Bounded read paths — accepted 2026-10-13
+
+The [performance contract](read-path-performance.md) governs compact stored summaries, bounded UI reads, pooled web connections, seek navigation and completed-analysis reuse. It supersedes earlier descriptions of full alert loads and unavailable application daily metrics for new runs. Historical missing measurements remain unavailable; CSV definitions, publication isolation, serialized execution and retention policy are unchanged.
+
 ## Source ownership amendment — 2026-10-12
 
 Admin owns execution, migrations, weekly jobs, registry and library builds under `alerts_bi_admin.engine`; commands use `alerts-bi-admin`. The previous runs ownership and runtime-wheel references below are historical. Product behavior, wire payloads, SQL contracts and outputs are unchanged. See [retirement and cutover](runs-retirement.md).

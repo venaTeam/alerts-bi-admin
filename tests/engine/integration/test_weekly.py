@@ -131,7 +131,7 @@ def test_without_the_model_every_week_is_held_for_a_person(
 
 
 def test_a_failed_model_week_is_held_and_the_healthy_week_after_it_waits(
-    fresh: None, registry: str, tmp_path: Path
+    fresh: None, registry: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # checkout-api still has a v2 alert in the week ending 31 Aug that no core rule (R6
     # included) withholds from the model, so the failing client has something to fail on.
@@ -154,6 +154,10 @@ def test_a_failed_model_week_is_held_and_the_healthy_week_after_it_waits(
         )
     assert [row["outcome"] for row in log] == ["published", "held", "stored"]
 
+    def refuse_rescan(*args: object, **kwargs: object) -> None:
+        pytest.fail("held and healthy completed scans must be reused")
+
+    monkeypatch.setattr("src.engine.run.orchestrator.analyze_team", refuse_rescan)
     resolved = weekly(registry, now, tmp_path, teams=[team])
     assert [o.outcome for o in resolved] == ["published", "published"]
     assert published(team) == [MONDAY + timedelta(days=d) for d in (0, 7, 14)]

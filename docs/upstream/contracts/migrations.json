@@ -1,6 +1,6 @@
 {
   "source_commit": "5f9e2f8b94438a505f25139b1d7b725b335db7c7",
-  "schema_head": "011_run_job_keys",
+  "schema_head": "013_analysis_checkpoints",
   "files": {
     "001_initial_schema.sql": "7c4f43ce0aa698bcf82b1694143fe9dd5f68a35430c1a8461c7296f958dde41a",
     "002_review_portal.sql": "593539fb7f5e3b458f107b79e348ee62a5d74841a220be97e0bd01fcbae012c6",
@@ -23,7 +23,11 @@
     "010_run_jobs.sql": "f718ebae61f00c5b5d9cc0d51f4ede025fb81e48d27147452cbc52960b81f6dd",
     "versions/010_run_jobs.py": "af389163cc798a59c2973a697af16195e2dbeb0f6a84279199f5ff45399a925c",
     "011_run_job_keys.sql": "08131e0c01f478626c653cc82391b257ca0b4e41e22ff79d34a63e40a811ae4a",
-    "versions/011_run_job_keys.py": "b8046a9e7f644c0c7f5a12f5f4c387672dc6d643701ab2697405d1927a13d73c"
+    "versions/011_run_job_keys.py": "b8046a9e7f644c0c7f5a12f5f4c387672dc6d643701ab2697405d1927a13d73c",
+    "012_read_models.sql": "adbd8529527d0a96feb17a2780859b43ee297f172d9b15bb6ddf492d297c4a96",
+    "versions/012_read_models.py": "b7ea01fc3544379fa41090af6b4fc82ff300a8ab2b6105afe19da4fbc45458ba",
+    "013_analysis_checkpoints.sql": "7eb4371e7d012d38bcba40d2ef8429e7b70e7ec7aeffc30767144572c24ab612",
+    "versions/013_analysis_checkpoints.py": "3cbc0f265f222278e0e7ddb4d77e2c133698095d6eafb460a6da3ac1e6cef1e9"
   },
   "amended": "2026-10-13"
 }

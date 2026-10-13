@@ -28,9 +28,12 @@ from alerts_bi_operations.suppression.fields import classify_field
 from alerts_bi_operations.suppression.lexer import SqlParseError, Token, tokenize
 from alerts_bi_operations.suppression.parser import Leaf, collect_leaves, parse_panel_sql
 from alerts_bi_shared.db.connection import Database
+from alerts_bi_shared.db.paging import cursor_for, order_by, scope_key, seek
 from alerts_bi_shared.insights import AlertRow, RuleTotal, SchemaTotals, SummaryInputs, WeekRules
 from alerts_bi_shared.insights.daily import daily_points
 from alerts_bi_shared.insights.estimate import v1_rule_key_of
+from alerts_bi_shared.insights.reader import read_history, read_summary
+from alerts_bi_shared.insights.stored import schema_totals as stored_schema_totals
 from alerts_bi_shared.insights.summary import summarize
 from alerts_bi_shared.ui.charts import ChartPoint, line_chart
 from alerts_bi_shared.ui.explain import (
@@ -117,6 +120,9 @@ class WorklistFilter:
     rule: str = ""
     sort: str = "events"
     page: int = 1
+    cursor: str | None = None
+    next_cursor: str | None = None
+    previous_cursor: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,7 +394,7 @@ def worklist_where(run_id: str, filters: WorklistFilter) -> tuple[str, dict[str,
     if filters.rule:
         # Delimited on both sides so R1 never matches R10.
         clauses.append(
-            "(',' + core_rule_ids + ',' + readiness_rule_ids + ',') LIKE '%,' + :rule + ',%'"
+            "finding_id IN (SELECT finding_id FROM run_rule_membership WHERE run_id=:run_id AND rule_id=:rule)"
         )
         params["rule"] = filters.rule
     return " AND ".join(clauses), params
@@ -404,14 +410,37 @@ def _worklist(
     """One page of the work list, its total, and the filters with the page clamped to the
     last one, so a page past the end shows the last page rather than nothing."""
     where, params = worklist_where(run_id, filters)
-    row = db.query_one(f"SELECT COUNT(*) AS n FROM alert_findings WHERE {where}", params)
+    row = db.query_one(f"SELECT COUNT(*) AS n FROM run_alert_list WHERE {where}", params)
     total = int(row["n"]) if row else 0
     filters = replace(filters, page=min(max(filters.page, 1), last_page(total)))
+    columns = (
+        (("application", False), ("alert_schema", False), ("key_field", False))
+        if filters.sort == "application"
+        else (
+            ("row_count", True),
+            ("application", False),
+            ("key_field", False),
+            ("alert_schema", False),
+        )
+    )
+    scope = scope_key([run_id, where, params, filters.sort])
+    after, seek_params, reverse = seek(filters.cursor, scope, columns)
+    sql = (
+        f"SELECT TOP (:size) {_ALERT_COLUMNS} FROM run_alert_list WHERE {where} AND {after} ORDER BY {order_by(columns, reverse)}"
+        if after
+        else (
+            f"SELECT {_ALERT_COLUMNS} FROM run_alert_list WHERE {where} ORDER BY {order_by(columns)} OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY"
+        )
+    )
     rows = db.query(
-        f"SELECT {_ALERT_COLUMNS} FROM alert_findings WHERE {where} "
-        f"ORDER BY {SORTS.get(filters.sort, SORTS['events'])} "
-        "OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY",
-        {**params, "offset": (filters.page - 1) * PAGE_SIZE, "size": PAGE_SIZE},
+        sql, {**params, **seek_params, "offset": (filters.page - 1) * PAGE_SIZE, "size": PAGE_SIZE}
+    )
+    if reverse:
+        rows.reverse()
+    filters = replace(
+        filters,
+        next_cursor=cursor_for(scope, rows[-1], columns) if rows else None,
+        previous_cursor=cursor_for(scope, rows[0], columns, previous=True) if rows else None,
     )
     return tuple(alert_row(r) for r in rows), total, filters
 
@@ -497,17 +526,24 @@ def load_admin_summary(
     selected = str(run["run_id"])
 
     daily = get_daily_metrics(db, selected)
-    alerts = tuple(
-        alert_row(row)
-        for row in db.query(
-            f"SELECT {_ALERT_COLUMNS} FROM alert_findings WHERE run_id = :run_id "
-            "ORDER BY alert_schema, application, key_field",
-            {"run_id": selected},
-        )
-    )
+    facts, alerts, _ = read_summary(db, selected, "admin")
     publication = _publication(db, selected)
     published = publication.state == "published"
-    history = _published_history(db, team_id, run["window_end"]) if published else ()
+    history = read_history(
+        db, team_id, selected, run["window_end"], "admin", None, facts, published=published
+    )
+    rule_counts = get_rule_counts(db, selected)
+    rates = {(r.schema, r.rule_id): r.distinct_per_day for r in rule_totals(rule_counts, ())}
+    inputs = replace(
+        summary_inputs(run, daily, rule_counts, alerts, published=published, history=history),
+        schemas=stored_schema_totals(facts, daily, admin=True),
+        rules=tuple(
+            RuleTotal(schema, rid, values[0], values[1], rates.get((schema, rid)))
+            for schema in SCHEMAS
+            for rid, values in facts["schemas"][schema]["rules"].items()
+        ),
+        facts=facts,
+    )
     worklist, total, filters = _worklist(db, selected, filters)
     schedule = db.query_one(
         "SELECT TOP 1 invoked_at, window_end, outcome, detail FROM weekly_review_log "
@@ -516,14 +552,7 @@ def load_admin_summary(
     )
     return AdminSummary(
         run=run,
-        inputs=summary_inputs(
-            run,
-            daily,
-            get_rule_counts(db, selected),
-            alerts,
-            published=published,
-            history=history,
-        ),
+        inputs=inputs,
         entry=read_snapshot(run.get("registry_entry_snapshot")),
         daily=daily,
         stored_panels=get_run_panels(db, selected),
@@ -871,6 +900,7 @@ def _worklist_html(summary: AdminSummary) -> str:
             rule=filters.rule,
             sort=None if filters.sort == "events" else filters.sort,
             page=target,
+            cursor=filters.next_cursor if target > page else filters.previous_cursor,
         )
         return f'<a class="button" href="{h(href)}#worklist">{text}</a>'
 
@@ -987,7 +1017,10 @@ def overview_content(summary: AdminSummary) -> str:
             ("Window end", format_instant(run["window_end"])),
         )
     )
-    filtered = summary.filters != WorklistFilter()
+    filtered = (
+        replace(summary.filters, cursor=None, next_cursor=None, previous_cursor=None)
+        != WorklistFilter()
+    )
     return (
         '<div class="abi-small abi-muted">Weekly totals · v1 and v2 shown separately</div>'
         f'<div class="abi-overview">{"".join(cards)}</div><section class="abi-panel abi-panel-pad"><h3>Review focus</h3><ul class="abi-review-list">{focus}</ul><a class="abi-btn" href="{h(pages.team_url(summary.inputs.team_id, str(run["run_id"]), "findings"))}#selected-run">Inspect findings {pages.icon("arrow")}</a></section>'

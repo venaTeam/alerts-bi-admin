@@ -245,6 +245,7 @@ class PersistencePayload:
     verdicts: list[dict[str, Any]] = field(default_factory=list)
     panel_parses: list[dict[str, Any]] = field(default_factory=list)
     run_panels: list[dict[str, Any]] = field(default_factory=list)
+    application_daily: list[dict[str, Any]] = field(default_factory=list)
 
 
 def persist_run(db: Database, payload: PersistencePayload) -> None:
@@ -316,6 +317,19 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
             insert_verdict_if_absent(db, verdict)
         for parse in payload.panel_parses:
             insert_panel_parse_if_absent(db, parse)
+        from .read_models import rebuild_read_models
+
+        db.execute("DELETE FROM run_application_daily WHERE run_id=:run", {"run": run_id})
+        if payload.application_daily:
+            columns = tuple(payload.application_daily[0])
+            db.execute_many(
+                _insert_statement("run_application_daily", columns), payload.application_daily
+            )
+        rebuild_read_models(db, str(run_id), payload.findings)
+        if payload.run.get("llm_assessed") and not any(
+            row.get("quality_state") == "unassessed" for row in payload.findings
+        ):
+            db.execute("DELETE FROM run_analysis_checkpoints WHERE run_id=:run", {"run": run_id})
 
 
 def insert_verdict_if_absent(db: Database, verdict: dict[str, Any]) -> None:

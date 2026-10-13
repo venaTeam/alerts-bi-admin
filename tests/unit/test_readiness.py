@@ -19,7 +19,7 @@ def client_for(monkeypatch: pytest.MonkeyPatch, db: Mock) -> TestClient:
     def connect(*args: object, **kwargs: object) -> Iterator[Database]:
         yield cast(Database, db)
 
-    monkeypatch.setattr(app, "connect", connect)
+    monkeypatch.setattr("alerts_bi_shared.db.connection.WebDatabasePool.connect", connect)
     monkeypatch.setattr(app, "check_health", lambda settings: {"execution": CheckOut(ok=True)})
     settings = AdminSettings(config=load_config(), database="alerts_bi_test", secret="x" * 40)
     return TestClient(app.build_admin(settings), headers={"X-Forwarded-User": "operator"})
@@ -35,7 +35,7 @@ def test_healthy_schema_checks_all_operator_tables_without_fetching_rows(
         response = client.get("/healthz")
     assert response.status_code == 200 and response.json()["ok"] is True
     statements = [call.args[0] for call in db.query.call_args_list]
-    assert len(statements) == 10
+    assert len(statements) == len(REQUIRED_COLUMNS)
     assert all(statement.startswith("SELECT TOP 0 ") for statement in statements)
     assert {statement.rsplit(" FROM ", 1)[1] for statement in statements} == {
         f"[{table}]" for table in REQUIRED_COLUMNS
