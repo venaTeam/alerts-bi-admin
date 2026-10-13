@@ -23,7 +23,7 @@ Do not commit generated secrets or apply the placeholder manifests unchanged.
 | LLM_ENABLED, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_MODEL_REVISION, LLM_TIMEOUT_MS, LLM_MAX_BATCH_SIZE, LLM_MAX_COMPLETION_TOKENS | Admin and weekly execution only; unchanged model configuration |
 | ADMIN_HOST=127.0.0.1, ADMIN_PORT=8200, ADMIN_USER_HEADER=X-Forwarded-User | Authenticated admin listener only |
 | ADMIN_SECRET | Private random value of at least 32 characters, signs actor-bound CSRF tokens |
-| ADMIN_DATABASE | Optional listener override; normally unset so SQL_DATABASE is shared |
+| ADMIN_DATABASE | Optional UI/worker/migration database override; unset uses SQL_DATABASE |
 | ADMIN_OUT_DIR=/app/out | Writable HTTP execution output; jobs use --out |
 | ADMIN_REGISTRY_PATH or --registry | Mounted admin-owned registry at /etc/alerts-bi/teams.json |
 | COOKIE_SECRET | Existing proxy session secret; keep its supported encoding and rotation procedure |
@@ -35,12 +35,30 @@ Portal requires only its SQL/reader settings, no registry, engine, operations or
 Validate edited registry with `alerts-bi-admin registry check --registry <path>`, increment
 registry_version, and preserve immutable snapshots in stored runs. Do not use --dev-user on a deployment.
 
-## Migration job
+## Automatic migrations
 
-Run `alerts-bi-admin db status` first, then this job using the existing SQL_DATABASE. It must
-apply through additive revision 011_run_job_keys (after 010_run_jobs) while UI/worker writers
-are stopped, after verifying the immutable 001–010 ledger. Ledger drift
-is a hard error. Never reset-test, downgrade, stamp over a problem or recreate production data.
+Accepted 2026-10-13: the admin Deployment now runs `db setup` in a regular `migrate`
+init container before the UI, manual worker and proxy start. It uses the same admin image
+digest, SQL settings and credentials, selecting ADMIN_DATABASE when nonempty and otherwise
+SQL_DATABASE (the CLI default is alerts_bi_dev). It applies only missing revisions after
+checking the immutable ledger; current head is 011_run_job_keys. No data reset occurs.
+
+Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
+new pod. A migration failure keeps the application containers unstarted and OpenShift retries
+initialization. Inspect `oc logs <pod> -c migrate` and the pod's init-container status; fix
+the database/schema problem and let initialization retry. Never reset-test, downgrade or stamp
+over drift. The configured SQL login must retain schema-migration permissions and connectivity.
+
+Build the updated image, replace all ADMIN_IMAGE_DIGEST occurrences with its same immutable
+digest, and apply deploy/admin.yaml. No separate migration launch is needed for normal rollout.
+Do not launch the optional job below concurrently or change this topology to multiple/rolling
+pods without coordinating migration execution. Manual pod deletion is not the Recreate upgrade
+ordering guarantee; confirm prior writer sessions have ended before maintenance recreation.
+
+### Optional manual maintenance job
+
+deploy/migrate.yaml remains for controlled maintenance with UI/worker writers stopped. It
+uses the same database selection as initialization. It is not part of normal automatic rollout.
 
 ```yaml
 apiVersion: batch/v1
@@ -54,7 +72,9 @@ spec:
       containers:
         - name: migrate
           image: ADMIN_IMAGE_DIGEST
-          command: ["alerts-bi-admin", "db", "setup"]
+          command: ["/bin/sh", "-ec"]
+          args:
+            - 'exec alerts-bi-admin db setup --database "${ADMIN_DATABASE:-${SQL_DATABASE:-alerts_bi_dev}}"'
           envFrom:
             - configMapRef: {name: alerts-bi-config}
             - secretRef: {name: alerts-bi-secrets}
@@ -95,6 +115,15 @@ spec:
     metadata: {labels: {app: alerts-bi-admin}}
     spec:
       serviceAccountName: alerts-bi-admin
+      initContainers:
+        - name: migrate
+          image: ADMIN_IMAGE_DIGEST
+          command: ["/bin/sh", "-ec"]
+          args:
+            - 'exec alerts-bi-admin db setup --database "${ADMIN_DATABASE:-${SQL_DATABASE:-alerts_bi_dev}}"'
+          envFrom:
+            - configMapRef: {name: alerts-bi-config}
+            - secretRef: {name: alerts-bi-secrets}
       containers:
         - name: admin
           image: ADMIN_IMAGE_DIGEST

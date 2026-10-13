@@ -136,8 +136,9 @@ Manual browser runs now return immediately after saving a SQL-backed submission.
 `alerts-bi-admin run-worker` in a separate terminal/process with matching ADMIN_DATABASE,
 ADMIN_REGISTRY_PATH, ADMIN_OUT_DIR, SQL, Elasticsearch and model settings. The worker does not
 require ADMIN_SECRET. The shipped deploy/admin.yaml includes a dedicated worker with the
-same image, registry, SQL/ES/model configuration and output mount. Stop UI/worker writers
-and apply through migration 011_run_job_keys before updating both processes; it backfills
+same image, registry, SQL/ES/model configuration and output mount. Its migration init container
+automatically runs db setup before UI/worker startup, targeting ADMIN_DATABASE or SQL_DATABASE.
+Recreate stops the previous pod before initialization; migration failure blocks startup. It backfills
 existing submission digests without editing 001–010. Older writers cannot insert the new
 required digest. Keys differing only in case or trailing spaces request distinct attempts.
 `run-worker --once` processes at most one job and exits. The team page polls while visible;
@@ -194,3 +195,10 @@ For prolonged running jobs and rollback, follow docs/upstream/manual-worker-runb
 The idle worker checks for work before taking application locks. State transitions are logged.
 The committed console-openapi.json contract describes async submissions and status; the live
 console keeps public schema endpoints disabled. Operators have shared access across teams.
+
+
+For automatic deployment migrations, build the updated image and set the same digest in
+the migrate init container, admin and run-worker entries of deploy/admin.yaml, then apply
+that manifest. The configured SQL credentials must allow schema migrations. No separate
+deploy/migrate.yaml Job is needed for normal rollout; it remains an optional maintenance
+tool with UI/worker writers stopped. Do not run it alongside deployment initialization.

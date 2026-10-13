@@ -24,6 +24,15 @@ spec:
     metadata: {labels: {app: alerts-bi-admin}}
     spec:
       serviceAccountName: alerts-bi-admin
+      initContainers:
+        - name: migrate
+          image: ADMIN_IMAGE_DIGEST
+          command: ["/bin/sh", "-ec"]
+          args:
+            - 'exec alerts-bi-admin db setup --database "${ADMIN_DATABASE:-${SQL_DATABASE:-alerts_bi_dev}}"'
+          envFrom:
+            - configMapRef: {name: alerts-bi-config}
+            - secretRef: {name: alerts-bi-secrets}
       containers:
         - name: admin
           image: ADMIN_IMAGE_DIGEST

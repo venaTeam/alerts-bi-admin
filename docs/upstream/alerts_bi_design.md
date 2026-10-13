@@ -1,5 +1,14 @@
 # Alerts BI — Design Document
 
+## Automatic deployment migrations — accepted 2026-10-13
+
+The product owner requested migrations to run automatically with admin deployment. The
+single-replica Recreate Deployment runs `db setup` in a regular migration init container
+using the same image and SQL configuration, targeting ADMIN_DATABASE when set. Missing
+revisions apply before UI/worker/proxy startup; failure blocks those containers. Existing
+revision checksums and data-preserving migration behavior are retained. Normal rollout
+no longer requires a separately launched migration Job. See openshift-deployment.md.
+
 ## Standalone HTML output removal — accepted 2026-10-13
 
 The product owner requested complete removal of standalone run HTML output. The supported

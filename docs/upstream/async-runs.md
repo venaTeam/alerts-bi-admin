@@ -83,8 +83,10 @@ To remove existing generated HTML after rollout, use `alerts-bi-admin remove-run
 <explicit-output-root>`. It removes only scorecard.html accompanied by all three CSV exports,
 stays inside that output root, and preserves other HTML and all CSV data.
 
-Deploy in order: stop the UI and manual worker; apply through additive migration 011
-(including 010 if not yet applied); deploy the updated image for both UI and worker. The
+Deploy the updated admin manifest with the same image digest in migration initialization,
+UI and worker. Recreate terminates the old pod, then the new pod's migration init container
+automatically applies missing revisions through 011 before any app container starts.
+Failure blocks startup until initialization succeeds; no separate migration launch is needed. The
 shipped admin manifest includes the dedicated executor with matching image, registry,
 SQL/ES/model settings and output mount. Keep both writers on the updated version: older
 writers do not supply the required key digest introduced by 011. Verify rapid acceptance, completion/failure, duplicate submission, restart
