@@ -64,6 +64,8 @@ Explicit `--registry` and `--out` flags take precedence over environment setting
 
 ### Elasticsearch sources
 
+For an existing deployment, see the [environment changes and migration guide](docs/admin-env-changes.md).
+
 Set `ES_V1_INDEX` and `ES_V2_INDEX` to the deployment's v1 and v2 index names, aliases,
 or read patterns. They default to `appchi-v1` and `appchi-v2` for the existing local mock.
 The reader and `/healthz` use the same settings; readiness requires both configured
