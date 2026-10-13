@@ -80,6 +80,40 @@ def test_acceptance_is_durable_idempotent_and_does_not_execute(client: TestClien
     assert client.post("/runs", json=BODY, headers={"X-CSRF-Token": token}).status_code == 409
 
 
+def test_submission_and_status_timestamps_preserve_sql_utc_instants(client: TestClient) -> None:
+    posted = submit(client, "utc-timestamps")
+    assert posted.status_code == 202, posted.text
+    row = posted.json()
+
+    def assert_instants(response: dict[str, Any], stored: dict[str, Any]) -> None:
+        for key in ("submitted_at", "started_at", "completed_at"):
+            if stored[key] is None:
+                assert response[key] is None
+            else:
+                assert response[key].endswith("Z"), response[key]
+                parsed = datetime.fromisoformat(response[key])
+                assert parsed.utcoffset() == timedelta(0)
+                assert parsed == stored[key].replace(tzinfo=UTC)
+
+    with connect(CONFIG.sql, DB) as db:
+        assert_instants(row, jobs.get_job(db, row["job_id"]))
+        started = datetime(2026, 10, 13, 12, 0, 0, 123000)
+        db.execute(
+            "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
+            {"id": row["job_id"], "at": started},
+        )
+        db.commit()
+        running = client.get(row["status_url"])
+        assert running.status_code == 200
+        assert running.json()["started_at"] == "2026-10-13T12:00:00.123Z"
+        assert_instants(running.json(), jobs.get_job(db, row["job_id"]))
+        jobs.finish_job(db, row["job_id"], "failed", "Test interruption")
+        finished = client.get(row["status_url"])
+        assert finished.status_code == 200
+        assert finished.json()["completed_at"] is not None
+        assert_instants(finished.json(), jobs.get_job(db, row["job_id"]))
+
+
 def test_installed_worker_completes_and_outputs_have_no_html(
     client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:

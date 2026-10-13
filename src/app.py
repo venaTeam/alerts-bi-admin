@@ -19,6 +19,7 @@ from alerts_bi_operations.review.decisions import DecisionRefused, record_decisi
 from alerts_bi_operations.review.publication import PublicationRefused, publish_run, unpublish_run
 from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.timefmt import iso_instant
 from alerts_bi_shared.versions import APP_VERSION
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.encoders import jsonable_encoder
@@ -479,7 +480,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         )
 
     def job_status(row: dict[str, Any]) -> dict[str, Any]:
-        return {
+        result = {
             key: row[key]
             for key in (
                 "job_id",
@@ -491,7 +492,10 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 "completed_at",
                 "error_summary",
             )
-        } | {
+        }
+        for key in ("submitted_at", "started_at", "completed_at"):
+            result[key] = iso_instant(row[key]) if row[key] is not None else None
+        return result | {
             "status_url": f"/run-jobs/{row['job_id']}",
             "result_url": pages.team_url(str(row["team_id"]), str(row["run_id"])) + "#selected-run"
             if row["status"] == "completed"
