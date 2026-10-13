@@ -6,7 +6,7 @@ the former runs service and source repository. The standalone portal remains a r
 consumer of published SQL views and `alerts-bi-shared`.
 
 Teams opens run history and Overview, Findings, Decisions and Activity tabs. Schedule and
-Decisions have workspace-wide pages. Trigger, inspect, publish, withdraw and record human
+Decisions have workspace-wide pages. Trigger, inspect, publish, withdraw, delete runs and record human
 decisions in the same application. The existing UI is preserved.
 
 ## Install and start
@@ -25,7 +25,9 @@ poetry run alerts-bi-admin serve
 
 `db setup` targets SQL_DATABASE unless `--database` is explicit; run it only for an authorized
 database. It preserves applied revisions and rejects checksum drift. No data/schema migration
-is introduced by the repository move. Schema head stays `008_measurement_basis`.
+is introduced by the repository move. The run-deletion feature requires schema head
+`009_run_deletion`; apply it through `db setup` before using Delete run. It preserves
+append-only decision protection while a run exists. Never edit applied migration files.
 
 The listener binds only to loopback, default port 8200, behind the trusted login proxy's
 `X-Forwarded-User`. Local-only `serve --dev-user your-name` supplies an explicit development
@@ -51,7 +53,11 @@ poetry run alerts-bi-admin decide --run-id <id> --schema v1 --application <app> 
 poetry run alerts-bi-admin decisions --team <team>
 ```
 
-Manual runs cover exactly the preceding 168 hours and remain unpublished. Weekly jobs retain
+Manual runs select a Monday 00:00 UTC end and cover the preceding Monday-to-Monday
+168 hours, remaining unpublished. The form uses a Monday-only date picker; JSON and CLI
+reject other weekdays or times. Omitted `run_at` / `--run-at` uses the latest completed
+Monday week. Historical runs and the fixed-clock acceptance oracle remain readable.
+Weekly jobs retain
 the Monday UTC windows, SQL schedule lock, health gate, catch-up and publication policy.
 Run exactly one weekly scheduler. Operator `--by` defaults to the OS user; web writes use the
 proxy identity. Operator commands support `--database`, while the listener additionally
@@ -61,6 +67,15 @@ manual runs, weekly jobs and weekly status all honor that environment variable.
 `ADMIN_OUT_DIR` configures HTTP output and the root for CLI reports: manual runs and
 `report` write `<root>/<run id prefix>`, weekly jobs write `<root>/weekly`.
 Explicit `--registry` and `--out` flags take precedence over environment settings.
+
+Delete run is an authenticated, CSRF-protected POST with explicit permanent-deletion
+confirmation. It removes the run's SQL results, publications, decisions, schedule rows and
+model audit transactionally, then removes the four generated reports from configured
+manual/weekly output folders. It retains shared caches and prompt artifacts, and reports
+file-cleanup failure separately. Custom CLI output paths require manual cleanup. Active
+manual/model/weekly work blocks deletion. The scheduler can recreate a deleted due week.
+The admin publication dialog has no gap override; missing weeks still block publication.
+CLI recovery and scheduler retention exceptions retain their existing gap handling.
 
 ### Elasticsearch sources
 

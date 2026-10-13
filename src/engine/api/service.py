@@ -25,9 +25,22 @@ from ..es.client import EsClient
 from ..llm.client import LlmClient
 from ..llm.fake import FakeLlmClient
 from ..run.orchestrator import RunSummary, execute_run, select_llm_client
+from ..weekly.plan import latest_week_end as latest_week_end
+from ..weekly.runner import WeeklyBusy as WeeklyBusy
+from ..weekly.runner import schedule_lock as schedule_lock
 from .schemas import CheckOut, LlmMode, RunRequest, TeamOut
 
-__all__ = ["RunGate", "RunResult", "check_health", "list_teams", "resolve_outputs", "start_run"]
+__all__ = [
+    "RunGate",
+    "RunResult",
+    "WeeklyBusy",
+    "check_health",
+    "latest_week_end",
+    "list_teams",
+    "resolve_outputs",
+    "schedule_lock",
+    "start_run",
+]
 
 
 class RunGate:
@@ -109,7 +122,7 @@ def select_client(config: AppConfig, mode: LlmMode) -> tuple[LlmClient | None, s
 
 def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResult:
     """Execute one run, persist it, write its files and render its outputs."""
-    run_at = body.run_at or datetime.now(UTC)
+    run_at = body.run_at or latest_week_end(datetime.now(UTC))
     if run_at.tzinfo is None:
         run_at = run_at.replace(tzinfo=UTC)
     client, reason = select_client(settings.config, body.llm)

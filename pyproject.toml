@@ -37,7 +37,7 @@ package-dir = {"alerts_bi_admin" = "src", "src" = "compat/src"}
 
 [tool.setuptools.package-data]
 alerts_bi_admin = ["py.typed"]
-"alerts_bi_admin.engine" = ["db/migrations/001_initial_schema.sql", "db/migrations/002_review_portal.sql", "db/migrations/003_weekly_schedule.sql", "db/migrations/004_llm_review_audit.sql", "db/migrations/005_team_summary.sql", "db/migrations/006_r6_episodes.sql", "db/migrations/007_portal_daily.sql", "db/migrations/008_measurement_basis.sql", "db/migrations/script.py.mako", "py.typed", "resources/guides/Alerting_Guide_Appchi_EN.md", "resources/guides/what_is_an_incorrect_alert_EN.md"]
+"alerts_bi_admin.engine" = ["db/migrations/001_initial_schema.sql", "db/migrations/002_review_portal.sql", "db/migrations/003_weekly_schedule.sql", "db/migrations/004_llm_review_audit.sql", "db/migrations/005_team_summary.sql", "db/migrations/006_r6_episodes.sql", "db/migrations/007_portal_daily.sql", "db/migrations/008_measurement_basis.sql", "db/migrations/009_run_deletion.sql", "db/migrations/script.py.mako", "py.typed", "resources/guides/Alerting_Guide_Appchi_EN.md", "resources/guides/what_is_an_incorrect_alert_EN.md"]
 
 [tool.ruff]
 line-length = 100

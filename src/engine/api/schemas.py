@@ -11,7 +11,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from ..weekly.plan import is_week_boundary
 
 __all__ = [
     "CheckOut",
@@ -68,11 +70,19 @@ class RunRequest(BaseModel):
 
     team: str = Field(min_length=1, description="registry team_id; a run never defaults")
     run_at: datetime | None = Field(
-        default=None, description="freeze run_at (ISO 8601 UTC); defaults to now"
+        default=None,
+        description="Monday 00:00 UTC window end; defaults to the latest completed Monday",
     )
     llm: LlmMode = Field(
         default="live", description="live: the on-prem model; fake: deterministic; off: skip"
     )
+
+    @field_validator("run_at")
+    @classmethod
+    def monday_boundary(cls, value: datetime | None) -> datetime | None:
+        if value is not None and not is_week_boundary(value):
+            raise ValueError("Choose a Monday at 00:00 UTC for the window end")
+        return value
 
 
 class VolumeOut(BaseModel):

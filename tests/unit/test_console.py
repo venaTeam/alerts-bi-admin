@@ -46,6 +46,7 @@ def test_every_read_requires_identity(client: TestClient, path: str) -> None:
         "/teams/checkout-api/trigger",
         "/runs/id/publish",
         "/runs/id/withdraw",
+        "/runs/id/delete",
         "/runs/id/decide",
     ],
 )

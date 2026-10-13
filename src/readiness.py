@@ -60,3 +60,8 @@ def check_schema(db: Database) -> None:
     for table, columns in REQUIRED_COLUMNS.items():
         names = ", ".join(f"[{column.strip()}]" for column in columns.split(","))
         db.query(f"SELECT TOP 0 {names} FROM [{table}]")
+    if (
+        db.query_one("SELECT 1 AS ready FROM schema_migrations WHERE version='009_run_deletion'")
+        is None
+    ):
+        raise ValueError("The operator schema needs migration 009_run_deletion.")

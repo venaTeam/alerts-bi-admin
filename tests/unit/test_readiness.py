@@ -30,6 +30,7 @@ def test_healthy_schema_checks_all_operator_tables_without_fetching_rows(
 ) -> None:
     db = Mock(spec=Database)
     db.query.return_value = []
+    db.query_one.return_value = {"ready": 1}
     with client_for(monkeypatch, db) as client:
         response = client.get("/healthz")
     assert response.status_code == 200 and response.json()["ok"] is True
@@ -62,3 +63,13 @@ def test_missing_table_or_column_returns_generic_503(
     assert "private connection" not in response.text
     assert missing not in response.text
     assert db.query.call_count <= len(REQUIRED_COLUMNS)
+
+
+def test_missing_deletion_migration_is_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = Mock(spec=Database)
+    db.query.return_value = []
+    db.query_one.return_value = None
+    with client_for(monkeypatch, db) as client:
+        response = client.get("/healthz")
+    assert response.status_code == 503
+    assert response.json()["checks"]["operator_schema"]["ok"] is False
