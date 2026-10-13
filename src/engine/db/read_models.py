@@ -12,6 +12,8 @@ from alerts_bi_shared.db.connection import Database
 from alerts_bi_shared.insights.estimate import v1_rule_key_of
 from alerts_bi_shared.insights.stored import build_facts
 
+from .bulk import insert_rows
+
 LIST_COLUMNS = (
     "run_id, alert_schema, application, key_field, message, severity, provider, alert_rule_url, "
     "component, node_name, row_count, first_seen, last_seen, quality_state, core_rule_ids, "
@@ -82,10 +84,12 @@ def rebuild_read_models(
         for r in rows
         if r["alert_schema"] == "v1"
     }
-    db.execute_many(
-        "INSERT INTO run_v1_rules(run_id,application,rule_hash) VALUES(:run,:app,:hash)",
+    insert_rows(
+        db,
+        "run_v1_rules",
+        ("run_id", "application", "rule_hash"),
         [
-            {"run": run_id, "app": app, "hash": sha256(key.encode()).digest()}
+            {"run_id": run_id, "application": app, "rule_hash": sha256(key.encode()).digest()}
             for app, key in sorted(keys)
         ],
     )

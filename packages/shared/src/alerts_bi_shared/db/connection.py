@@ -20,10 +20,11 @@ Two execution paths, matching what each statement actually is:
   ``:word`` as a bind parameter, and the migration DDL carries colons in its comments;
   parsing those would be a change in meaning for no benefit.
 
-Connections are not pooled. Each :func:`connect` builds an engine with ``NullPool``, opens
+Dedicated execution connections are not pooled. Each :func:`connect` builds an engine with ``NullPool``, opens
 one connection and disposes the engine on exit, which is exactly the lifetime the pipeline
 had before. A pool would hold connections open across the guarded test-database reset, which
-drops the database out from under them.
+drops the database out from under them. WebDatabasePool provides separate bounded request
+connections; close application lifespans before resetting a disposable database.
 """
 
 from __future__ import annotations

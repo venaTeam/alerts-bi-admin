@@ -15,13 +15,20 @@ from alerts_bi_shared.insights.stored import alert_from_row, merge_facts
 @lru_cache(maxsize=64)
 def _decode(payload: str) -> dict[str, Any]:
     result: dict[str, Any] = json.loads(payload)
+    if result.get("version") != 1:
+        raise ValueError("Unsupported stored summary format")
     return result
 
 
 def decode_facts(payload: str) -> dict[str, Any]:
     # Cache only immutable serialized facts, never publication visibility or decisions.
     # merge_facts allocates every mutable output; callers cannot mutate the cached value.
-    return _decode(payload) if len(payload) <= 262144 else json.loads(payload)
+    if len(payload) <= 262144:
+        return _decode(payload)
+    result: dict[str, Any] = json.loads(payload)
+    if result.get("version") != 1:
+        raise ValueError("Unsupported stored summary format")
+    return result
 
 
 def selection(

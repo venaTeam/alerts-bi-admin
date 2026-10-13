@@ -1,5 +1,5 @@
 {
-  "source_commit": "5f9e2f8b94438a505f25139b1d7b725b335db7c7",
+  "source_commit": "06feb519a0fc970c95efe25084e27a8f69f2df1b",
   "schema_head": "013_analysis_checkpoints",
   "files": {
     "001_initial_schema.sql": "7c4f43ce0aa698bcf82b1694143fe9dd5f68a35430c1a8461c7296f958dde41a",

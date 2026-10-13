@@ -79,9 +79,14 @@ def main() -> None:
     parser.add_argument("--events", type=int, default=300000)
     parser.add_argument("--mode", choices=("streaming", "materialized"), default="streaming")
     parser.add_argument("--team", default="legacy-batch-jobs")
+    parser.add_argument(
+        "--identities", type=int, default=None, help="Distinct keys, independent of event count"
+    )
     args = parser.parse_args()
     if args.events < 1:
         parser.error("--events must be positive")
+    if args.identities is not None and not 1 <= args.identities <= args.events:
+        parser.error("--identities must be between one and --events")
     definitions = json.loads(Path("scripts/mock_teams.json").read_bytes())["teams"]
     fixture = next(t for t in definitions if t["name"] == args.team)
     templates = [expand_v1(fixture, definition)[0]["doc"] for definition in fixture["v1Defs"]]
@@ -105,6 +110,9 @@ def main() -> None:
                     **templates[i % len(templates)],
                     "@timestamp": timestamp,
                     "time_created": timestamp,
+                    **(
+                        {"key_field": f"scale-key-{i % args.identities}"} if args.identities else {}
+                    ),
                 }
             )
         page = json.dumps(documents)

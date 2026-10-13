@@ -50,6 +50,12 @@ def seek(
             return "", {}, False
         if any(type(value) not in (int, str) for value in values):
             return "", {}, False
+        for (name, _), value in zip(columns, values, strict=True):
+            if name in ("row_count", "attention_rank"):
+                if type(value) is not int or not 0 <= value <= 2147483647:
+                    return "", {}, False
+            elif not isinstance(value, str) or len(value) > 512:
+                return "", {}, False
     except (ValueError, TypeError, UnicodeError):
         return "", {}, False
     terms = []

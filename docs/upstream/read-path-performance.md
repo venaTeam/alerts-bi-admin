@@ -60,6 +60,34 @@ numbered-page bookmarks remain supported. Equal event counts preserve identity o
 Application-filtered charts use exact stored daily unions when available; old weeks
 without those facts continue to show an unavailable measurement.
 
+Persistence sends parameterized batches below SQL Server's 2,100-parameter and
+1,000-row VALUES limits, within the same atomic completed-run transaction. This reduces
+driver round trips without making partial runs visible.
+
+### Reads during ingestion
+
+The local load rehearsal exposed reader blocking with SQL Server's default locking
+READ COMMITTED isolation. Low latency during ingestion requires committed row-versioned
+reads (`READ_COMMITTED_SNAPSHOT ON`) or equivalent isolation proven in the deployment.
+This changes read isolation, not worker concurrency, retention, or deployment topology.
+Existing session execution locks, update locks and uniqueness constraints remain in place.
+Do not use NOLOCK: unpublished or incomplete facts must never appear in either application.
+
+The benchmark's `--read-committed-snapshot` flag changes only explicitly guarded local
+`alerts_bi_test`. Production enablement remains a separate authorized database rollout.
+For that rollout, rehearse on a representative copy, allow version-store/tempdb capacity,
+drain application connections, and use an approved database identifier from `master`:
+
+```sql
+ALTER DATABASE [approved_database] SET READ_COMMITTED_SNAPSHOT ON WITH NO_WAIT;
+```
+
+Verify `sys.databases.is_read_committed_snapshot_on`, then reconnect the applications.
+`NO_WAIT` fails rather than terminating another session. Rollback uses `OFF WITH NO_WAIT`
+after draining connections again; locking readers may then wait for ingestion. Keep write
+transactions bounded and monitor version-store growth, ingestion duration and request p95.
+This follows Microsoft's [row-versioning guidance](https://learn.microsoft.com/en-us/sql/relational-databases/sql-server-transaction-locking-and-row-versioning-guide?view=sql-server-ver17).
+
 ## Verification and rollout
 
 Compare stored summaries and filtered combinations against complete-input calculations.

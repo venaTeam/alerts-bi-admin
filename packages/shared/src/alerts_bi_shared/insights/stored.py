@@ -237,16 +237,14 @@ def schema_totals(
         unseen = [int(d["unseen"]) for d in days if d.get("unseen") is not None]
         result[schema] = SchemaTotals(
             schema=schema,
-            events=f["events"],
+            events=sum(int(d["alerts"]) for d in days) if admin else f["events"],
             distinct_alerts=f["distinct_alerts"],
-            distinct_per_day=sum(d["distinct_alerts"] for d in days) / 7
-            if admin and measured
-            else None,
+            distinct_per_day=sum(d["distinct_alerts"] for d in days) / 7 if admin else None,
             rule_flagged_events=sum(
                 d.get("flagged_by_rule", d.get("flagged_rows", 0)) for d in days
             )
-            if measured
-            else None,
+            if measured or admin
+            else (0 if not f["distinct_alerts"] else None),
             rule_flagged_alerts=f["states"].get("rule_flagged", 0),
             suppressed=sum(d["suppressed"] for d in days)
             if measured
