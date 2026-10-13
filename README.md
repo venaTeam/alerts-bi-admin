@@ -78,6 +78,9 @@ The mock generator, scale probe and Kibana data-view lookup use these index sett
 too. The generator requires distinct concrete names and still refuses `RESET=1` on
 non-loopback endpoints. Use an isolated local mock for generation/reset; source aliases
 and wildcard patterns are for readers. The scale probe also honors `ADMIN_REGISTRY_PATH`.
+Pure fixture helpers, fake evaluation, and CPU/memory benchmarks accept wildcard settings;
+concrete-name validation happens before mock reset or bulk writes. Readiness rejects
+wildcard sources with no matching indices.
 
 ## Source, libraries and builds
 

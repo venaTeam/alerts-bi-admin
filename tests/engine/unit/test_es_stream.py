@@ -97,6 +97,16 @@ def test_pit_lifetime_applies_to_open_and_each_page() -> None:
     assert all(request["pit"]["keep_alive"] == "5m" for request in client.requests)
 
 
+@pytest.mark.parametrize("exists", [False, True])
+def test_index_existence_rejects_empty_wildcard_matches(exists: bool) -> None:
+    transport = MagicMock()
+    transport.indices.exists.return_value = exists
+    assert EsClient(Client.config, transport).index_exists("legacy-alerts-*") is exists
+    transport.indices.exists.assert_called_once_with(
+        index="legacy-alerts-*", allow_no_indices=False
+    )
+
+
 @pytest.mark.parametrize("failure", ["timeout", "shard", "total", "relation", "sort", "count"])
 def test_incomplete_reads_fail_and_close_latest_pit(failure: str) -> None:
     response = page(1)

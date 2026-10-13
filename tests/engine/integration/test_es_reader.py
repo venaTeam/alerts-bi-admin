@@ -44,6 +44,11 @@ def test_the_query_is_scoped_to_exact_operators_and_the_half_open_window() -> No
     assert "lte" not in filters[1]["range"]["@timestamp"]
 
 
+def test_existence_check_requires_a_wildcard_match(client: EsClient) -> None:
+    assert client.index_exists(CONFIG.es.v1_index + "*")
+    assert not client.index_exists("alerts-bi-review-4256308540-no-source-*")
+
+
 def test_reads_only_the_selected_team_operators(client: EsClient) -> None:
     team = select_team(load_registry(), "fraud-detection")
     result = read_schema(client, "v1", team.v1_operators, WINDOW)

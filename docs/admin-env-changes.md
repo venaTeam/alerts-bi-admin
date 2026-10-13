@@ -88,9 +88,20 @@ has been merged or deployed.
 The mock generator requires two distinct concrete index names. Do not use aliases
 or wildcard/read expressions as generator targets. Its `RESET=1` operation still
 refuses non-loopback endpoints; use an isolated local mock when generating data.
+These writer checks run when reset or bulk loading is requested. Importing fixture
+helpers, running fake model evaluation, and benchmarking without Elasticsearch writes
+remain supported with wildcard source settings. Readiness rejects wildcard expressions
+that match no indices.
 
-Verification of the implementation passed 893 unit tests, 114 integration tests,
+Initial implementation verification passed 893 unit tests, 114 integration tests,
 4 acceptance tests, and 843 acceptance-oracle checks, plus lint, formatting,
 strict types, lockfile and packaging checks. A real CLI run and browser
 Overview/Findings review were checked using custom source aliases and a `5m`
 snapshot lifetime. Production behavior has not been verified.
+
+After the PR review fixes, all 902 unit tests passed with wildcard source settings,
+including test collection and fake-evaluation/benchmark subprocesses. All 12
+Elasticsearch reader integration tests passed. The admin health endpoint returned
+200 for matching patterns and 503 for an unmatched pattern with SQL still healthy;
+the browser team overview also passed its smoke check. No SQL database reset was
+needed for these follow-up checks.

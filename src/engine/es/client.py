@@ -53,7 +53,7 @@ class EsClient:
 
     def index_exists(self, index: str) -> bool:
         try:
-            return bool(self.client.indices.exists(index=index))
+            return bool(self.client.indices.exists(index=index, allow_no_indices=False))
         except (ApiError, TransportError):
             return False
 
