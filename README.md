@@ -138,7 +138,9 @@ ADMIN_REGISTRY_PATH, ADMIN_OUT_DIR, SQL, Elasticsearch and model settings. The w
 require ADMIN_SECRET. The shipped deploy/admin.yaml includes a dedicated worker with the
 same image, registry, SQL/ES/model configuration and output mount. Its migration init container
 automatically runs db setup before UI/worker startup, targeting ADMIN_DATABASE or SQL_DATABASE.
-Recreate stops the previous pod before initialization; migration failure blocks startup. It backfills
+Recreate stops the previous pod before initialization; migration failure blocks startup. The
+health endpoint requires the job-key digest column and migration 011 ledger entry, so a
+010-only schema returns 503 until upgraded. Migration 011 backfills
 existing submission digests without editing 001–010. Older writers cannot insert the new
 required digest. Keys differing only in case or trailing spaces request distinct attempts.
 `run-worker --once` processes at most one job and exits. The team page polls while visible;

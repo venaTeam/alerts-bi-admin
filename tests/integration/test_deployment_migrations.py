@@ -13,6 +13,9 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alerts_bi_shared.db.connection import connect
+from fastapi.testclient import TestClient
+from src.app import build_admin
+from src.config import AdminConfig, AdminSettings
 from src.engine.config import load_config
 from src.engine.db import migrate as migrations
 
@@ -61,6 +64,13 @@ def test_init_applies_missing_revision_once_to_admin_database(
             {"id": "c" * 32, "hash": "0" * 64},
         )
         db.commit()
+    settings = AdminSettings(AdminConfig(CONFIG.sql), DB, "m" * 40, out_root=tmp_path)
+    with TestClient(
+        build_admin(settings), headers={"X-Forwarded-User": "migration-test"}
+    ) as client:
+        before = client.get("/healthz")
+    assert before.status_code == 503, before.text
+    assert before.json()["checks"]["operator_schema"]["ok"] is False
     # An explicit admin target wins even when SQL_DATABASE names another database.
     first = init_command(tmp_path, {"ADMIN_DATABASE": DB, "SQL_DATABASE": "unused-target"})
     assert first.returncode == 0, first.stderr
@@ -69,6 +79,12 @@ def test_init_applies_missing_revision_once_to_admin_database(
     second = init_command(tmp_path, {"ADMIN_DATABASE": "", "SQL_DATABASE": DB})
     assert second.returncode == 0, second.stderr
     assert "database is up to date" in second.stdout
+    with TestClient(
+        build_admin(settings), headers={"X-Forwarded-User": "migration-test"}
+    ) as client:
+        after = client.get("/healthz")
+    assert after.status_code == 200, after.text
+    assert after.json()["ok"] is True
     with connect(CONFIG.sql, DB) as db:
         assert migrations.current_revision(db) == "011_run_job_keys"
         assert db.query_one(

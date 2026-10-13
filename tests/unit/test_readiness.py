@@ -43,9 +43,12 @@ def test_healthy_schema_checks_all_operator_tables_without_fetching_rows(
     assert "[open_since]" in " ".join(statements)
     assert "[unseen_unmeasured]" in " ".join(statements)
     assert "[withdrawn_reason]" in " ".join(statements)
+    assert "[idempotency_key_hash]" in " ".join(statements)
 
 
-@pytest.mark.parametrize("missing", [*sorted(REQUIRED_COLUMNS), "open_since"])
+@pytest.mark.parametrize(
+    "missing", [*sorted(REQUIRED_COLUMNS), "open_since", "idempotency_key_hash"]
+)
 def test_missing_table_or_column_returns_generic_503(
     monkeypatch: pytest.MonkeyPatch, missing: str
 ) -> None:
@@ -65,10 +68,15 @@ def test_missing_table_or_column_returns_generic_503(
     assert db.query.call_count <= len(REQUIRED_COLUMNS)
 
 
-def test_missing_deletion_migration_is_not_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("missing", ["009_run_deletion", "011_run_job_keys"])
+def test_missing_required_migration_is_not_ready(
+    monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
     db = Mock(spec=Database)
     db.query.return_value = []
-    db.query_one.return_value = None
+    db.query_one.side_effect = lambda statement, params: (
+        None if params["version"] == missing else {"ready": 1}
+    )
     with client_for(monkeypatch, db) as client:
         response = client.get("/healthz")
     assert response.status_code == 503
