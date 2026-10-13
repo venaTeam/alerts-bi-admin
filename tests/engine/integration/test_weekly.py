@@ -13,7 +13,6 @@ from alerts_bi_shared.db.connection import connect
 from src.engine.config import load_config
 from src.engine.db.migrate import reset_test_database
 from src.engine.es.client import EsClient
-from src.engine.es.reader import V1_INDEX
 from src.engine.llm.fake import FakeLlmClient, ScriptedResult
 from src.engine.weekly.runner import PUBLISHER, WeeklyBusy, run_weekly, schedule_lock
 
@@ -42,8 +41,8 @@ def registry(tmp_path_factory: pytest.TempPathFactory) -> str:
 @pytest.fixture()
 def fresh() -> Iterator[None]:
     try:
-        if not EsClient(CONFIG.es).index_exists(V1_INDEX):
-            pytest.skip("mock Elasticsearch has no appchi-v1 index")
+        if not EsClient(CONFIG.es).index_exists(CONFIG.es.v1_index):
+            pytest.skip("mock Elasticsearch is missing the configured v1 index")
     except Exception as exc:  # pragma: no cover - environment dependent
         pytest.skip(f"mock Elasticsearch is not reachable: {exc}")
     try:

@@ -57,7 +57,7 @@ class EsClient:
         except (ApiError, TransportError):
             return False
 
-    def open_pit(self, index: str, keep_alive: str = "2m") -> str:
+    def open_pit(self, index: str, keep_alive: str | None = None) -> str:
         """Open a point-in-time so pagination sees one consistent view of the index.
 
         Without a PIT, ``from``/``size`` paging over a live index can skip or repeat
@@ -65,7 +65,9 @@ class EsClient:
         depend on how busy the cluster was during the run.
         """
         try:
-            response = self.client.open_point_in_time(index=index, keep_alive=keep_alive)
+            response = self.client.open_point_in_time(
+                index=index, keep_alive=keep_alive or self.config.pit_keep_alive
+            )
         except NotFoundError as exc:
             raise ElasticsearchError(f"index {index} does not exist", 404) from exc
         except (ApiError, TransportError) as exc:

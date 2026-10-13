@@ -56,3 +56,15 @@ def test_operator_ui_uses_only_local_engine_adapters() -> None:
                     assert node.module in adapters, path
             elif isinstance(node, ast.Import):
                 assert all(not item.name.startswith(forbidden) for item in node.names), path
+
+
+def test_listener_passes_environment_indexes_to_engine(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ADMIN_SECRET", "x" * 40)
+    monkeypatch.setenv("ES_V1_INDEX", "operator-v1")
+    monkeypatch.setenv("ES_V2_INDEX", "operator-v2")
+    settings = load_admin_settings().api_settings()
+    assert settings.config.es.v1_index == "operator-v1"
+    assert settings.config.es.v2_index == "operator-v2"

@@ -24,7 +24,6 @@ from src.engine.db.repositories import (
     persist_run,
 )
 from src.engine.es.client import EsClient
-from src.engine.es.reader import V1_INDEX
 from src.engine.llm.fake import FakeLlmClient
 from src.engine.run.orchestrator import RunSummary, execute_run
 
@@ -43,12 +42,12 @@ RunFn = Callable[..., tuple[Any, RunSummary]]
 def es_client() -> EsClient:
     client = EsClient(CONFIG.es)
     try:
-        available = client.index_exists(V1_INDEX)
+        available = client.index_exists(CONFIG.es.v1_index)
     except Exception as exc:  # pragma: no cover - environment dependent
         pytest.skip(f"mock Elasticsearch is not reachable: {exc}")
     if not available:
         pytest.skip(
-            "mock Elasticsearch has no appchi-v1 index; run: docker compose up -d && "
+            "mock Elasticsearch is missing the configured v1 index; run: docker compose up -d && "
             "RESET=1 poetry run python scripts/generate_mock_alerts.py"
         )
     return client

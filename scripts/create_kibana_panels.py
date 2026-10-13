@@ -24,10 +24,18 @@ import base64
 import json
 import os
 import re
+import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from src.engine.config import load_dotenv, load_es_config
+
+load_dotenv()
+ES_CONFIG = load_es_config()
 KB = os.environ.get("KIBANA_URL", "http://localhost:5601").rstrip("/")
 AUTH = os.environ.get("KIBANA_AUTH")
 
@@ -66,7 +74,7 @@ def data_views() -> dict[str, str]:
                 return view_id
         raise SystemExit(f'no data view for index "{title}" — create it in Kibana first')
 
-    return {"v1": find("appchi-v1"), "v2": find("appchi-v2")}
+    return {"v1": find(ES_CONFIG.v1_index), "v2": find(ES_CONFIG.v2_index)}
 
 
 def put(object_type: str, object_id: str, body: dict[str, Any]) -> dict[str, Any]:

@@ -12,7 +12,7 @@ from alerts_bi_operations.registry import load_registry, select_team
 from alerts_bi_shared.window import build_run_window
 from src.engine.config import load_config
 from src.engine.es.client import EsClient
-from src.engine.es.reader import V1_INDEX, build_query, read_schema, read_team_alerts
+from src.engine.es.reader import build_query, read_schema, read_team_alerts
 
 pytestmark = pytest.mark.integration
 
@@ -25,7 +25,7 @@ WINDOW = build_run_window(MOCK_NOW)
 @pytest.fixture(scope="module")
 def client() -> EsClient:
     es = EsClient(CONFIG.es)
-    if not es.index_exists(V1_INDEX):
+    if not es.index_exists(CONFIG.es.v1_index):
         pytest.skip(
             "mock Elasticsearch is not reachable; run: docker compose up -d && "
             "RESET=1 poetry run python scripts/generate_mock_alerts.py"

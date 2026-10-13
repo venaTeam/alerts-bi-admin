@@ -56,8 +56,26 @@ the Monday UTC windows, SQL schedule lock, health gate, catch-up and publication
 Run exactly one weekly scheduler. Operator `--by` defaults to the OS user; web writes use the
 proxy identity. Operator commands support `--database`, while the listener additionally
 supports `ADMIN_DATABASE`. Registry is admin-owned `config/teams.json`; mount production values
-using `ADMIN_REGISTRY_PATH`/`serve --registry`, and pass `--registry` to engine/job commands.
-`ADMIN_OUT_DIR` configures HTTP output; CLI jobs use `--out` or their documented defaults.
+using `ADMIN_REGISTRY_PATH` or an explicit `--registry`. The listener, registry check,
+manual runs, weekly jobs and weekly status all honor that environment variable.
+`ADMIN_OUT_DIR` configures HTTP output and the root for CLI reports: manual runs and
+`report` write `<root>/<run id prefix>`, weekly jobs write `<root>/weekly`.
+Explicit `--registry` and `--out` flags take precedence over environment settings.
+
+### Elasticsearch sources
+
+Set `ES_V1_INDEX` and `ES_V2_INDEX` to the deployment's v1 and v2 index names, aliases,
+or read patterns. They default to `appchi-v1` and `appchi-v2` for the existing local mock.
+The reader and `/healthz` use the same settings; readiness requires both configured
+sources to exist. Whitespace in an index setting is rejected before querying.
+Settings load from `.env`, with the process environment taking precedence.
+`ES_PIT_KEEP_ALIVE` controls the point-in-time lifetime for both opening and paging
+the snapshot (default `2m`); use a positive duration such as `5m` or `120s`.
+
+The mock generator, scale probe and Kibana data-view lookup use these index settings
+too. The generator requires distinct concrete names and still refuses `RESET=1` on
+non-loopback endpoints. Use an isolated local mock for generation/reset; source aliases
+and wildcard patterns are for readers. The scale probe also honors `ADMIN_REGISTRY_PATH`.
 
 ## Source, libraries and builds
 

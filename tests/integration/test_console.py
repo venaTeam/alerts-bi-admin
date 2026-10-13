@@ -16,7 +16,6 @@ from src.config import AdminConfig, AdminSettings
 from src.engine.config import load_config
 from src.engine.db.repositories import PersistencePayload, persist_run
 from src.engine.es.client import EsClient
-from src.engine.es.reader import V1_INDEX
 from src.pages import finding_key
 from src.queries import decision_history
 
@@ -241,7 +240,7 @@ def test_form_and_json_trigger_share_gate(client: TestClient) -> None:
 
 def test_ui_trigger_runs_real_engine_and_stays_unpublished(client: TestClient) -> None:
     try:
-        if not EsClient(CONFIG.es).index_exists(V1_INDEX):
+        if not EsClient(CONFIG.es).index_exists(CONFIG.es.v1_index):
             pytest.skip("Elasticsearch mock index is absent")
     except Exception as exc:
         pytest.skip(f"Elasticsearch unavailable: {exc}")

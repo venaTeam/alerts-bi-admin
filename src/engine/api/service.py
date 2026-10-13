@@ -22,7 +22,6 @@ from fastapi import HTTPException, status
 from ..config import ApiSettings, AppConfig
 from ..db.repositories import get_latest_run, persist_run
 from ..es.client import EsClient
-from ..es.reader import V1_INDEX
 from ..llm.client import LlmClient
 from ..llm.fake import FakeLlmClient
 from ..run.orchestrator import RunSummary, execute_run, select_llm_client
@@ -82,7 +81,13 @@ def check_health(settings: ApiSettings) -> dict[str, CheckOut]:
     """Report each dependency separately; a failure is data, not an exception."""
     checks: dict[str, CheckOut] = {}
     try:
-        checks["elasticsearch"] = CheckOut(ok=EsClient(settings.config.es).index_exists(V1_INDEX))
+        es = EsClient(settings.config.es)
+        try:
+            v1_exists = es.index_exists(settings.config.es.v1_index)
+            v2_exists = es.index_exists(settings.config.es.v2_index)
+            checks["elasticsearch"] = CheckOut(ok=v1_exists and v2_exists)
+        finally:
+            es.close()
     except Exception as exc:
         checks["elasticsearch"] = CheckOut(ok=False, error=redact_error(exc))
     try:

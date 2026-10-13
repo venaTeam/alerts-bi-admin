@@ -27,7 +27,6 @@ from src.engine.api.service import RunGate
 from src.engine.config import ApiSettings, load_config
 from src.engine.db.migrate import reset_test_database
 from src.engine.es.client import EsClient
-from src.engine.es.reader import V1_INDEX
 
 pytestmark = pytest.mark.integration
 
@@ -46,8 +45,8 @@ def run_body(**overrides: object) -> dict[str, object]:
 @pytest.fixture(scope="module")
 def settings(tmp_path_factory: pytest.TempPathFactory) -> ApiSettings:
     try:
-        if not EsClient(CONFIG.es).index_exists(V1_INDEX):
-            pytest.skip("mock Elasticsearch has no appchi-v1 index")
+        if not EsClient(CONFIG.es).index_exists(CONFIG.es.v1_index):
+            pytest.skip("mock Elasticsearch is missing the configured v1 index")
     except Exception as exc:  # pragma: no cover - environment dependent
         pytest.skip(f"mock Elasticsearch is not reachable: {exc}")
     try:
