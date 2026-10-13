@@ -26,7 +26,7 @@ Implement design section 7.12's Monday-only picker and server validation on form
 entry points; default to the latest completed Monday. Remove the admin gap override while
 preserving missing-week checks and scheduler/CLI exceptions. Add authenticated CSRF-protected
 `POST /runs/{run_id}/delete` with explicit confirmation, manual/scheduler/model-review locks,
-atomic SQL run-owned cleanup and configured report cleanup. Add migration 010 permitting
+atomic SQL run-owned cleanup and configured report cleanup. Add migration 009 permitting
 decision deletion only within a connection/run-scoped whole-run deletion allowance, with
 a checked parent foreign key preventing orphan inserts; ordinary decisions remain immutable.
 Verify published/unpublished/withdrawn/failed deletion, rollback, neighboring run preservation,
