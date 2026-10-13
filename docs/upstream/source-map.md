@@ -19,5 +19,6 @@ now live under admin's `src/engine`; the installed namespace is `alerts_bi_admin
 
 Supported executables are `alerts-bi-admin` and `alerts-bi-portal`. Admin is independently
 buildable using its local uv workspace; portal pins an immutable shared wheel produced by
-admin. Public `alerts_bi_shared` and `alerts_bi_operations` imports are unchanged. No supported
+admin. Shared 0.1.3 is unchanged. Operations 0.2.0 removes `report.html` and restricts
+the public report renderer to the three CSV exports. No supported
 consumer imports or installs a runs package. The old repository remains historical.

@@ -141,12 +141,14 @@ you can leave and return later. Failures and worker interruptions remain visible
 new submission to retry. Analysis completion never publishes a review.
 
 JSON clients use authenticated `POST /run-jobs` with X-CSRF-Token and Idempotency-Key, then
-GET the returned status_url. Existing synchronous POST /runs remains compatible and shares
+GET the returned status_url. Existing synchronous POST /runs returns JSON only and shares
 the manual SQL gate. Workers retain the shared weekly/manual CLI/report/deletion execution lock for their complete
 lifecycle. Pending/running jobs prevent permanent deletion. See docs/upstream/async-runs.md for the full contract.
 
-Run/report/weekly/acceptance output directories now contain three CSV exports. Scorecard HTML
-renders from SQL at the existing authenticated routes. To clean older generated HTML, use
+Run/report/weekly/acceptance output directories contain three CSV exports. Standalone HTML
+scorecards are removed entirely, including on-demand routes and download links. The normal
+team workspace remains available. POST /runs returns JSON only, without a scorecard field.
+Operations 0.2.0 removes report.html; shared 0.1.3 and CSV columns are unchanged. To clean older generated HTML, use
 `alerts-bi-admin remove-run-html --out <explicit-output-root>`; this preserves CSVs and other
 HTML files and only removes scorecard.html accompanied by all three CSV exports.
 

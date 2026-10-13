@@ -56,15 +56,7 @@ th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(-
 .result { color: var(--muted); font-size: .9rem; margin-top: .75rem; }
 """
 
-#: The form posts JSON so the request body matches the documented contract exactly, rather
-#: than a second form-encoded shape the endpoint would also have to accept. It also gives a
-#: run some feedback: a plain form submit shows nothing for the minutes a run can take.
-#:
-#: The finished scorecard is downloaded rather than written over this page. Replacing the
-#: page destroyed the form, so starting a second run meant navigating back; a download
-#: leaves the page intact and puts the report where the reader can keep it. The run also
-#: has a real URL, so the result line offers that too - a tab that can be reloaded and
-#: bookmarked, which a blob cannot.
+#: The contract-test form displays the JSON result and links only to CSV exports.
 SUBMIT_SCRIPT = """
 document.querySelector('form').addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -75,49 +67,31 @@ document.querySelector('form').addEventListener('submit', async (event) => {
   failure.textContent = '';
   result.textContent = '';
   button.disabled = true;
-  button.textContent = 'Running\\u2026';
+  button.textContent = 'Running…';
   const data = Object.fromEntries(new FormData(form).entries());
   if (!data.run_at) delete data.run_at;
   try {
     const response = await fetch('/runs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'text/html' },
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(data),
     });
-    const body = await response.text();
+    const body = await response.json();
     if (!response.ok) {
-      // The server renders a readable error page. Parse it for its text rather than
-      // injecting its markup, and keep the form usable so the run can be corrected.
-      const parsed = new DOMParser().parseFromString(body, 'text/html');
-      const detail = parsed.querySelector('p');
-      const message = (detail ? detail.textContent : '').trim();
+      const message = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
       failure.textContent = response.status + ' — ' + (message || 'the run was refused');
     } else {
-      const runId = response.headers.get('X-Alerts-BI-Run-Id') || '';
-      const team = response.headers.get('X-Alerts-BI-Team') || 'run';
-      const name = 'scorecard-' + team + (runId ? '-' + runId.slice(0, 8) : '') + '.html';
-      const url = URL.createObjectURL(new Blob([body], { type: 'text/html' }));
-      const download = document.createElement('a');
-      download.href = url;
-      download.download = name;
-      document.body.appendChild(download);
-      download.click();
-      download.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-
-      result.textContent = 'Downloaded ' + name + ' \\u2014 ';
-      const open = document.createElement('a');
-      open.href = '/runs/' + runId;
-      open.target = '_blank';
-      open.rel = 'noopener';
-      open.textContent = 'open it in a new tab';
-      result.appendChild(open);
+      result.textContent = 'Run completed. CSV exports: ';
+      for (const name of ['daily_metrics.csv', 'rule_counts.csv', 'alert_worklist.csv']) {
+        const download = document.createElement('a');
+        download.href = body.files[name];
+        download.textContent = name;
+        result.appendChild(download);
+        result.appendChild(document.createTextNode(' '));
+      }
     }
   } catch (error) {
-    // A dead server must say so. Leaving the button stuck on 'Running' made an
-    // unreachable service look like a slow run.
-    failure.textContent =
-      'Could not reach the service: ' + error + '. Is it still running?';
+    failure.textContent = 'Could not reach the service: ' + error + '. Is it still running?';
   } finally {
     button.disabled = false;
     button.textContent = 'Run';

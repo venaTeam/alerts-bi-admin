@@ -15,7 +15,6 @@ from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode
 
 from alerts_bi_operations.registry import RegistryError, load_registry
-from alerts_bi_operations.report.render import build_run_outputs
 from alerts_bi_operations.review.decisions import DecisionRefused, record_decision
 from alerts_bi_operations.review.publication import PublicationRefused, publish_run, unpublish_run
 from alerts_bi_shared.db.connection import Database, connect
@@ -57,11 +56,6 @@ SECURITY_HEADERS = {
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
 }
-
-#: The scorecard is self-contained with its own inline stylesheet and no script.
-SCORECARD_CSP = (
-    "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'none'"
-)
 
 _MAX_FORM = 64 * 1024
 
@@ -132,15 +126,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 response = PlainTextResponse("A same-site CSRF token is required.", status_code=403)
             else:
                 response = await call_next(request)
-        if (
-            request.url.path.startswith("/runs/")
-            and response.headers.get("content-type", "").startswith("text/html")
-            and (
-                request.url.path.endswith(("/scorecard", "/scorecard.html"))
-                or request.url.path.count("/") == 2
-            )
-        ):
-            response.headers.setdefault("Content-Security-Policy", SCORECARD_CSP)
         for name, value in SECURITY_HEADERS.items():
             response.headers.setdefault(name, value)
         return response
@@ -428,13 +413,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             ),
             303,
         )
-
-    @app.get("/runs/{run_id}/scorecard", response_class=HTMLResponse)
-    def scorecard(run_id: str) -> HTMLResponse:
-        with database() as db:
-            run_row(db, run_id)
-            html = build_run_outputs(db, run_id)["scorecard.html"]
-        return HTMLResponse(html, headers={"Content-Security-Policy": SCORECARD_CSP})
 
     @app.get("/runs/{run_id}/findings", response_class=HTMLResponse)
     def findings(

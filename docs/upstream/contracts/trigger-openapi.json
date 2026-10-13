@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Alerts BI",
-    "description": "Starts one team's weekly alert-quality run and serves its scorecard. A wrapper over the same pipeline the command line drives; it performs no analysis of its own, and reports are rendered only from committed SQL rows.",
+    "description": "Starts one team's weekly alert-quality run and serves CSV exports. A wrapper over the same pipeline the command line drives; it performs no analysis of its own, and reports are rendered only from committed SQL rows.",
     "version": "0.1.0"
   },
   "paths": {
@@ -47,7 +47,7 @@
         "tags": [
           "runs"
         ],
-        "summary": "Run one team and return its scorecard",
+        "summary": "Run one team and return a JSON summary with CSV links",
         "operationId": "create_run_runs_post",
         "requestBody": {
           "content": {
@@ -61,12 +61,11 @@
         },
         "responses": {
           "200": {
-            "description": "The scorecard HTML, or a JSON summary for an API caller.",
+            "description": "The completed run summary and its three CSV export links.",
             "content": {
               "application/json": {
                 "schema": {}
-              },
-              "text/html": {}
+              }
             }
           },
           "400": {
@@ -88,72 +87,12 @@
         }
       }
     },
-    "/runs/{run_id}": {
-      "get": {
-        "tags": [
-          "runs"
-        ],
-        "summary": "Re-render a stored run's scorecard from SQL",
-        "operationId": "get_scorecard_runs__run_id__get",
-        "parameters": [
-          {
-            "name": "run_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Run Id"
-            }
-          },
-          {
-            "name": "team",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "required when run_id is \"latest\"",
-              "title": "Team"
-            },
-            "description": "required when run_id is \"latest\""
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/runs/{run_id}/{name}": {
       "get": {
         "tags": [
           "runs"
         ],
-        "summary": "One of the four approved outputs, rendered from SQL",
+        "summary": "One of the three CSV exports, rendered from SQL",
         "operationId": "get_output_runs__run_id___name__get",
         "parameters": [
           {
@@ -171,7 +110,6 @@
             "required": true,
             "schema": {
               "enum": [
-                "scorecard.html",
                 "daily_metrics.csv",
                 "rule_counts.csv",
                 "alert_worklist.csv"
@@ -206,7 +144,6 @@
               "application/json": {
                 "schema": {}
               },
-              "text/html": {},
               "text/csv": {}
             }
           },

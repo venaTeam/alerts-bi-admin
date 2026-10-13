@@ -191,12 +191,19 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
         ) == {"quality_state": "rule_flagged"}
 
 
-def test_existing_output_routes_remain_available(client: TestClient) -> None:
-    for name in ("scorecard.html", "daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
+def test_csv_output_routes_remain_available(client: TestClient) -> None:
+    for name in ("daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
         response = client.get(f"/runs/{RUN}/{name}")
         assert response.status_code == 200
-        if name.endswith(".csv"):
-            assert "attachment" in response.headers["content-disposition"]
+        assert "attachment" in response.headers["content-disposition"]
+    page = client.get(f"/teams/{TEAM}?run_id={RUN}")
+    assert page.status_code == 200
+    for name in ("daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
+        assert f"/runs/{RUN}/{name}" in page.text
+    assert "scorecard" not in page.text.lower()
+    assert client.get(f"/runs/{RUN}").status_code == 404
+    for suffix in ("scorecard", "scorecard.html"):
+        assert client.get(f"/runs/{RUN}/{suffix}").status_code == 422
 
 
 def test_identity_history_never_crosses_teams(client: TestClient) -> None:
@@ -385,7 +392,7 @@ def test_permanent_deletion_removes_all_run_records(
     assert "run_id=" not in deleted.headers["location"]
     assert client.get(deleted.headers["location"]).status_code == 200
     assert not directory.exists()
-    assert client.get(f"/runs/{run_id}/scorecard").status_code == 404
+    assert client.get(f"/runs/{run_id}/daily_metrics.csv").status_code == 404
     assert client.get(f"/runs/{run_id}/alert_worklist.csv").status_code == 404
     with connect(CONFIG.sql, DB) as db:
         for table in (

@@ -109,11 +109,11 @@ def test_an_unknown_route_is_a_404_rather_than_a_traceback(client: TestClient) -
 
 def test_the_openapi_document_describes_the_surface(client: TestClient) -> None:
     schema = client.get("/openapi.json").json()
+    assert "/runs/{run_id}" not in schema["paths"]
     assert set(schema["paths"]) >= {
         "/healthz",
         "/teams",
         "/runs",
-        "/runs/{run_id}",
         "/runs/{run_id}/{name}",
     }
     assert schema["info"]["title"] == "Alerts BI"
@@ -134,17 +134,16 @@ def test_the_interactive_documentation_is_served(client: TestClient) -> None:
 # ----------------------------------------------------------------------- runs
 
 
-def test_a_run_returns_the_scorecard_html_for_that_run(client: TestClient) -> None:
-    response = client.post("/runs", json=run_body())
+def test_a_run_returns_only_json_even_when_html_is_requested(client: TestClient) -> None:
+    response = client.post("/runs", json=run_body(), headers={"Accept": "text/html"})
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
-    assert "Alerts BI scorecard" in response.text
-    assert "Checkout API" in response.text
-    # The run identity travels in a header so a caller can fetch the CSVs afterwards.
+    assert response.headers["content-type"].startswith("application/json")
+    assert "scorecard" not in response.json()
+    assert set(response.json()["files"]) == set(OUTPUT_FILES)
     assert len(response.headers["x-alerts-bi-run-id"]) == 64
 
 
-def test_a_run_writes_csvs_and_keeps_html_available_from_sql(
+def test_a_run_writes_only_csvs_and_html_export_is_unavailable(
     client: TestClient,
 ) -> None:
     response = client.post("/runs", json=run_body())
@@ -153,7 +152,7 @@ def test_a_run_writes_csvs_and_keeps_html_available_from_sql(
         name for name in OUTPUT_FILES if name.endswith(".csv")
     )
     run_id = response.headers["x-alerts-bi-run-id"]
-    assert client.get(f"/runs/{run_id}/scorecard.html").status_code == 200
+    assert client.get(f"/runs/{run_id}/scorecard.html").status_code == 422
 
 
 def test_a_json_caller_gets_the_summary_and_links_instead_of_html(client: TestClient) -> None:
@@ -172,7 +171,7 @@ def test_a_json_caller_gets_the_summary_and_links_instead_of_html(client: TestCl
         assert rows is not None and distinct is not None
         assert payload["v1"] == {"rows": rows["n"], "distinct": distinct["n"]}
     assert payload["llm_assessed"] is True
-    assert payload["scorecard"] == f"/runs/{payload['run_id']}"
+    assert "scorecard" not in payload
     assert set(payload["files"]) == set(OUTPUT_FILES)
 
 
@@ -249,11 +248,9 @@ def test_a_second_concurrent_run_is_refused_rather_than_racing(
 # -------------------------------------------------------------------- reports
 
 
-def test_a_stored_run_renders_from_sql_on_demand(client: TestClient) -> None:
+def test_standalone_html_run_route_is_removed(client: TestClient) -> None:
     run_id = client.post("/runs", json=run_body()).headers["x-alerts-bi-run-id"]
-    response = client.get(f"/runs/{run_id}")
-    assert response.status_code == 200
-    assert "Alerts BI scorecard" in response.text
+    assert client.get(f"/runs/{run_id}").status_code == 404
 
 
 @pytest.mark.parametrize("name", ["daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"])
@@ -277,24 +274,24 @@ def test_latest_resolves_that_team_s_most_recent_run(client: TestClient) -> None
     newer = client.post("/runs", json=run_body(team=team, run_at=RUN_AT))
     client.post("/runs", json=run_body(team=team, run_at="2026-08-17T00:00:00Z"))
 
-    response = client.get(f"/runs/latest?team={team}")
+    response = client.get(f"/runs/latest/daily_metrics.csv?team={team}")
     assert response.status_code == 200
     assert response.headers["x-alerts-bi-run-id"] == newer.headers["x-alerts-bi-run-id"]
 
 
 def test_latest_without_a_team_is_refused(client: TestClient) -> None:
-    response = client.get("/runs/latest", headers=JSON)
+    response = client.get("/runs/latest/daily_metrics.csv", headers=JSON)
     assert response.status_code == 400
     assert "team" in response.json()["detail"]
 
 
 def test_an_unknown_run_id_is_a_404_not_an_empty_report(client: TestClient) -> None:
-    response = client.get(f"/runs/{'f' * 64}", headers=JSON)
+    response = client.get(f"/runs/{'f' * 64}/daily_metrics.csv", headers=JSON)
     assert response.status_code == 404
     assert "not in the store" in response.json()["detail"]
 
 
-def test_only_the_four_approved_outputs_are_reachable(client: TestClient) -> None:
+def test_only_the_three_approved_csv_outputs_are_reachable(client: TestClient) -> None:
     """The file contract is the file contract; the surface serves nothing else."""
     run_id = client.post("/runs", json=run_body()).headers["x-alerts-bi-run-id"]
     for name in ("findings.json", "runs.csv", "secrets.txt"):

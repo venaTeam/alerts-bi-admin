@@ -91,7 +91,7 @@ def test_installed_worker_completes_and_outputs_have_no_html(
     row = submit(client, "accepted").json()
     assert row["status"] == "completed", row
     assert client.get(row["result_url"]).status_code == 200
-    assert client.get(f"/runs/{row['run_id']}/scorecard.html").status_code == 200
+    assert client.get(f"/runs/{row['run_id']}/scorecard.html").status_code == 422
     directory = settings.out_root / row["run_id"][:16]
     assert {p.name for p in directory.iterdir()} == {
         "daily_metrics.csv",

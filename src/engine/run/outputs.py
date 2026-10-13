@@ -1,4 +1,4 @@
-"""Persist CSV exports; serve HTML on demand from SQL instead of storing run HTML."""
+"""Persist CSV exports and remove exact legacy run HTML artifacts."""
 
 from pathlib import Path
 

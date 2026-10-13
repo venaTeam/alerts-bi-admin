@@ -2,7 +2,7 @@
 
 Manual analysis can outlast an OpenShift Route timeout. The product owner requested asynchronous
 execution with results displayed when complete, and removal of generated per-run HTML files.
-This amendment supersedes synchronous browser triggering and automatic HTML-file writes.
+This amendment supersedes synchronous browser triggering. The subsequent accepted request removes standalone HTML output entirely, including on-demand rendering.
 
 ## HTTP and UI contract
 
@@ -20,7 +20,8 @@ This amendment supersedes synchronous browser triggering and automatic HTML-file
   retain their URL/filter state when refreshed. Returning later reads current state from SQL.
   Failed jobs offer the existing New run action to retry. Connectivity failure is presented
   separately from analysis failure and polling retries automatically. No progress percentage is invented.
-- `POST /runs` retains its synchronous completed-scorecard/JSON wire contract for compatibility.
+- `POST /runs` retains synchronous execution, returning a JSON summary and three CSV links.
+  Standalone HTML responses and the `scorecard` field are removed, including for `Accept: text/html`.
   Both operator API paths share the durable manual-execution gate. Busy submissions return 409;
   validation retains existing 400/422 behavior. Authentication and CSRF failures remain 401/403.
 
@@ -30,7 +31,7 @@ Admin owns migration 010_run_jobs and `alerts-bi-admin run-worker`. The UI only 
 reads jobs. Run one dedicated worker process using the same admin image, registry mount,
 SQL/ES/model settings and writable output configuration as the UI. No broker is required. Immutable migration 009_run_deletion is preserved; job state is additive revision 010.
 The worker polls SQL and claims at most one submission. States are pending, running, completed
-and failed. Completion never publishes a review. Portal views and library versions are unchanged.
+and failed. Completion never publishes a review. Portal views and shared 0.1.3 are unchanged. Operations 0.2.0 removes the public HTML renderer.
 
 A SQL session application lock (`alerts-bi-manual-run`) serializes admission, execution and
 recovery. The execution connection owns that lock across LLM-journal and persistence commits.
@@ -61,9 +62,10 @@ records live until explicit deletion of their parent run.
 
 Admin run, weekly, report and acceptance commands write daily_metrics.csv, rule_counts.csv and
 alert_worklist.csv. They remove the exact legacy scorecard.html in their selected output
-directory. HTML remains an authenticated on-demand SQL rendering at the existing scorecard and
-scorecard.html routes; four addressable output representations remain compatible. The immutable
-operations library's explicit four-file renderer is unchanged for existing consumers.
+directory. Standalone HTML routes, rendering and download links are removed entirely. The
+normal authenticated team workspace remains the way to view results. Operations 0.2.0
+builds/writes only the three CSVs and removes `report.html`; earlier immutable versions are
+not rewritten. Consumers of that removed module must migrate to the workspace or CSV exports.
 
 To remove existing generated HTML after rollout, use `alerts-bi-admin remove-run-html --out
 <explicit-output-root>`. It removes only scorecard.html accompanied by all three CSV exports,

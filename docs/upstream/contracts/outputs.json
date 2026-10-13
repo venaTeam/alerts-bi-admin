@@ -1,6 +1,5 @@
 {
   "files": [
-    "scorecard.html",
     "daily_metrics.csv",
     "rule_counts.csv",
     "alert_worklist.csv"
@@ -82,8 +81,7 @@
     "rule_counts.csv",
     "alert_worklist.csv"
   ],
-  "on_demand": [
-    "scorecard.html"
-  ],
-  "legacy_operations_renderer": "Public explicit renderer retains all four files; admin command output storage follows stored_files"
+  "on_demand": [],
+  "operations_version": "0.2.0",
+  "html_removal": "Accepted 2026-10-13: no standalone HTML renderer, response, route, file or link; normal admin workspace remains"
 }

@@ -17,8 +17,6 @@
     "/teams/{team_id}",
     "/teams/{team_id}/summary",
     "/runs/{run_id}/findings",
-    "/runs/{run_id}/scorecard",
-    "/runs/{run_id}",
     "/runs/{run_id}/{name}",
     "/healthz",
     "/run-jobs/{job_id}"
@@ -75,5 +73,11 @@
       "result_url"
     ],
     "concurrency": "One active manual job; SQL session lock and active slot constraint; busy returns 409"
-  }
+  },
+  "exports": [
+    "daily_metrics.csv",
+    "rule_counts.csv",
+    "alert_worklist.csv"
+  ],
+  "synchronous_response": "JSON summary and three CSV links; no HTML content negotiation or scorecard field"
 }

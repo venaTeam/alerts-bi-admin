@@ -15,7 +15,6 @@ def test_csv_export_removes_legacy_html_and_preserves_other_files(
         outputs,
         "build_run_outputs",
         lambda db, run: {
-            "scorecard.html": "<html>rendered on demand</html>",
             "daily_metrics.csv": "a\r\n1\r\n",
         },
     )

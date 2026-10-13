@@ -71,7 +71,6 @@ class RunGate:
 @dataclass(frozen=True, slots=True)
 class RunResult:
     summary: RunSummary
-    outputs: dict[str, str]
     out_dir: Path
 
 
@@ -153,7 +152,7 @@ def execute_request(
         log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
         out_dir = settings.out_root / summary.run_id[:16]
         render_run_report(db, summary.run_id, out_dir)
-        return RunResult(summary, build_run_outputs(db, summary.run_id), out_dir)
+        return RunResult(summary, out_dir)
     finally:
         es_client.close()
         close_client(client)

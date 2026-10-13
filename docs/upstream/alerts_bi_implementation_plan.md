@@ -1,11 +1,25 @@
 # Alerts BI — Implementation Blueprint
 
+## Standalone HTML output removal — accepted 2026-10-13
+
+The product owner requested complete removal of standalone run HTML output. The supported
+exports are exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`.
+The authenticated team workspace still displays completed runs, metrics, findings and run
+details. No standalone scorecard renderer, route, file or download link remains. `POST /runs`
+returns JSON with three CSV links, including for `Accept: text/html`; its `scorecard` field
+is removed. Bare `GET /runs/{run_id}` and the dedicated scorecard route are removed;
+the CSV filename validator refuses `scorecard.html`. This supersedes all older standalone
+HTML/four-output requirements below. Operations 0.2.0 removes `report.html` and changes the
+public renderer to three CSV outputs; shared 0.1.3, CSV columns and portal views are unchanged.
+Existing immutable operations versions remain historical artifacts. Legacy HTML cleanup
+remains available for old output directories. See [output meanings](outputs.md).
+
 ## Async manual execution amendment — 2026-10-13
 
 Implement the [async run contract](async-runs.md): additive migration 010, durable admission and
 idempotency, one independently supervised run-worker, shared SQL manual gate, short status reads,
 accessible completion polling and explicit restart recovery. Admin-generated run output contains
-three CSV files; authenticated HTML renders on demand. Keep synchronous POST /runs compatibility.
+three CSV files; completed results appear in the team workspace. Synchronous POST /runs returns JSON.
 ## Run lifecycle amendment — 2026-10-13
 
 Implement design section 7.12's Monday-only picker and server validation on form/JSON/CLI
@@ -51,7 +65,7 @@ Implement a runnable tool that:
 4. Applies the approved deterministic and suppression rules.
 5. Uses durable verdict reuse and the approved grouped LLM batching flow.
 6. Persists reproducible run data in SQL Server.
-7. Produces one HTML team scorecard plus CSV exports.
+7. Displays completed results in the admin workspace and produces three CSV exports.
 
 The MVP does not include scheduled execution, historical backfill, an interactive frontend, cross-team ranking, a company-wide unattributed-alert audit, or automatic enforcement of LLM findings.
 
@@ -213,12 +227,12 @@ Add uniqueness constraints around natural idempotency keys, especially run ident
 
 Render reports only from persisted data. Provide:
 
-- A self-contained HTML team scorecard.
+- The existing admin workspace for completed run results; no standalone HTML scorecard.
 - Exactly `daily_metrics.csv`, `rule_counts.csv`, and `alert_worklist.csv`.
 - Clear separation between the mutually exclusive identity states `rule_flagged`, `llm_flagged`, `needs_review`, `assessed_good`, and `unassessed`, with readiness gaps kept orthogonal.
 - Visible run metadata and version identifiers so results can be reproduced.
 
-The HTML contains run metadata; migration; schema-separated volume and diagnostics; quality; visibility and supplied panel IDs; rule/principle breakdown; actionable work list; and limitations. It contains no cross-run trend, delta, leaderboard, or combined v1/v2 volume conclusion. Use deterministic ordering, retain full CSV values, HTML-escape every source value, and neutralize cells beginning with `=`, `+`, `-`, or `@` against spreadsheet formula injection. Defer the interactive frontend until after the MVP.
+The workspace displays run metadata, phase, schema-separated volume and diagnostics, quality, visibility, panels and findings. Use deterministic ordering, retain full CSV values, escape every source value displayed in the UI, and neutralize cells beginning with `=`, `+`, `-`, or `@` against spreadsheet formula injection. The report library renders CSV only.
 
 ## 3. Reconcile the existing mock before feature work
 
@@ -268,7 +282,7 @@ Success means rerunning the same prompt/model version reuses prior verdicts, inv
 
 ### Milestone 5 — Complete scorecard and hardening
 
-Finish the HTML and CSV outputs, phase derivation, readiness display, operational logging, idempotent reruns, failure recovery, and performance tests.
+Finish the admin run display and CSV outputs, phase derivation, readiness display, operational logging, idempotent reruns, failure recovery, and performance tests.
 
 Success means every mock team can be run individually and its stored scorecard reconciles with source rows and acceptance fixtures.
 
@@ -301,7 +315,7 @@ Extend `docker-compose.yml` with a pinned SQL Server 2022 container, readiness h
 
 ### Acceptance tests
 
-Also `pytest`. Give the existing seeded generator a fixed default acceptance clock and require a clean reload. Reconcile every approved rule, add dense and over-200 batching groups, and cover every suppression and retry path. Maintain a hand-reviewed `test/fixtures/expected-results.json` for every mock team with daily volume, diagnostic operands, per-rule counts, batch membership, quality states, suppression, readiness, and phase. The production pipeline must not generate this oracle. Provide a verification command that compares persisted SQL results and CSV exports with it; check HTML structure and required content rather than volatile formatting.
+Also `pytest`. Give the existing seeded generator a fixed default acceptance clock and require a clean reload. Reconcile every approved rule, add dense and over-200 batching groups, and cover every suppression and retry path. Maintain a hand-reviewed `test/fixtures/expected-results.json` for every mock team with daily volume, diagnostic operands, per-rule counts, batch membership, quality states, suppression, readiness, and phase. The production pipeline must not generate this oracle. Provide a verification command that compares persisted SQL results and CSV exports with it; verify the admin overview, findings and CSV download workflow in the browser.
 
 ## 6. Configuration and security
 
@@ -334,7 +348,7 @@ The MVP is complete when:
 - Stored daily metrics reconcile with mock source data.
 - All rule, suppression, batching, retry, and phase edge cases pass.
 - Repeated runs are auditable and do not corrupt durable caches.
-- The HTML scorecard and CSV exports are generated solely from SQL Server.
+- The admin workspace and three CSV exports read solely from SQL Server; standalone HTML output is removed.
 - LLM results are visibly advisory and versioned.
 - Deferred features are absent from the MVP execution path.
 

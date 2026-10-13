@@ -9,12 +9,10 @@ They assert coverage and the invariants a reader could get wrong, not prose.
 
 from __future__ import annotations
 
-import inspect
 import re
 from pathlib import Path
 
 import pytest
-from alerts_bi_operations.report import html
 from alerts_bi_operations.report.csv_export import (
     DAILY_METRIC_HEADERS,
     RULE_COUNT_HEADERS,
@@ -28,7 +26,6 @@ DOC = _DOC_PATH.read_bytes().decode("utf-8")
 #: Prose wraps, so a sentence the document does state can straddle a line break. Phrases are
 #: matched against this rather than the raw text; column and section names against the raw.
 FLAT = re.sub(r"\s+", " ", DOC)
-HTML_SOURCE = inspect.getsource(html)
 
 EXPORTS = {
     "daily_metrics.csv": DAILY_METRIC_HEADERS,
@@ -55,11 +52,6 @@ def test_every_exported_column_is_described(export: str, column: str) -> None:
 @pytest.mark.parametrize("name", OUTPUT_FILES)
 def test_every_output_file_is_described(name: str) -> None:
     assert f"`{name}`" in DOC
-
-
-@pytest.mark.parametrize("section", re.findall(r"<h2>([^<]*)</h2>", HTML_SOURCE))
-def test_every_scorecard_section_is_described(section: str) -> None:
-    assert f"**{section}**" in DOC, f"the scorecard renders {section!r} and the document omits it"
 
 
 @pytest.mark.parametrize(
