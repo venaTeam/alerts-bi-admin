@@ -213,7 +213,10 @@ def _command_report(args: argparse.Namespace, config: AppConfig) -> int:
         sys.stderr.write("--run-id or --team is required\n")
         return 2
 
-    with connect(config.sql, _target_database(args, config)) as db:
+    with (
+        schedule_lock(config, _target_database(args, config)),
+        connect(config.sql, _target_database(args, config)) as db,
+    ):
         run_id = args.run_id
         if not run_id:
             latest = get_latest_run(db, args.team)

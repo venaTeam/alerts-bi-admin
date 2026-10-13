@@ -579,7 +579,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             except WeeklyBusy:
                 raise HTTPException(
                     409,
-                    "A run, weekly schedule or deletion is active. Try deleting after it finishes.",
+                    "A run, report, weekly schedule or deletion is active. Try deleting after it finishes.",
                 ) from None
             finally:
                 gate.release()

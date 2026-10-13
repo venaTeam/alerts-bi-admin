@@ -12,6 +12,7 @@ from threading import Event
 from typing import Any
 
 import pytest
+from alerts_bi_operations.report import render as report_render
 from alerts_bi_operations.review.publication import publish_run, unpublish_run
 from alerts_bi_shared.db.connection import Database, connect
 from fastapi.testclient import TestClient
@@ -549,6 +550,68 @@ def test_cli_rerun_blocks_deletion_through_the_entire_lifecycle(
             db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id}) is None
         )
     assert not (out_root / run_id[:16]).exists()
+
+
+@pytest.mark.parametrize("selector", ["--run-id", "--team"])
+def test_cli_report_blocks_deletion_until_files_are_written(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, selector: str
+) -> None:
+    """Pause after SQL rendering, before mkdir/write, using the configured output root."""
+    run_id = "c" * 64
+    out_root = client.app.state.settings.out_root  # type: ignore[attr-defined]
+    monkeypatch.setenv("ADMIN_OUT_DIR", str(out_root))
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(run=sample_run(run_id=run_id, run_at=datetime(2026, 9, 7))),
+        )
+    arguments = ["report", selector, run_id if selector == "--run-id" else TEAM, "--database", DB]
+    assert main(arguments) == 0
+    reached, resume = Event(), Event()
+    original = report_render.build_run_outputs
+
+    def pause_after_render(db: Database, selected_id: str) -> dict[str, str]:
+        outputs = original(db, selected_id)
+        assert selected_id == run_id
+        reached.set()
+        assert resume.wait(30), "The CLI report was never resumed"
+        return outputs
+
+    monkeypatch.setattr(report_render, "build_run_outputs", pause_after_render)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        report = pool.submit(main, arguments)
+        try:
+            assert reached.wait(30), "The CLI report did not finish reading SQL"
+            refused = client.post(
+                f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+            )
+            assert refused.status_code == 409
+            assert "done=" not in refused.headers.get("location", "")
+        finally:
+            resume.set()
+            assert report.result(timeout=30) == 0
+    assert all((out_root / run_id[:16] / name).exists() for name in report_render.OUTPUT_FILES)
+    deleted = client.post(
+        f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
+    )
+    assert deleted.status_code == 303 and "done=" in deleted.headers["location"]
+    with connect(CONFIG.sql, DB) as db:
+        assert (
+            db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id}) is None
+        )
+    assert not (out_root / run_id[:16]).exists()
+
+
+@pytest.mark.usefixtures("client")
+def test_cli_report_failure_releases_shared_execution_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_render(*args: Any, **kwargs: Any) -> Any:
+        raise OSError("injected report write failure")
+
+    monkeypatch.setattr(engine_cli, "render_run_report", fail_render)
+    with pytest.raises(OSError, match="injected report write failure"):
+        main(["report", "--run-id", RUN, "--database", DB])
+    with schedule_lock(CONFIG, DB):
+        pass
 
 
 @pytest.mark.usefixtures("client")

@@ -13,6 +13,7 @@ failure handling and the explicit exception to retained audit history.
 
 Manual HTTP/API and CLI runs share the existing SQL session execution lock with weekly
 scheduling and deletion, from before scanning through persistence and report writing.
+Standalone CLI reports hold it before run-id/team lookup through the final file write.
 Model-off runs hold it too. Its separate connection survives data commits; contention is
 refused promptly and errors release the lock. Updated CLI clients and the app roll out together.
 

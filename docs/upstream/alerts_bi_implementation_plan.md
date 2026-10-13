@@ -18,6 +18,10 @@ the historical resource name for scheduler compatibility and release on errors. 
 with a real CLI rerun paused before scanning, persistence and reporting on separate SQL
 connections, with assessment both disabled and fake: deletion and a competing API run
 are refused until completion, then deletion removes the stored run and reports.
+Standalone CLI `report` must acquire the same lock before run-id/team lookup and retain it
+through all file writes. Pause after SQL rendering but before writing to the configured
+output root: deletion must return 409, then succeed after reporting finishes without
+leaving recreated files. Verify both selection modes and lock release on write failure.
 
 ## Source ownership amendment — 2026-10-12
 

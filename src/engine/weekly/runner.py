@@ -68,7 +68,7 @@ NEEDS_ATTENTION = frozenset({"held", "failed", "blocked"})
 
 
 class WeeklyBusy(RuntimeError):
-    """Another run, weekly schedule or deletion holds the shared execution lock."""
+    """Another run, report, weekly schedule or deletion holds the shared execution lock."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,12 +100,13 @@ def enrolled_teams(registry_path: str | None, only: Sequence[str] = ()) -> list[
 
 @contextmanager
 def schedule_lock(config: AppConfig, database: str) -> Iterator[None]:
-    """Hold the shared manual/schedule/deletion SQL lock, or refuse immediately.
+    """Hold the shared run/report/schedule/deletion SQL lock, or refuse immediately.
 
     Retain the historical resource name so existing schedulers still coordinate. This
     separate SQL session survives commits and rollbacks on the run's data connection.
     Manual callers hold it from before scanning through persistence and report writing;
-    deletion holds it through SQL cleanup and file removal.
+    standalone reports hold it from run lookup through all file writes, and deletion
+    holds it through SQL cleanup and file removal.
     """
     with connect(config.sql, database, autocommit=True) as lock:
         row = lock.query_one(
@@ -115,7 +116,9 @@ def schedule_lock(config: AppConfig, database: str) -> Iterator[None]:
             "SELECT @result AS result"
         )
         if row is None or int(row["result"]) < 0:
-            raise WeeklyBusy("another run, weekly schedule or deletion is already in progress")
+            raise WeeklyBusy(
+                "another run, report, weekly schedule or deletion is already in progress"
+            )
         try:
             yield
         finally:
