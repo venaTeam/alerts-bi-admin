@@ -11,6 +11,11 @@ migration 009 and a checked parent foreign key), then cleans configured report f
 refused; scheduler enrollment remains. See design section 7.12 and decision 004 for scope,
 failure handling and the explicit exception to retained audit history.
 
+Manual HTTP/API and CLI runs share the existing SQL session execution lock with weekly
+scheduling and deletion, from before scanning through persistence and report writing.
+Model-off runs hold it too. Its separate connection survives data commits; contention is
+refused promptly and errors release the lock. Updated CLI clients and the app roll out together.
+
 ## Source ownership amendment — 2026-10-12
 
 Admin owns execution, migrations, weekly jobs, registry and library builds under `alerts_bi_admin.engine`; commands use `alerts-bi-admin`. The previous runs ownership and runtime-wheel references below are historical. Product behavior, wire payloads, SQL contracts and outputs are unchanged. See [retirement and cutover](runs-retirement.md).

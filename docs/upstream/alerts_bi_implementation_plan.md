@@ -12,6 +12,13 @@ a checked parent foreign key preventing orphan inserts; ordinary decisions remai
 Verify published/unpublished/withdrawn/failed deletion, rollback, neighboring run preservation,
 ordinary decision protection, Monday boundaries, tampered inputs and browser workflows.
 
+Manual HTTP/API and CLI entry points must hold the existing scheduler SQL session lock
+through the entire scan/persist/report lifecycle; deletion takes the same lock. Preserve
+the historical resource name for scheduler compatibility and release on errors. Verify
+with a real CLI rerun paused before scanning, persistence and reporting on separate SQL
+connections, with assessment both disabled and fake: deletion and a competing API run
+are refused until completion, then deletion removes the stored run and reports.
+
 ## Source ownership amendment — 2026-10-12
 
 Admin owns execution, migrations, weekly jobs, registry and library builds under `alerts_bi_admin.engine`; commands use `alerts-bi-admin`. The previous runs ownership and runtime-wheel references below are historical. Product behavior, wire payloads, SQL contracts and outputs are unchanged. See [retirement and cutover](runs-retirement.md).

@@ -869,6 +869,15 @@ a checked parent foreign key rejects orphan inserts, and updates remain forbidde
 uses the manual gate, scheduler lock, model-review lock and run-row lock; active work is
 refused. The authenticated actor and run id are logged without alert content.
 
+**Concurrency clarified 2026-10-13:** manual HTTP/API runs, manual CLI runs, the weekly
+schedule and deletion share the database's existing `alerts-bi-weekly` SQL session lock.
+Manual runs hold it before the Elasticsearch scan through persistence and all report
+writing, including with model assessment disabled. The lock uses its own connection, so
+data-connection commits and model-audit lock release cannot end this protection early.
+Contending HTTP runs/deletion return 409; the CLI fails with a busy message. Both success
+and failure release the lock. Roll out updated manual CLI clients alongside the app;
+an older CLI that does not take the shared lock cannot coordinate with deletion.
+
 Generated reports in the configured manual and weekly output locations are removed after
 SQL commit; a cleanup failure is reported distinctly. Custom CLI export locations are not
 tracked and need separate cleanup. Shared prompt artifacts, verdict caches and panel parses
