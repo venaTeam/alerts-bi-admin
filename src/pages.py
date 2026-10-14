@@ -22,7 +22,9 @@ from alerts_bi_shared.ui.explain import (
 from alerts_bi_shared.ui.html import h
 
 from .assets import MOCK_CSS
+from .engine.api.backfill import selectable_weeks
 from .engine.api.service import latest_week_end
+from .engine.weekly.plan import RETENTION_DAYS
 
 EXTRA_CSS = """
 html,body{margin:0;min-height:100%;color-scheme:light}body{background:#eef1f4}
@@ -46,6 +48,43 @@ html,body{margin:0;min-height:100%;color-scheme:light}body{background:#eef1f4}
 #abi-console .abi-legacy mark.sup{background:var(--abi-rule-soft);color:var(--abi-rule)}#abi-console .abi-legacy pre.sql{white-space:pre-wrap;overflow-wrap:anywhere}
 #abi-console .abi-legacy .panels{list-style:none;padding:0}#abi-console .abi-legacy .panels li{margin:12px 0}
 @media(min-width:1450px){#abi-console .abi-main{padding:28px 36px}}
+#abi-console .abi-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+#abi-console .abi-inline-form{display:inline}#abi-console .abi-banner-row{flex:1;justify-content:space-between}
+#abi-console .abi-dialog.abi-wide{width:780px}#abi-console .abi-bf-weeks{border:0;margin:0;padding:0;min-width:0}#abi-console .abi-bf-facts{display:flex;flex-wrap:wrap;gap:8px 28px;margin:0;font-size:12px}
+#abi-console .abi-bf-facts dt{font-size:11px;color:var(--abi-muted)}#abi-console .abi-bf-facts dd{margin:2px 0 0;font-weight:500}
+#abi-console .abi-bf-pick{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px 12px;margin-bottom:12px}#abi-console .abi-bf-pick label{margin:0}
+#abi-console .abi-cal-months{display:flex;flex-wrap:wrap;gap:14px}#abi-console .abi-cal{flex:1 1 210px;min-width:0;border:1px solid var(--abi-line);border-radius:8px;padding:10px 10px 8px}
+#abi-console .abi-cal-name{font-size:12px;font-weight:600;margin:0 0 6px 4px}#abi-console .abi-cal-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));row-gap:2px}
+#abi-console .abi-cal-dow{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--abi-muted);text-align:center;padding-bottom:4px}#abi-console .abi-cal-dow.mon{color:var(--abi-ink);font-weight:600}
+#abi-console .abi-cal-day{height:32px;display:grid;place-items:center;font-size:11px;color:var(--abi-muted);font-variant-numeric:tabular-nums;opacity:.7}#abi-console .abi-cal-day.out{opacity:.3}
+#abi-console label.abi-cal-mon{position:relative;display:grid;place-items:center;height:32px;margin:0;font-weight:600;cursor:pointer}
+#abi-console .abi-cal-mon input{position:absolute;opacity:0;width:1px;height:1px;margin:0;pointer-events:none}
+#abi-console .abi-cal-mon input+span{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;font-size:12px;border:1.5px solid transparent;font-variant-numeric:tabular-nums;position:relative}
+#abi-console .abi-cal-mon.is-missing input+span{border:1.5px dashed var(--abi-secondary)}#abi-console .abi-cal-mon.is-completed input+span{background:var(--abi-soft);border-color:var(--abi-muted)}
+#abi-console .abi-cal-mon.is-published input+span{background:var(--abi-good-soft);color:var(--abi-good)}#abi-console .abi-cal-mon.is-active input+span{background:var(--abi-selected);color:var(--abi-focus)}
+#abi-console .abi-cal-mon.is-expired input+span{color:var(--abi-muted);text-decoration:line-through;font-weight:400}#abi-console .abi-cal-mon.is-future input+span{color:var(--abi-muted);font-weight:400;opacity:.55}
+#abi-console .abi-cal-mon input:disabled+span{cursor:not-allowed}#abi-console label.abi-cal-mon:has(input:disabled){cursor:not-allowed}
+#abi-console .abi-cal-mon input:not(:disabled):hover+span{background:var(--abi-selected)}
+#abi-console .abi-cal-mon input:checked+span{background:var(--abi-ink);border:1.5px solid var(--abi-ink);color:var(--abi-surface)}
+#abi-console .abi-cal-mon input:focus-visible+span{outline:3px solid var(--abi-focus);outline-offset:2px}
+#abi-console .abi-cal-mon.is-expiring input+span:after{content:"";position:absolute;top:-2px;right:-2px;width:9px;height:9px;border-radius:50%;background:var(--abi-amber);border:2px solid var(--abi-surface)}
+#abi-console .abi-cal-legend{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11px;color:var(--abi-secondary)}#abi-console .abi-cal-legend li{display:flex;align-items:center;gap:6px}
+#abi-console .abi-cal-key{width:14px;height:14px;border-radius:50%;display:inline-block;flex-shrink:0}#abi-console .abi-cal-key.is-selected{background:var(--abi-ink)}
+#abi-console .abi-cal-key.is-missing{border:1.5px dashed var(--abi-secondary)}#abi-console .abi-cal-key.is-completed{background:var(--abi-soft);border:1.5px solid var(--abi-muted)}
+#abi-console .abi-cal-key.is-published{background:var(--abi-good-soft);border:1px solid var(--abi-good)}#abi-console .abi-cal-key.is-active{background:var(--abi-selected);border:1px solid var(--abi-focus)}
+#abi-console .abi-cal-key.is-expiring{width:9px;height:9px;background:var(--abi-amber)}#abi-console .abi-cal-key.is-expired{width:auto;height:auto;border-radius:0;text-decoration:line-through;color:var(--abi-muted)}
+#abi-console .abi-bf-cols{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:18px;align-items:start}#abi-console .abi-bf-side{display:flex;flex-direction:column;gap:14px;min-width:0}
+#abi-console .abi-bf-order-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px}
+#abi-console .abi-bf-order{list-style:none;margin:0;padding:0;border:1px solid var(--abi-line);border-radius:8px;max-height:252px;overflow:auto}
+#abi-console .abi-bf-order li{display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--abi-line);font-size:12px}#abi-console .abi-bf-order li:last-child{border-bottom:0}
+#abi-console .abi-bf-n{width:22px;height:22px;border-radius:50%;background:var(--abi-soft);display:grid;place-items:center;font-size:11px;font-weight:600;color:var(--abi-secondary)}
+#abi-console .abi-bf-order strong{font-weight:500;display:block}#abi-console .abi-bf-order small{display:block;font-size:11px;color:var(--abi-muted)}#abi-console .abi-bf-order small.warn{color:var(--abi-amber)}
+#abi-console .abi-bf-empty{border:1px dashed var(--abi-line);border-radius:8px;padding:20px;text-align:center;font-size:12px;color:var(--abi-muted)}#abi-console .abi-bf-order:empty{display:none}
+#abi-console .abi-bf-order:not(:empty)+.abi-bf-empty{display:none}#abi-console .abi-dialog-footer .abi-bf-note{margin-right:auto}
+#abi-console .abi-bf-panel .abi-table td{padding:10px 14px}#abi-console .abi-bf-panel tr.is-running{background:var(--abi-selected)}#abi-console .abi-bf-panel tr.is-running td:first-child{box-shadow:inset 3px 0 0 var(--abi-focus)}
+#abi-console .abi-bf-summary{display:flex;flex-direction:column;gap:8px}#abi-console progress.abi-bf-bar{appearance:none;width:100%;height:5px;border:0;border-radius:5px;background:var(--abi-line);overflow:hidden}
+#abi-console progress.abi-bf-bar::-webkit-progress-bar{background:var(--abi-line)}#abi-console progress.abi-bf-bar::-webkit-progress-value{background:var(--abi-focus)}#abi-console progress.abi-bf-bar::-moz-progress-bar{background:var(--abi-focus)}
+@media(max-width:700px){#abi-console .abi-bf-cols{grid-template-columns:1fr}}
 """
 STYLESHEET = SHARED_CSS + "\n" + MOCK_CSS + "\n" + EXTRA_CSS
 STYLESHEET_PATH = f"/assets/console-{sha256(STYLESHEET.encode()).hexdigest()[:12]}.css"
@@ -86,6 +125,65 @@ document.addEventListener('submit', event => {
 window.addEventListener('pageshow', () => document.querySelectorAll('[data-trigger] button[type=submit]').forEach(b => {
  b.disabled = false; b.textContent = 'Start run';
 }));
+const JOB_TEXT = {
+ pending: 'Waiting for the worker. You can leave this page.',
+ queued: 'Queued. It starts before the next backfill week. You can leave this page.',
+ running: 'Analysis running. You can leave this page.'
+};
+document.querySelectorAll('[data-backfill-form]').forEach(form => {
+ const order = form.querySelector('[data-backfill-order]');
+ const submit = form.querySelector('button[type=submit]');
+ const weeks = () => [...form.querySelectorAll('input[name=week]')];
+ const update = () => {
+  const picked = weeks().filter(input => input.checked);
+  order.replaceChildren(...picked.map((input, index) => {
+   const item = document.createElement('li');
+   const number = document.createElement('span');
+   number.className = 'abi-bf-n'; number.textContent = String(index + 1);
+   const text = document.createElement('div');
+   const name = document.createElement('strong'); name.textContent = input.dataset.weekLabel;
+   const note = document.createElement('small'); note.textContent = input.dataset.weekNote;
+   if (input.dataset.weekWarn) note.className = 'warn';
+   text.append(name, note); item.append(number, text);
+   return item;
+  }));
+  submit.disabled = picked.length === 0;
+  submit.textContent = picked.length ? 'Queue ' + picked.length + (picked.length === 1 ? ' run' : ' runs') : 'Queue runs';
+ };
+ form.addEventListener('change', event => { if (event.target.name === 'week') update(); });
+ form.querySelector('[data-backfill-all]')?.addEventListener('click', () => {
+  weeks().forEach(input => { if (input.dataset.missing !== undefined && !input.disabled) input.checked = true; });
+  update();
+ });
+ form.querySelector('[data-backfill-clear]')?.addEventListener('click', () => {
+  weeks().forEach(input => { input.checked = false; }); update();
+ });
+ form.addEventListener('submit', () => {
+  submit.disabled = true; submit.textContent = 'Queuing…';
+  form.querySelector('[role=status]').textContent = 'Saving the backfill. Once accepted, you can leave this page.';
+ });
+ window.addEventListener('pageshow', update);
+ update();
+});
+let backfillPolling = false;
+async function pollBackfill() {
+ const panel = document.querySelector('[data-backfill-url]');
+ if (!panel || document.hidden || backfillPolling) return;
+ backfillPolling = true;
+ try {
+  const response = await fetch(panel.dataset.backfillUrl, {headers: {'Accept': 'application/json'}});
+  if (!response.ok) throw new Error('Status unavailable');
+  const backfill = await response.json();
+  const state = backfill.weeks.map(week => week.job_id + ':' + week.status).join(',');
+  if (state !== panel.dataset.backfillState) { window.location.reload(); return; }
+ } catch (error) {
+  panel.querySelector('[role=status]').textContent = 'Connection interrupted. Status checks will retry; this does not mean the backfill failed.';
+ } finally { backfillPolling = false; }
+}
+if (document.querySelector('[data-backfill-url]')) {
+ setInterval(pollBackfill, 3000);
+ document.addEventListener('visibilitychange', pollBackfill);
+}
 let polling = false;
 async function pollJobs() {
  if (document.hidden || polling) return;
@@ -96,7 +194,7 @@ async function pollJobs() {
    if (!response.ok) throw new Error('Status unavailable');
    const job = await response.json();
    const status = row.querySelector('[role=status]');
-   status.textContent = job.status === 'pending' ? 'Waiting for the worker. You can leave this page.' : 'Analysis running. You can leave this page.';
+   status.textContent = JOB_TEXT[job.status] || status.textContent;
    if (job.status !== row.dataset.jobState) {
     const url = new URL(window.location.href);
     if (job.status === 'completed' && url.searchParams.get('job_id') === job.job_id) {
@@ -130,6 +228,7 @@ def icon(name: str) -> str:
         "plus": '<path d="M12 5v14M5 12h14"/>',
         "info": '<circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/>',
         "close": '<path d="m6 6 12 12M6 18 18 6"/>',
+        "history": '<path d="M3 12a9 9 0 1 0 2.64-6.36L3 8.3"/><path d="M3 3v5.3h5.3"/><path d="M12 7.5V12l3 2"/>',
     }
     return f'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{paths.get(name, paths["info"])}</svg>'
 
@@ -227,7 +326,9 @@ def _week(run: Mapping[str, Any]) -> str:
 
 
 def _source(run: Mapping[str, Any]) -> str:
-    return "Weekly schedule" if run.get("scheduled") else "Manual / API"
+    if run.get("scheduled"):
+        return "Weekly schedule"
+    return "Backfill" if run.get("backfilled") else "Manual / API"
 
 
 def dashboard_page(
@@ -316,6 +417,354 @@ def trigger_form(
     )
 
 
+WEEK = timedelta(days=7)
+_MONTHS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+_WEEK_STATES = {
+    "missing": "No run yet",
+    "completed": "Has an unpublished run; picking it runs the week again",
+    "published": "Published, locked",
+    "active": "Already queued or running",
+    "expired": "Past Elasticsearch retention",
+    "future": "Week not complete yet",
+}
+
+
+def _utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _day_month(value: datetime) -> str:
+    return f"{value.day} {value:%b}"
+
+
+def _expires(end: datetime) -> datetime:
+    """When a week's window start leaves the Elasticsearch retention."""
+    return end - WEEK + timedelta(days=RETENTION_DAYS)
+
+
+def week_states(calendar: Mapping[datetime, str], now: datetime) -> dict[datetime, str]:
+    """Every Monday window end from the first retained week to the latest completed one."""
+    earliest, latest = selectable_weeks(now)
+    states = {}
+    end = earliest
+    while end <= latest:
+        states[end] = calendar.get(end.replace(tzinfo=None), "missing")
+        end += WEEK
+    return states
+
+
+def _week_state(end: datetime, states: Mapping[datetime, str]) -> str:
+    if end in states:
+        return states[end]
+    return "future" if end > max(states) else "expired"
+
+
+def _monday_cell(day: datetime, states: Mapping[datetime, str], now: datetime) -> str:
+    state = _week_state(day, states)
+    selectable = state in ("missing", "completed")
+    expires = _expires(day)
+    expiring = selectable and expires - _utc(now) <= WEEK
+    label = format_week(day - WEEK, day)
+    description = _WEEK_STATES[state]
+    if expiring:
+        description += f". Leaves retention on {_day_month(expires)}"
+    if state == "completed":
+        note, warn = "Runs this week again; it has an unpublished run", True
+    elif expiring:
+        note, warn = f"Leaves retention on {_day_month(expires)}", True
+    else:
+        note = f"{_day_month(day - WEEK)} 00:00 → {_day_month(day)} 00:00 UTC · 168 hours"
+        warn = False
+    attributes = " ".join(
+        part
+        for part in (
+            f'value="{day:%Y-%m-%d}"',
+            f'data-week-label="{h(label)}"',
+            f'data-week-note="{h(note)}"',
+            "data-week-warn" if warn else "",
+            "data-missing" if state == "missing" else "",
+            "" if selectable else "disabled",
+        )
+        if part
+    )
+    return (
+        f'<label class="abi-cal-mon is-{state}{" is-expiring" if expiring else ""}" title="{h(label)}: {h(description)}">'
+        f'<input type="checkbox" name="week" {attributes}><span>{day.day}'
+        f'<span class="abi-sr">, week {h(label)}, {h(description)}</span></span></label>'
+    )
+
+
+def _month_grid(year: int, month: int, states: Mapping[datetime, str], now: datetime) -> str:
+    first = datetime(year, month, 1, tzinfo=UTC)
+    following = datetime(year + month // 12, month % 12 + 1, 1, tzinfo=UTC)
+    # Weeks start on Sunday (approved 2026-10-14); Mondays are the only selectable days.
+    day = first - timedelta(days=(first.weekday() + 1) % 7)
+    cells = [
+        f'<span class="abi-cal-dow{" mon" if index == 1 else ""}" aria-hidden="true">{name}</span>'
+        for index, name in enumerate(("Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"))
+    ]
+    count = 0
+    while day < following or count % 7:
+        inside = day.month == month
+        if inside and day.weekday() == 0:
+            cells.append(_monday_cell(day, states, now))
+        else:
+            cells.append(
+                f'<span class="abi-cal-day{"" if inside else " out"}" aria-hidden="true">{day.day}</span>'
+            )
+        day += timedelta(days=1)
+        count += 1
+    name = f"{_MONTHS[month - 1]} {year}"
+    return (
+        f'<div class="abi-cal" role="group" aria-label="{name}"><p class="abi-cal-name">{name}</p>'
+        f'<div class="abi-cal-grid">{"".join(cells)}</div></div>'
+    )
+
+
+def backfill_form(
+    team_id: str, token: str, name: str, calendar: Mapping[datetime, str], now: datetime
+) -> str:
+    """The Backfill weeks dialog: Sunday-first month calendars of selectable Mondays."""
+    states = week_states(calendar, now)
+    earliest, latest = min(states), max(states)
+    missing = [end for end, state in states.items() if state == "missing"]
+    months: list[tuple[int, int]] = []
+    cursor = datetime(earliest.year, earliest.month, 1, tzinfo=UTC)
+    while cursor <= latest:
+        months.append((cursor.year, cursor.month))
+        cursor = datetime(cursor.year + cursor.month // 12, cursor.month % 12 + 1, 1, tzinfo=UTC)
+    urgent = next(
+        (
+            end
+            for end, state in sorted(states.items())
+            if state in ("missing", "completed") and _expires(end) - _utc(now) <= WEEK
+        ),
+        None,
+    )
+    warning = ""
+    if urgent is not None:
+        days = max(0, (_expires(urgent) - _utc(now)).days)
+        warning = (
+            f'<div class="abi-banner amber">{icon("info")}<span>{h(format_week(urgent - WEEK, urgent))} '
+            f"leaves Elasticsearch retention on {h(_day_month(_expires(urgent)))}, in {days} "
+            f"{'day' if days == 1 else 'days'}. After that it can no longer be backfilled.</span></div>"
+        )
+    select_all = (
+        f'<button type="button" class="abi-link" data-backfill-all>Select all {len(missing)} without a run</button>'
+        '<span class="abi-muted" aria-hidden="true">·</span>'
+        if missing
+        else ""
+    )
+    content = (
+        f'<input type="hidden" name="submission_key" value="{uuid4().hex}">'
+        f'<dl class="abi-bf-facts"><div><dt>Team</dt><dd>{h(name or team_id)}</dd></div>'
+        f"<div><dt>Weeks you can pick</dt><dd>{h(_day_month(earliest - WEEK))} to {h(_day_month(latest))} "
+        f"{latest.year} · {len(states)} weeks</dd></div>"
+        f"<div><dt>Elasticsearch retention</dt><dd>{RETENTION_DAYS} days</dd></div></dl>"
+        f"{warning}"
+        '<fieldset class="abi-bf-weeks" aria-labelledby="backfill-weeks-label"><div class="abi-bf-pick">'
+        '<p id="backfill-weeks-label" class="abi-small"><strong>Weeks to backfill</strong>'
+        " · pick the Monday each week ends on (00:00 UTC)</p>"
+        f'<span class="abi-row">{select_all}<button type="button" class="abi-link" data-backfill-clear>Clear</button></span></div>'
+        f'<div class="abi-cal-months">{"".join(_month_grid(year, month, states, now) for year, month in months)}</div>'
+        '<ul class="abi-cal-legend"><li><span class="abi-cal-key is-selected"></span>Selected</li>'
+        '<li><span class="abi-cal-key is-missing"></span>No run yet</li>'
+        '<li><span class="abi-cal-key is-completed"></span>Unpublished run</li>'
+        '<li><span class="abi-cal-key is-published"></span>Published (locked)</li>'
+        '<li><span class="abi-cal-key is-active"></span>Queued or running</li>'
+        '<li><span class="abi-cal-key is-expiring"></span>Leaves retention within 7 days</li>'
+        '<li><span class="abi-cal-key is-expired">27</span>Past retention</li></ul></fieldset>'
+        '<div class="abi-bf-cols"><div><div class="abi-bf-order-head"><h3>Run order</h3>'
+        '<span class="abi-small abi-muted">Oldest first · one at a time</span></div>'
+        '<ol class="abi-bf-order" data-backfill-order aria-live="polite"></ol>'
+        '<div class="abi-bf-empty">Pick at least one Monday in the calendar.</div></div>'
+        '<div class="abi-bf-side"><div><label for="backfill-model">Model mode</label><select id="backfill-model" name="llm">'
+        '<option value="live" selected>Live · configured model</option><option value="fake">Fake · deterministic test model</option>'
+        '<option value="off">Off · skip assessment</option></select>'
+        '<p class="abi-small abi-muted abi-mt">Applies to every week. Each week is assessed in full, like a weekly run, '
+        "so model usage grows with the number of weeks.</p></div>"
+        '<div class="abi-evidence-box"><strong>Weeks that already have a run</strong>Only published weeks are locked; '
+        "withdraw one to run it again. A week with an unpublished run can be picked to run it again.</div>"
+        '<p role="status" aria-live="polite" class="abi-small"></p></div></div>'
+    )
+    action = "/teams/" + quote(team_id, safe="") + "/backfill"
+    return (
+        f'<dialog class="abi-dialog abi-wide" id="backfill-weeks" aria-labelledby="backfill-weeks-title">'
+        f'<form method="post" action="{h(action)}" data-backfill-form>{_hidden(token)}'
+        '<div class="abi-dialog-header"><h2 id="backfill-weeks-title">Backfill weeks</h2>'
+        f'<button type="button" class="abi-link" data-close aria-label="Close dialog">{icon("close")}</button></div>'
+        f'<div class="abi-dialog-content">{content}</div><div class="abi-dialog-footer">'
+        '<p class="abi-small abi-muted abi-bf-note">Completed weeks stay unpublished until you publish them.</p>'
+        '<button type="button" class="abi-btn" data-close>Cancel</button>'
+        '<button type="submit" class="abi-btn abi-primary">Queue runs</button></div></form></dialog>'
+    )
+
+
+def gap_banner(calendar: Mapping[datetime, str], now: datetime) -> str:
+    """How many retained weeks have no completed run, and when the oldest expires."""
+    missing = [end for end, state in week_states(calendar, now).items() if state == "missing"]
+    if not missing:
+        return ""
+    oldest = missing[0]
+    count = f"{len(missing)} {'week' if len(missing) == 1 else 'weeks'}"
+    verb = "has" if len(missing) == 1 else "have"
+    return (
+        f'<div class="abi-banner amber">{icon("info")}<div class="abi-row abi-banner-row"><span><strong>'
+        f"{count} inside Elasticsearch retention {verb} no run.</strong> The oldest, "
+        f"{h(format_week(oldest - WEEK, oldest))}, leaves retention on {h(_day_month(_expires(oldest)))}.</span>"
+        f'<button type="button" class="abi-link" data-dialog="backfill-weeks">Backfill weeks {icon("arrow")}</button></div></div>'
+    )
+
+
+def _post_button(action: str, token: str, label: str, css: str = "abi-link") -> str:
+    return (
+        f'<form method="post" action="{h(action)}" class="abi-inline-form">{_hidden(token)}'
+        f'<button type="submit" class="{css}">{h(label)}</button></form>'
+    )
+
+
+def backfill_signature(weeks: Sequence[Mapping[str, Any]]) -> str:
+    """Matches the client's comparison of polled week states."""
+    return ",".join(f"{week['job_id']}:{week['status']}" for week in weeks)
+
+
+def _backfill_row(
+    team_id: str, week: Mapping[str, Any], index: int, total: int, token: str, next_up: bool
+) -> str:
+    end = _utc(week["run_at"])
+    status = str(week["status"])
+    job = quote(str(week["job_id"]), safe="")
+    action = ""
+    if status == "completed":
+        cell = badge("completed")
+        detail = f"Finished {_when(week.get('completed_at'))} · unpublished"
+        if week.get("error_summary"):
+            detail += f" · {week['error_summary']}"
+        url = team_url(team_id, str(week["run_id"])) + "#selected-run"
+        action = f'<a class="abi-link" href="{h(url)}">Open run {icon("arrow")}</a>'
+    elif status in ("running", "pending"):
+        cell = badge("Running", "amber")
+        detail = (
+            f"Started {_when(week.get('started_at'))} · analysis running"
+            if status == "running"
+            else "Waiting for the worker"
+        )
+    elif status == "queued":
+        cell = badge("queued")
+        detail = "Next to run" if next_up else "Waits for the week above"
+        action = _post_button(f"/run-jobs/{job}/cancel", token, "Remove")
+    elif status == "failed":
+        cell = badge("failed")
+        detail = str(week.get("error_summary") or "Analysis failed.")
+        action = _post_button(f"/run-jobs/{job}/retry", token, "Retry week")
+    else:
+        cell = badge("cancelled")
+        detail = str(week.get("error_summary") or "Cancelled before it started.")
+    attempts = int(week.get("attempts", 1))
+    attempt = f" · attempt {attempts}" if attempts > 1 else ""
+    return (
+        f'<tr class="{"is-running" if status == "running" else ""}"><td><strong>{h(format_week(end - WEEK, end))}</strong>'
+        f"<small>Week {index + 1} of {total}{attempt}</small></td>"
+        f'<td data-label="Status:">{cell}</td><td class="abi-small abi-muted">{h(detail)}</td><td>{action}</td></tr>'
+    )
+
+
+def backfill_panel(
+    team_id: str, backfill: Mapping[str, Any], weeks: Sequence[Mapping[str, Any]], token: str
+) -> str:
+    """Progress of the team's newest shown backfill, above its run history."""
+    if not weeks:
+        return ""
+    base = "/backfills/" + quote(str(backfill["backfill_id"]), safe="")
+    count = dict.fromkeys(("completed", "running", "queued", "failed", "cancelled"), 0)
+    for week in weeks:
+        count["running" if week["status"] == "pending" else str(week["status"])] += 1
+    total = len(weeks)
+    active = count["running"] + count["queued"] > 0
+    if count["running"]:
+        tone, state_label = "amber", "Running"
+    elif active:
+        tone, state_label = "amber", "Queued"
+    elif count["failed"]:
+        tone, state_label = "amber", f"Finished with {count['failed']} failed"
+    elif count["cancelled"] and not count["completed"]:
+        tone, state_label = "", "Cancelled"
+    else:
+        tone, state_label = "good", "Finished"
+    actions = ""
+    if count["queued"]:
+        weeks_label = "week" if count["queued"] == 1 else "weeks"
+        actions += _post_button(
+            base + "/cancel",
+            token,
+            f"Cancel {count['queued']} queued {weeks_label}",
+            "abi-btn abi-danger",
+        )
+    if not active and count["failed"]:
+        retry = "Retry failed week" if count["failed"] == 1 else "Retry failed weeks"
+        actions += _post_button(base + "/retry", token, retry, "abi-btn abi-primary")
+    if not active:
+        actions += _post_button(base + "/dismiss", token, "Dismiss", "abi-btn")
+    parts = [f"{count['completed']} of {total} completed"] + [
+        f"{count[state]} {state}"
+        for state in ("running", "queued", "failed", "cancelled")
+        if count[state]
+    ]
+    if active:
+        message = (
+            "You can leave this page. Queued weeks start on their own, oldest first. "
+            "A New run or the weekly schedule goes ahead of the next queued week."
+        )
+    elif count["completed"]:
+        message = "Completed weeks are ready to review and publish."
+    else:
+        message = "No week completed."
+    if backfill.get("cancelled_at"):
+        who = backfill.get("cancelled_by") or "an operator"
+        message += f" Queued weeks cancelled by {who} · {_when(backfill['cancelled_at'])}."
+    first_queued = next(
+        (index for index, week in enumerate(weeks) if week["status"] == "queued"), None
+    )
+    rows = "".join(
+        _backfill_row(
+            team_id, week, index, total, token, index == first_queued and not count["running"]
+        )
+        for index, week in enumerate(weeks)
+    )
+    polling = (
+        f' data-backfill-url="{h(base)}" data-backfill-state="{h(backfill_signature(weeks))}"'
+        if active
+        else ""
+    )
+    title = f"Backfill · {total} {'week' if total == 1 else 'weeks'}"
+    return (
+        f'<section class="abi-panel abi-bf-panel" id="backfill" aria-labelledby="backfill-title"{polling}>'
+        f'<div class="abi-list-head"><div class="abi-row"><h3 id="backfill-title">{title}</h3>{badge(state_label, tone)}</div>'
+        f'<div class="abi-row">{actions}</div></div>'
+        f'<div class="abi-panel-pad abi-bf-summary"><div class="abi-row abi-between abi-small"><strong>{h(" · ".join(parts))}</strong>'
+        f'<span class="abi-muted">Queued by {h(backfill["requested_by"])} · {h(_when(backfill["submitted_at"]))} '
+        f"· Model {h(backfill['llm_mode'])}</span></div>"
+        f'<progress class="abi-bf-bar" max="{total}" value="{count["completed"]}" aria-label="Weeks completed">'
+        f"{count['completed']} of {total}</progress>"
+        f'<p role="status" aria-live="polite" class="abi-small abi-muted">{h(message)}</p></div>'
+        '<table class="abi-table"><thead><tr><th>Week</th><th>Status</th><th>Detail</th><th></th></tr></thead>'
+        f"<tbody>{rows}</tbody></table></section>"
+    )
+
+
 def publication_controls(run: Mapping[str, Any], token: str) -> tuple[str, str]:
     base = "/runs/" + quote(str(run["run_id"]), safe="")
     context = f'<div class="abi-evidence-box"><strong>{h(run.get("team_display_name") or run["team_id"])}</strong>{h(_week(run))}</div>'
@@ -397,6 +846,13 @@ def pager(
     return f'<div class="abi-row abi-between abi-panel-pad abi-small"><span>Page {page} of {count} · {total:,} total</span><span class="abi-row">{links}</span></div>'
 
 
+JOB_MESSAGES = {
+    "pending": "Waiting for the worker. You can leave this page.",
+    "queued": "Queued. It starts before the next backfill week. You can leave this page.",
+    "running": "Analysis running. You can leave this page.",
+}
+
+
 def team_page(
     user: str,
     team_id: str,
@@ -413,8 +869,19 @@ def team_page(
     error: bool,
     *,
     jobs: Sequence[Mapping[str, Any]] = (),
+    backfill: str = "",
+    backfill_dialog: str = "",
+    backfill_active: bool = False,
 ) -> str:
     run_id = str(selected["run_id"]) if selected else None
+    backfill_button = ""
+    if backfill_dialog:
+        opener = (
+            'disabled title="A backfill is already in progress for this team"'
+            if backfill_active
+            else 'data-dialog="backfill-weeks"'
+        )
+        backfill_button = f'<button class="abi-btn" type="button" {opener}>{icon("history")}Backfill weeks</button>'
     rows = []
     for row in runs:
         active = str(row["run_id"]) == run_id
@@ -429,25 +896,23 @@ def team_page(
         )
     body = (
         f'<div class="abi-row abi-between"><a class="abi-link" href="/">{icon("back")}All teams</a><div class="abi-crumb">Operations / Teams</div></div>'
-        f'<div class="abi-heading"><div><div class="abi-eyebrow">Team workspace</div><h1>{h(name)}</h1><div class="abi-team-context"><span>{h(str(selected.get("sources_label", "Team sources"))) if selected else "Team sources"}</span><span>{"Weekly · Monday to Monday UTC" if enrolled else "Manual runs"}</span></div></div><button class="abi-btn abi-primary" type="button" data-dialog="new-run">{icon("plus")}New run</button></div>'
+        f'<div class="abi-heading"><div><div class="abi-eyebrow">Team workspace</div><h1>{h(name)}</h1><div class="abi-team-context"><span>{h(str(selected.get("sources_label", "Team sources"))) if selected else "Team sources"}</span><span>{"Weekly · Monday to Monday UTC" if enrolled else "Manual runs"}</span></div></div>'
+        f'<div class="abi-row">{backfill_button}<button class="abi-btn abi-primary" type="button" data-dialog="new-run">{icon("plus")}New run</button></div></div>'
+        f"{backfill}"
         f'<section class="abi-panel abi-team-runs"><div class="abi-list-head"><h3>Team runs <span class="abi-muted">· {total}</span></h3><span class="abi-small abi-muted">Select a run to review below</span></div><table class="abi-table"><thead><tr><th>Reporting week / run</th><th>Analysis</th><th>Publication</th><th></th></tr></thead><tbody>{"".join(rows) or "<tr><td colspan=4>No runs yet. Start the first run above.</td></tr>"}</tbody></table>{pager(team_id, run_id, tab, run_page, total, 20, "run_page")}</section>'
     )
-    dialogs = trigger_form(team_id, token, name)
+    dialogs = trigger_form(team_id, token, name) + backfill_dialog
     if jobs:
         body += '<section class="abi-panel abi-panel-pad"><h3>Run submissions</h3>'
         for job in jobs:
-            active = job["status"] in ("pending", "running")
+            active = job["status"] in ("pending", "queued", "running")
             attrs = (
                 f' data-job-url="/run-jobs/{h(job["job_id"])}" data-job-state="{h(job["status"])}"'
                 if active
                 else ""
             )
             message = (
-                (
-                    "Waiting for the worker. You can leave this page."
-                    if job["status"] == "pending"
-                    else "Analysis running. You can leave this page."
-                )
+                JOB_MESSAGES[str(job["status"])]
                 if active
                 else str(job.get("error_summary") or "Analysis failed. Start a new run to retry.")
             )

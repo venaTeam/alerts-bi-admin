@@ -2,6 +2,8 @@
 
 The session lock lives on the execution connection, surviving journal/persistence commits.
 A new worker can recover running jobs only after the previous session released its lock.
+Queued jobs (backfill weeks, and manual runs accepted while a backfill is in progress) hold
+no slot; the worker claims them one at a time after pending work (docs/backfill.md).
 """
 
 from __future__ import annotations
@@ -22,12 +24,25 @@ from fastapi import HTTPException
 from ..config import ApiSettings
 from ..run.orchestrator import compute_run_id
 from ..run.outputs import render_run_report
-from ..weekly.runner import WeeklyBusy, schedule_lock
+from ..weekly.runner import (
+    BACKFILL_YIELD_RESOURCE,
+    WeeklyBusy,
+    backfill_in_progress,
+    schedule_lock,
+)
 from .schemas import RunRequest
 from .service import close_client, execute_request, latest_week_end, select_client
 
 LOCK_RESOURCE = "alerts-bi-manual-run"
 EXPORT_WARNING = "Analysis saved; CSV export failed. Regenerate exports with the report command."
+ACTIVE_STATES = ("queued", "pending", "running")
+
+
+class ExecutionBusy(HTTPException):
+    """The execution lock or the active slot is taken; other 409 refusals stay distinct."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(409, detail)
 
 
 @contextmanager
@@ -47,9 +62,7 @@ def execution_lock(db: Database, settings: ApiSettings | None = None) -> Iterato
                 {"resource": LOCK_RESOURCE},
             )
             if row is None or int(row["result"]) < 0:
-                raise HTTPException(
-                    409, "A run is already in progress. Try again after it finishes."
-                )
+                raise ExecutionBusy("A run is already in progress. Try again after it finishes.")
             try:
                 yield
             finally:
@@ -59,8 +72,8 @@ def execution_lock(db: Database, settings: ApiSettings | None = None) -> Iterato
                 )
                 db.commit()
     except WeeklyBusy:
-        raise HTTPException(
-            409, "A run, report, weekly schedule or deletion is active. Try again when it finishes."
+        raise ExecutionBusy(
+            "A run, report, weekly schedule or deletion is active. Try again when it finishes."
         ) from None
 
 
@@ -72,8 +85,10 @@ def get_job(db: Database, job_id: str) -> dict[str, Any]:
 
 
 def team_jobs(db: Database, team_id: str) -> list[dict[str, Any]]:
+    """Manual submissions needing attention; backfill weeks have their own panel."""
     return db.query(
-        "SELECT TOP 20 * FROM run_jobs WHERE team_id=:team AND (status <> 'completed' OR error_summary IS NOT NULL) "
+        "SELECT TOP 20 * FROM run_jobs WHERE team_id=:team AND backfill_id IS NULL "
+        "AND status <> 'cancelled' AND (status <> 'completed' OR error_summary IS NOT NULL) "
         "ORDER BY submitted_at DESC, job_id DESC",
         {"team": team_id},
     )
@@ -81,9 +96,90 @@ def team_jobs(db: Database, team_id: str) -> list[dict[str, Any]]:
 
 def refuse_active_job(db: Database) -> None:
     if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1"):
-        raise HTTPException(
-            409, "A run is already pending or running. Try again after it finishes."
+        raise ExecutionBusy("A run is already pending or running. Try again after it finishes.")
+
+
+def _existing_submission(
+    db: Database, operator: str, key_hash: bytes, request_hash: str
+) -> dict[str, Any] | None:
+    existing = db.query_one(
+        "SELECT * FROM run_jobs WHERE requested_by=:operator AND idempotency_key_hash=:key_hash",
+        {"operator": operator, "key_hash": key_hash},
+    )
+    if existing and existing["request_hash"] != request_hash:
+        raise HTTPException(409, "This submission key was already used with different options.")
+    return existing
+
+
+def _admit(
+    settings: ApiSettings,
+    db: Database,
+    body: RunRequest,
+    operator: str,
+    idempotency_key: str,
+    key_hash: bytes,
+    request_hash: str,
+    status: str,
+) -> dict[str, Any]:
+    """Validate the team, capture the run identity and store one submission row."""
+    try:
+        registry = (
+            load_registry(settings.registry_path) if settings.registry_path else load_registry()
         )
+        select_team(registry, body.team)
+    except RegistryError as exc:
+        raise HTTPException(400, str(exc)) from None
+    run_at = body.run_at or latest_week_end(datetime.now(UTC))
+    run_at = run_at.replace(tzinfo=UTC) if run_at.tzinfo is None else run_at.astimezone(UTC)
+    client, _ = select_client(settings.config, body.llm)
+    model_version = client.model_version if client else None
+    close_client(client)
+    from alerts_bi_shared.window import build_run_window
+
+    window = build_run_window(run_at)
+    run_id = compute_run_id(
+        team_id=body.team,
+        run_at=window.run_at,
+        window_start=window.window_start,
+        registry_sha256=registry.file_sha256,
+        model_version=model_version,
+    )
+    if db.query_one(
+        "SELECT run_id FROM review_publications WHERE run_id=:id AND withdrawn_at IS NULL",
+        {"id": run_id},
+    ):
+        raise HTTPException(409, "This run is published. Withdraw it before running it again.")
+    job_id = uuid4().hex
+    db.execute(
+        "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,request_hash,team_id,"
+        "run_at,llm_mode,registry_sha256,run_id,status,active_slot,submitted_at) "
+        "VALUES (:id,:key,:key_hash,:operator,:hash,:team,:at,:mode,:registry,:run,:status,:slot,:now)",
+        {
+            "id": job_id,
+            "key": idempotency_key,
+            "key_hash": key_hash,
+            "operator": operator,
+            "hash": request_hash,
+            "team": body.team,
+            "at": run_at.replace(tzinfo=None),
+            "mode": body.llm,
+            "registry": registry.file_sha256,
+            "run": run_id,
+            "status": status,
+            "slot": 1 if status == "pending" else None,
+            "now": datetime.now(UTC).replace(tzinfo=None),
+        },
+    )
+    db.commit()
+    log.info(
+        "run.job_submitted",
+        job_id=job_id,
+        team_id=body.team,
+        run_id=run_id,
+        operator=operator,
+        status=status,
+    )
+    return get_job(db, job_id)
 
 
 def submit_job(
@@ -97,89 +193,43 @@ def submit_job(
     # Binary identity preserves case and trailing spaces regardless of SQL collation.
     key_hash = bytes.fromhex(sha256_text(idempotency_key))
     with connect(settings.config.sql, settings.target_database) as db:
-        existing = db.query_one(
-            "SELECT * FROM run_jobs WHERE requested_by=:operator AND idempotency_key_hash=:key_hash",
-            {"operator": operator, "key_hash": key_hash},
-        )
+        existing = _existing_submission(db, operator, key_hash, request_hash)
         if existing:
-            if existing["request_hash"] != request_hash:
-                raise HTTPException(
-                    409, "This submission key was already used with different options."
-                )
             return existing
-        with execution_lock(db, settings):
-            # Recheck after acquiring the lock: a simultaneous identical submission may
-            # have committed since the first lookup.
-            existing = db.query_one(
-                "SELECT * FROM run_jobs WHERE requested_by=:operator AND idempotency_key_hash=:key_hash",
-                {"operator": operator, "key_hash": key_hash},
+        try:
+            with execution_lock(db, settings):
+                # Recheck after acquiring the lock: a simultaneous identical submission may
+                # have committed since the first lookup.
+                existing = _existing_submission(db, operator, key_hash, request_hash)
+                if existing:
+                    return existing
+                status = "pending"
+                try:
+                    refuse_active_job(db)
+                except ExecutionBusy:
+                    if not backfill_in_progress(db):
+                        raise
+                    status = "queued"
+                return _admit(
+                    settings, db, body, operator, idempotency_key, key_hash, request_hash, status
+                )
+        except ExecutionBusy:
+            db.rollback()
+            if not backfill_in_progress(db):
+                raise
+        # A backfill week holds the execution lock. Queue this run ahead of the remaining
+        # weeks; a queued row holds no slot, so admission needs no execution lock.
+        try:
+            return _admit(
+                settings, db, body, operator, idempotency_key, key_hash, request_hash, "queued"
             )
+        except Exception:
+            db.rollback()
+            # A simultaneous identical submission wins the unique key; return its row.
+            existing = _existing_submission(db, operator, key_hash, request_hash)
             if existing:
-                if existing["request_hash"] != request_hash:
-                    raise HTTPException(
-                        409, "This submission key was already used with different options."
-                    )
                 return existing
-            refuse_active_job(db)
-            try:
-                registry = (
-                    load_registry(settings.registry_path)
-                    if settings.registry_path
-                    else load_registry()
-                )
-                select_team(registry, body.team)
-            except RegistryError as exc:
-                raise HTTPException(400, str(exc)) from None
-            run_at = body.run_at or latest_week_end(datetime.now(UTC))
-            run_at = run_at.replace(tzinfo=UTC) if run_at.tzinfo is None else run_at.astimezone(UTC)
-            client, _ = select_client(settings.config, body.llm)
-            model_version = client.model_version if client else None
-            close_client(client)
-            from alerts_bi_shared.window import build_run_window
-
-            window = build_run_window(run_at)
-            run_id = compute_run_id(
-                team_id=body.team,
-                run_at=window.run_at,
-                window_start=window.window_start,
-                registry_sha256=registry.file_sha256,
-                model_version=model_version,
-            )
-            if db.query_one(
-                "SELECT run_id FROM review_publications WHERE run_id=:id AND withdrawn_at IS NULL",
-                {"id": run_id},
-            ):
-                raise HTTPException(
-                    409, "This run is published. Withdraw it before running it again."
-                )
-            job_id = uuid4().hex
-            db.execute(
-                "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,request_hash,team_id,"
-                "run_at,llm_mode,registry_sha256,run_id,status,active_slot,submitted_at) "
-                "VALUES (:id,:key,:key_hash,:operator,:hash,:team,:at,:mode,:registry,:run,'pending',1,:now)",
-                {
-                    "id": job_id,
-                    "key": idempotency_key,
-                    "key_hash": key_hash,
-                    "operator": operator,
-                    "hash": request_hash,
-                    "team": body.team,
-                    "at": run_at.replace(tzinfo=None),
-                    "mode": body.llm,
-                    "registry": registry.file_sha256,
-                    "run": run_id,
-                    "now": datetime.now(UTC).replace(tzinfo=None),
-                },
-            )
-            db.commit()
-            log.info(
-                "run.job_submitted",
-                job_id=job_id,
-                team_id=body.team,
-                run_id=run_id,
-                operator=operator,
-            )
-            return get_job(db, job_id)
+            raise
 
 
 def finish_job(db: Database, job_id: str, state: str, error: str | None = None) -> None:
@@ -213,18 +263,66 @@ def committed_result(db: Database, job: dict[str, Any]) -> bool:
     )
 
 
+def _may_claim_backfill(db: Database) -> bool:
+    """False while a weekly invocation waits for the current backfill week to finish."""
+    row = db.query_one(
+        "SELECT APPLOCK_TEST('public', :resource, 'Shared', 'Session') AS free",
+        {"resource": BACKFILL_YIELD_RESOURCE},
+    )
+    return row is not None and int(row["free"]) == 1
+
+
+def _has_work(db: Database) -> bool:
+    if db.query_one(
+        "SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1 "
+        "OR (status='queued' AND backfill_id IS NULL)"
+    ):
+        return True
+    queued = db.query_one(
+        "SELECT TOP 1 job_id FROM run_jobs WHERE status='queued' AND backfill_id IS NOT NULL"
+    )
+    return queued is not None and _may_claim_backfill(db)
+
+
+def claim_queued(db: Database, started: datetime) -> dict[str, Any] | None:
+    """Claim the next queued job: manual runs first, then backfill weeks oldest first."""
+    candidates = db.query(
+        "SELECT TOP 5 j.job_id FROM run_jobs j "
+        "LEFT JOIN run_backfills b ON b.backfill_id=j.backfill_id "
+        "WHERE j.status='queued' AND (j.backfill_id IS NULL OR :backfill=1) "
+        "ORDER BY CASE WHEN j.backfill_id IS NULL THEN 0 ELSE 1 END, b.submitted_at, "
+        "j.run_at, j.submitted_at, j.job_id",
+        {"backfill": 1 if _may_claim_backfill(db) else 0},
+    )
+    for candidate in candidates:
+        # A cancellation may have committed since the read; claim only a still-queued row.
+        claimed = db.query(
+            "UPDATE run_jobs SET status='running',active_slot=1,started_at=:at "
+            "OUTPUT inserted.job_id WHERE job_id=:id AND status='queued'",
+            {"id": candidate["job_id"], "at": started},
+        )
+        db.commit()
+        if claimed:
+            return get_job(db, str(candidate["job_id"]))
+    return None
+
+
 def work_once(settings: ApiSettings) -> bool:
     """Claim at most one job, recover orphans, then run on the lock-owning SQL session."""
     with connect(settings.config.sql, settings.target_database) as db:
         # An idle poll must not compete with submissions, reports or weekly execution.
         # Recheck and claim under the locks below; a new job after this read waits one poll.
-        if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1") is None:
+        if not _has_work(db):
             return False
         try:
             with execution_lock(db, settings):
                 for orphan in db.query("SELECT * FROM run_jobs WHERE status='running'"):
                     completed = committed_result(db, orphan)
-                    error: str | None = "Worker interrupted. Start a new run to retry."
+                    error: str | None = (
+                        "Worker interrupted. Retry this week."
+                        if orphan.get("backfill_id")
+                        else "Worker interrupted. Start a new run to retry."
+                    )
                     if completed:
                         try:
                             # The prior worker may have died between SQL commit and the
@@ -249,24 +347,28 @@ def work_once(settings: ApiSettings) -> bool:
                         "completed" if completed else "failed",
                         error,
                     )
+                started = datetime.now(UTC).replace(tzinfo=None)
+                started = started.replace(microsecond=started.microsecond // 1000 * 1000)
                 job = db.query_one(
                     "SELECT TOP 1 * FROM run_jobs WHERE status='pending' ORDER BY submitted_at"
                 )
-                if job is None:
-                    return False
-                started = datetime.now(UTC).replace(tzinfo=None)
-                started = started.replace(microsecond=started.microsecond // 1000 * 1000)
-                db.execute(
-                    "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
-                    {"id": job["job_id"], "at": started},
-                )
-                db.commit()
+                if job is not None:
+                    db.execute(
+                        "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
+                        {"id": job["job_id"], "at": started},
+                    )
+                    db.commit()
+                else:
+                    job = claim_queued(db, started)
+                    if job is None:
+                        return False
                 job["started_at"] = started
                 log.info(
                     "run.job_started",
                     job_id=job["job_id"],
                     team_id=job["team_id"],
                     run_id=job["run_id"],
+                    backfill_id=job.get("backfill_id"),
                 )
                 try:
                     registry = (
@@ -291,6 +393,8 @@ def work_once(settings: ApiSettings) -> bool:
                         "completed" if completed else "failed",
                         EXPORT_WARNING
                         if completed
+                        else "Analysis failed. Check the service logs, then retry this week."
+                        if job.get("backfill_id")
                         else "Analysis failed. Check the service logs, then start a new run to retry.",
                     )
                 return True

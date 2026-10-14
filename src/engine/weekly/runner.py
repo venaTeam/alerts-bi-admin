@@ -25,8 +25,9 @@ Server application lock.
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+import time
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -45,15 +46,19 @@ from ..run.outputs import render_run_report
 from .plan import WEEK, plan_weeks
 
 __all__ = [
+    "BACKFILL_WAIT",
+    "BACKFILL_YIELD_RESOURCE",
     "HOLD_DAYS",
     "LOCK_RESOURCE",
     "PUBLISHER",
     "Outcome",
     "WeeklyBusy",
+    "backfill_in_progress",
     "enrolled_teams",
     "run_health",
     "run_weekly",
     "schedule_lock",
+    "weekly_lock",
 ]
 
 #: Who a scheduled publication is recorded as.
@@ -62,6 +67,13 @@ PUBLISHER = "weekly-schedule"
 #: How long an unhealthy week is held and retried before it is published anyway.
 HOLD_DAYS = 3
 LOCK_RESOURCE = "alerts-bi-weekly"
+
+#: Held by a weekly invocation waiting for a running backfill week; while it is held the
+#: manual-run worker claims no further backfill weeks (docs/backfill.md).
+BACKFILL_YIELD_RESOURCE = "alerts-bi-backfill-yield"
+#: How long a weekly invocation waits for the current backfill week before refusing.
+BACKFILL_WAIT = timedelta(hours=3)
+BACKFILL_POLL_SECONDS = 30.0
 
 #: Outcomes that need a person: the command exits non-zero when any of these occurred.
 NEEDS_ATTENTION = frozenset({"held", "failed", "blocked"})
@@ -141,6 +153,73 @@ def schedule_lock(
             lock.execute(
                 f"EXEC sp_releaseapplock @Resource = N'{LOCK_RESOURCE}', @LockOwner = 'Session'"
             )
+
+
+def backfill_in_progress(db: Database) -> bool:
+    """Does any backfill week wait, hold the slot, or run? Pre-backfill schemas never do."""
+    present = db.query_one("SELECT COL_LENGTH('run_jobs', 'backfill_id') AS present")
+    if present is None or present["present"] is None:
+        return False
+    return (
+        db.query_one(
+            "SELECT TOP 1 job_id FROM run_jobs WHERE backfill_id IS NOT NULL "
+            "AND status IN ('queued', 'pending', 'running')"
+        )
+        is not None
+    )
+
+
+@contextmanager
+def weekly_lock(
+    config: AppConfig,
+    database: str,
+    *,
+    wait: timedelta = BACKFILL_WAIT,
+    poll_seconds: float = BACKFILL_POLL_SECONDS,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> Iterator[None]:
+    """The shared lock for a weekly invocation, letting it go ahead of queued backfill weeks.
+
+    Without a backfill in progress this refuses at once, exactly like :func:`schedule_lock`.
+    While one is in progress the invocation holds :data:`BACKFILL_YIELD_RESOURCE`, so the
+    worker claims no further backfill weeks, and polls until the current week releases the
+    shared lock or ``wait`` expires. Only one invocation can wait at a time.
+    """
+    with connect(config.sql, database, autocommit=True) as hold:
+        holding = False
+        try:
+            deadline = clock() + wait.total_seconds()
+            while True:
+                stack = ExitStack()
+                try:
+                    stack.enter_context(schedule_lock(config, database))
+                except WeeklyBusy:
+                    if clock() >= deadline or not backfill_in_progress(hold):
+                        raise
+                    if not holding:
+                        row = hold.query_one(
+                            "SET NOCOUNT ON; DECLARE @result INT; "
+                            "EXEC @result = sp_getapplock @Resource=:resource, "
+                            "@LockMode='Exclusive', @LockOwner='Session', @LockTimeout=0; "
+                            "SELECT @result AS result",
+                            {"resource": BACKFILL_YIELD_RESOURCE},
+                        )
+                        if row is None or int(row["result"]) < 0:
+                            raise
+                        holding = True
+                        log.info("weekly.waiting_for_backfill")
+                    sleep(poll_seconds)
+                    continue
+                with stack:
+                    yield
+                return
+        finally:
+            if holding:
+                hold.execute(
+                    "EXEC sp_releaseapplock @Resource=:resource, @LockOwner='Session'",
+                    {"resource": BACKFILL_YIELD_RESOURCE},
+                )
 
 
 def run_health(db: Database, run_id: str) -> list[str]:
@@ -353,7 +432,7 @@ def run_weekly(
     invoked_at = now if now.tzinfo else now.replace(tzinfo=UTC)
     outcomes: list[Outcome] = []
 
-    with schedule_lock(config, database):
+    with weekly_lock(config, database):
         for team in enrolled:
             with connect(config.sql, database) as db:
                 try:

@@ -7,6 +7,7 @@ views. Both use the application's SQL credential.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 
 from alerts_bi_shared.db.connection import Database
@@ -14,6 +15,7 @@ from alerts_bi_shared.db.connection import Database
 __all__ = [
     "PAGE_SIZE",
     "alerts_with_findings",
+    "backfill_calendar",
     "decision_history",
     "team_log",
     "team_overview",
@@ -71,6 +73,8 @@ def team_runs(db: Database, team_id: str, limit: int = 20, page: int = 1) -> lis
                r.ruleset_version, r.prompt_version,
                p.publication_id, p.published_at, p.published_by, p.review_note,
                (SELECT COUNT(*) FROM weekly_review_log l WHERE l.run_id=r.run_id) AS scheduled,
+               (SELECT COUNT(*) FROM run_jobs j WHERE j.run_id=r.run_id AND j.backfill_id IS NOT NULL
+                 AND j.status='completed') AS backfilled,
                (SELECT COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v1.states.unassessed') AS BIGINT),0)+COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v2.states.unassessed') AS BIGINT),0) FROM run_summaries s WHERE s.run_id=r.run_id AND s.scope_kind='team') AS unassessed,
                (SELECT COUNT(*) FROM review_publications w
                  WHERE w.run_id = r.run_id AND w.withdrawn_at IS NOT NULL) AS withdrawn
@@ -83,6 +87,35 @@ def team_runs(db: Database, team_id: str, limit: int = 20, page: int = 1) -> lis
         """,
         {"team_id": team_id, "limit": limit, "offset": (page - 1) * limit},
     )
+
+
+def backfill_calendar(db: Database, team_id: str, earliest_end: datetime) -> dict[datetime, str]:
+    """Each retained Monday window end's backfill state for the team.
+
+    ``published`` and ``active`` (queued, pending or running) weeks are locked; ``completed``
+    weeks have an unpublished run that a backfill replaces. Unlisted weeks have no run.
+    """
+    params = {"team_id": team_id, "earliest": earliest_end.replace(tzinfo=None)}
+    states: dict[datetime, str] = {}
+    for row in db.query(
+        "SELECT DISTINCT window_end FROM runs WHERE team_id=:team_id AND status='completed' "
+        "AND window_end>=:earliest",
+        params,
+    ):
+        states[row["window_end"]] = "completed"
+    for row in db.query(
+        "SELECT DISTINCT run_at FROM run_jobs WHERE team_id=:team_id "
+        "AND status IN ('queued','pending','running') AND run_at>=:earliest",
+        params,
+    ):
+        states[row["run_at"]] = "active"
+    for row in db.query(
+        "SELECT DISTINCT window_end FROM review_publications WHERE team_id=:team_id "
+        "AND withdrawn_at IS NULL AND window_end>=:earliest",
+        params,
+    ):
+        states[row["window_end"]] = "published"
+    return states
 
 
 def team_log(db: Database, team_id: str, limit: int = 30) -> list[dict[str, Any]]:
