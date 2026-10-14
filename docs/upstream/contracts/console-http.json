@@ -95,7 +95,7 @@
     "scope": "One registered team per backfill; 1-12 distinct completed Monday 00:00 UTC window ends whose window start is within the 84-day Elasticsearch retention",
     "locked_weeks": "Weeks with a current publication for the team, or a queued, pending or running job for the team",
     "model_mode": "live, fake or off for every week; live by default",
-    "admission": "Browser form with same-site actor-bound CSRF and a per-form submission key; one run_backfills row and one queued run_jobs row per week in one transaction; no execution lock",
+    "admission": "Browser form with same-site actor-bound CSRF and a per-form submission key; one run_backfills row and one queued run_jobs row per week in one transaction; no execution lock; every run job insert and run deletion take the team's transaction-scoped queue lock alerts-bi-queue:{team_id}",
     "claim_order": "Orphan reconciliation, pending job, queued manual jobs by submission, then backfill weeks by backfill submission and oldest week first",
     "manual_priority": "While a backfill is in progress a manual submission that finds the slot or execution lock busy is accepted as queued",
     "weekly_priority": "A weekly invocation blocked during a backfill holds SQL session lock alerts-bi-backfill-yield and waits up to three hours, polling every 30 seconds",

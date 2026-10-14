@@ -48,8 +48,10 @@ a current publication for the team, or already has a queued, pending or running 
 or when the team already has an active backfill.
 
 Admission stores one `run_backfills` row and one queued `run_jobs` row per week in one SQL
-transaction under a per-team admission lock. It performs no Elasticsearch or model call and does
-not take the execution lock. As for manual jobs, each week's registry hash and deterministic run
+transaction under the team's transaction-scoped queue lock (`alerts-bi-queue:{team_id}`). Every
+run job insert and run deletion take the same lock, so a deletion cannot remove a week or run
+queued after its own checks. Admission performs no Elasticsearch or model call and does not
+take the execution lock. As for manual jobs, each week's registry hash and deterministic run
 ID are captured at acceptance.
 
 ## Queue and execution
