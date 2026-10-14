@@ -17,7 +17,11 @@ REQUIRED_COLUMNS: dict[str, str] = {
     "run_jobs": (
         "job_id, idempotency_key, idempotency_key_hash, requested_by, request_hash, "
         "team_id, run_at, llm_mode, registry_sha256, run_id, status, active_slot, "
-        "submitted_at, started_at, completed_at, error_summary"
+        "submitted_at, started_at, completed_at, error_summary, backfill_id"
+    ),
+    "run_backfills": (
+        "backfill_id, team_id, requested_by, idempotency_key_hash, request_hash, llm_mode, "
+        "week_count, submitted_at, cancelled_at, cancelled_by, dismissed_at"
     ),
     "runs": (
         "run_id, run_at, team_id, team_display_name, window_start, window_end, "
@@ -76,6 +80,7 @@ def check_schema(db: Database) -> None:
         "011_run_job_keys",
         "012_read_models",
         "013_analysis_checkpoints",
+        "014_backfills",
     ):
         if (
             db.query_one(
