@@ -25,6 +25,8 @@ class EsConfig:
     v1_index: str = "appchi-v1"
     v2_index: str = "appchi-v2"
     pit_keep_alive: str = "2m"
+    search_retries: int = 3
+    search_retry_backoff_ms: int = 1000
 
     def __post_init__(self) -> None:
         for name, value in (("ES_V1_INDEX", self.v1_index), ("ES_V2_INDEX", self.v2_index)):
@@ -32,6 +34,10 @@ class EsConfig:
                 raise ValueError(
                     f"{name} must be a nonempty index name or expression without whitespace"
                 )
+        if self.search_retries < 0:
+            raise ValueError("ES_SEARCH_RETRIES must not be negative")
+        if self.search_retry_backoff_ms < 0:
+            raise ValueError("ES_SEARCH_RETRY_BACKOFF_MS must not be negative")
         if not re.fullmatch(r"[1-9][0-9]*(?:ms|s|m|h|d)", self.pit_keep_alive):
             raise ValueError("ES_PIT_KEEP_ALIVE must be a positive duration such as 2m or 120s")
 
@@ -48,4 +54,6 @@ def load_es_config() -> EsConfig:
         v1_index=read_str("ES_V1_INDEX", "appchi-v1"),
         v2_index=read_str("ES_V2_INDEX", "appchi-v2"),
         pit_keep_alive=read_str("ES_PIT_KEEP_ALIVE", "2m"),
+        search_retries=read_int("ES_SEARCH_RETRIES", 3),
+        search_retry_backoff_ms=read_int("ES_SEARCH_RETRY_BACKOFF_MS", 1000),
     )

@@ -13,11 +13,11 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from time import perf_counter
+from time import perf_counter, sleep
 from typing import Any
 
 from alerts_bi_operations.registry import TeamEntry
-from alerts_bi_shared.logging_setup import log
+from alerts_bi_shared.logging_setup import log, redact_error
 from alerts_bi_shared.timefmt import iso_instant
 from alerts_bi_shared.window import RunWindow
 
@@ -31,6 +31,11 @@ __all__ = [
     "read_team_alerts",
     "scan_schema",
 ]
+
+
+# Transport failures (no HTTP status) and server-side statuses that are worth another try.
+# Anything else (a bad query, a missing or expired point-in-time) cannot succeed on retry.
+_RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +77,37 @@ def build_query(operators: Sequence[str], window: RunWindow) -> dict[str, Any]:
 def _iso(value: datetime) -> str:
     """Render an instant the way Elasticsearch date parsing expects."""
     return iso_instant(value)
+
+
+def _search_with_retry(client: EsClient, body: dict[str, Any], index: str) -> dict[str, Any]:
+    """Run one page search, retrying transient failures with exponential backoff.
+
+    Re-sending the identical body is safe: the PIT pins one view of the index and
+    ``search_after`` pins the page, so a retry returns exactly the page that failed. Rows
+    are only consumed after a successful response, so a retry cannot duplicate rows.
+    """
+    config = client.config
+    attempt = 0
+    while True:
+        try:
+            return client.search(body)
+        except ElasticsearchError as exc:
+            if (
+                exc.status is not None and exc.status not in _RETRYABLE_STATUSES
+            ) or attempt >= config.search_retries:
+                raise
+            delay = config.search_retry_backoff_ms / 1000 * 2**attempt
+            attempt += 1
+            log.warn(
+                "es.search_retry",
+                index=index,
+                attempt=attempt,
+                max_retries=config.search_retries,
+                status=exc.status,
+                delay_seconds=round(delay, 3),
+                error=redact_error(exc),
+            )
+            sleep(delay)
 
 
 def read_schema(
@@ -144,7 +180,7 @@ def scan_schema(
                 body["search_after"] = search_after
 
             before = perf_counter()
-            response = client.search(body)
+            response = _search_with_retry(client, body, index)
             search_seconds += perf_counter() - before
             cluster_ms += int(response.get("took", 0))
             pit_id = response.get("pit_id", pit_id)

@@ -142,3 +142,78 @@ def test_no_operators_skips_cluster() -> None:
     assert scan_schema(cast(EsClient, client), "v1", [], WINDOW, lambda row: None) == (0, 0)
     assert client.requests == []
     assert client.closed == []
+
+
+class FlakyClient(Client):
+    """Raises the queued exceptions before serving responses."""
+
+    def __init__(self, outcomes: list[Any]) -> None:
+        super().__init__([])
+        self.outcomes = iter(outcomes)
+
+    def search(self, body: dict[str, Any]) -> dict[str, Any]:
+        self.requests.append(deepcopy(body))
+        outcome = next(self.outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return cast(dict[str, Any], outcome)
+
+
+@pytest.fixture
+def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    recorded: list[float] = []
+    monkeypatch.setattr("src.engine.es.reader.sleep", recorded.append)
+    return recorded
+
+
+@pytest.mark.parametrize("status", [None, 429, 500, 502, 503, 504])
+def test_transient_page_failure_is_retried_with_the_same_page_request(
+    sleeps: list[float], status: int | None
+) -> None:
+    client = FlakyClient(
+        [page(1), ElasticsearchError("boom", status), page(2), page(3, empty=True)]
+    )
+    received: list[AlertRecord] = []
+    assert scan_schema(cast(EsClient, client), "v1", ["op"], WINDOW, received.append) == (3, 2)
+    assert len(received) == 2, "the failed attempt must not duplicate or drop rows"
+    assert len(client.requests) == 4
+    assert client.requests[1] == client.requests[2], "retry re-sends the identical request"
+    assert client.requests[2]["search_after"] == [1, 1]
+    assert client.requests[2]["pit"]["id"] == "pit-1"
+    assert sleeps == [1.0]
+    assert client.closed == ["pit-3"]
+
+
+def test_backoff_doubles_and_resets_per_page(sleeps: list[float]) -> None:
+    error = ElasticsearchError("boom", 503)
+    client = FlakyClient([error, error, page(1, total=1), error, page(2, total=1, empty=True)])
+    scan_schema(cast(EsClient, client), "v1", ["op"], WINDOW, lambda row: None)
+    assert sleeps == [1.0, 2.0, 1.0]
+
+
+def test_retries_are_bounded_then_the_error_propagates(sleeps: list[float]) -> None:
+    error = ElasticsearchError("boom", 503)
+    client = FlakyClient([page(1), error, error, error, error])
+    with pytest.raises(ElasticsearchError, match="boom"):
+        scan_schema(cast(EsClient, client), "v1", ["op"], WINDOW, lambda row: None)
+    assert len(client.requests) == 5, "one attempt plus three retries for the failing page"
+    assert sleeps == [1.0, 2.0, 4.0]
+    assert client.closed == ["pit-1"]
+
+
+@pytest.mark.parametrize("status", [400, 404])
+def test_non_transient_failure_is_not_retried(sleeps: list[float], status: int) -> None:
+    client = FlakyClient([ElasticsearchError("bad", status)])
+    with pytest.raises(ElasticsearchError, match="bad"):
+        scan_schema(cast(EsClient, client), "v1", ["op"], WINDOW, lambda row: None)
+    assert len(client.requests) == 1
+    assert sleeps == []
+
+
+def test_retries_can_be_disabled(sleeps: list[float]) -> None:
+    client = FlakyClient([ElasticsearchError("boom", 503)])
+    client.config = replace(Client.config, search_retries=0)
+    with pytest.raises(ElasticsearchError):
+        scan_schema(cast(EsClient, client), "v1", ["op"], WINDOW, lambda row: None)
+    assert len(client.requests) == 1
+    assert sleeps == []

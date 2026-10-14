@@ -17,6 +17,8 @@ ENV_NAMES = [
     "ES_V1_INDEX",
     "ES_V2_INDEX",
     "ES_PIT_KEEP_ALIVE",
+    "ES_SEARCH_RETRIES",
+    "ES_SEARCH_RETRY_BACKOFF_MS",
     "SQL_HOST",
     "SQL_PORT",
     "SQL_USER",
@@ -67,6 +69,7 @@ def test_defaults_are_sane_without_any_environment() -> None:
     assert config.es.v1_index == "appchi-v1"
     assert config.es.v2_index == "appchi-v2"
     assert config.es.pit_keep_alive == "2m"
+    assert (config.es.search_retries, config.es.search_retry_backoff_ms) == (3, 1000)
     assert config.sql.database == "alerts_bi_dev"
     assert config.sql.test_database == "alerts_bi_test"
     assert config.llm.enabled is False
@@ -112,6 +115,15 @@ def test_whitespace_index_settings_fail_at_load(
 def test_invalid_pit_lifetime_fails_at_load(monkeypatch: pytest.MonkeyPatch, value: str) -> None:
     monkeypatch.setenv("ES_PIT_KEEP_ALIVE", value)
     with pytest.raises(ValueError, match="ES_PIT_KEEP_ALIVE"):
+        load_config()
+
+
+@pytest.mark.parametrize("name", ["ES_SEARCH_RETRIES", "ES_SEARCH_RETRY_BACKOFF_MS"])
+def test_negative_search_retry_settings_fail_at_load(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    monkeypatch.setenv(name, "-1")
+    with pytest.raises(ValueError, match=name):
         load_config()
 
 
