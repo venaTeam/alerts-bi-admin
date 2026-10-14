@@ -14,7 +14,7 @@ The wording of each principle is taken from the pinned catalogue in
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
@@ -27,6 +27,7 @@ __all__ = [
     "Evidence",
     "decision_question",
     "dominant_r6_pattern",
+    "dominant_r6_pattern_totals",
     "format_date",
     "format_instant",
     "format_week",
@@ -111,16 +112,26 @@ def dominant_r6_pattern(alerts: Iterable[tuple[str | None, int]]) -> str | None:
     Ties go to the pattern with more events, then to R6's own priority order (flapping,
     spamming, stuck). ``None`` when no alert carries a pattern.
     """
-    alerts_by: dict[str, int] = {}
-    events_by: dict[str, int] = {}
+    totals: dict[str, list[int]] = {}
     for pattern, events in alerts:
         if pattern not in _R6_PRIORITY:
             continue
-        alerts_by[pattern] = alerts_by.get(pattern, 0) + 1
-        events_by[pattern] = events_by.get(pattern, 0) + events
-    if not alerts_by:
+        pair = totals.setdefault(pattern, [0, 0])
+        pair[0] += 1
+        pair[1] += events
+    return dominant_r6_pattern_totals(totals)
+
+
+def dominant_r6_pattern_totals(totals: Mapping[str, Sequence[int]]) -> str | None:
+    """Choose from exact ``[alert_count, event_count]`` aggregates without expanding alerts.
+
+    Use the same alert-count, event-count and pattern-priority ordering as the full-input
+    path. Unknown patterns and entries representing no alerts cannot supply guidance.
+    """
+    candidates = [p for p in _R6_PRIORITY if p in totals and totals[p][0] > 0]
+    if not candidates:
         return None
-    return min(alerts_by, key=lambda p: (-alerts_by[p], -events_by[p], _R6_PRIORITY.index(p)))
+    return min(candidates, key=lambda p: (-totals[p][0], -totals[p][1], _R6_PRIORITY.index(p)))
 
 
 def _r6_rate(evidence: Evidence) -> str:

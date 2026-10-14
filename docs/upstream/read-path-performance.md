@@ -49,7 +49,7 @@ v1-rule hashes, with application day facts captured on new executions. Migration
 private retry checkpoints. Backfill processes runs individually within the migration
 transaction: rehearse upgrade duration, log growth and blocking on a representative copy
 before scheduling production migration. Neither migration removes historical facts.
-Shared 0.1.4 and operations 0.2.1 are the coordinated library versions. Portal readiness
+Shared 0.1.5 and operations 0.2.2 are the coordinated library versions. Portal readiness
 checks all eleven published-only views. Unpublish/replace is visible immediately because
 every request rechecks SQL publication views; only decoded immutable JSON is cached, at
 most 64 entries of 256 KiB each. Evidence stays on detail/page reads and CSV exports.
@@ -59,6 +59,12 @@ the ordinary run/publication predicates apply independently of the cursor. Exist
 numbered-page bookmarks remain supported. Equal event counts preserve identity ordering.
 Application-filtered charts use exact stored daily unions when available; old weeks
 without those facts continue to show an unavailable measurement.
+
+R6 summary guidance selects the pattern carried by the most alert identities, then the
+most events on a tie, then flapping/spamming/stuck priority. Stored pattern totals retain
+both identity and event counts and use the same ordering as full-input calculations;
+bounded examples never determine the dominant pattern. Shared 0.1.5 corrects this
+selection in both surfaces; operations 0.2.2 pins the matching shared dependency.
 
 Persistence sends parameterized batches below SQL Server's 2,100-parameter and
 1,000-row VALUES limits, within the same atomic completed-run transaction. This reduces
