@@ -201,11 +201,11 @@ def _insert_week(
     operator: str,
     registry_sha256: str,
     run_id: str,
-    attempt: int,
     now: datetime,
 ) -> str:
     job_id = uuid4().hex
-    key = f"bf-{backfill_id}-{end:%Y%m%d}-{attempt}"
+    # Unique per job: retries must not depend on earlier attempts, which run deletion removes.
+    key = f"backfill-{job_id}"
     db.execute(
         "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,"
         "request_hash,team_id,run_at,llm_mode,registry_sha256,run_id,status,active_slot,"
@@ -307,7 +307,6 @@ def submit_backfill(
                 operator=operator,
                 registry_sha256=registry.file_sha256,
                 run_id=run_ids[end],
-                attempt=1,
                 now=submitted,
             )
         row = get_backfill(db, backfill_id)
@@ -435,7 +434,7 @@ def retry_backfill(
                 {"id": backfill_id},
             )
             submitted = _now()
-            for row, end in zip(failed, weeks, strict=True):
+            for end in weeks:
                 _insert_week(
                     db,
                     backfill_id=backfill_id,
@@ -445,7 +444,6 @@ def retry_backfill(
                     operator=operator,
                     registry_sha256=registry.file_sha256,
                     run_id=run_ids[end],
-                    attempt=int(row["attempts"]) + 1,
                     now=submitted,
                 )
     log.info(

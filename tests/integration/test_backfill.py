@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from threading import Event
 from typing import Any
 
@@ -530,6 +531,49 @@ def test_retried_backfill_stays_visible_after_dismissal_or_a_newer_backfill(
     assert panel not in client.get(f"/teams/{TEAM}").text
     post(client, f"/backfills/{older['backfill_id']}/retry")
     assert panel in client.get(f"/teams/{TEAM}").text
+
+
+def test_retry_still_queues_after_an_earlier_attempts_run_is_deleted(
+    settings: AdminSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    registry = tmp_path / "teams.json"
+    registry.write_bytes(Path("config/teams.json").read_bytes())
+    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry), out_root=settings.out_root)
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Test failure")
+
+    monkeypatch.setattr(jobs, "execute_request", fail)
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "retry", now=NOW)
+    first = queued_weeks(api, row["backfill_id"])[0]
+    with connect(CONFIG.sql, DB) as db:
+        # The week already had an unpublished run with the first attempt's identity.
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=first["run_id"],
+                    run_at=datetime(2026, 8, 10),
+                    window_start=datetime(2026, 8, 3),
+                    window_end=datetime(2026, 8, 10),
+                )
+            ),
+        )
+    assert jobs.work_once(api)
+    # A registry change gives the second attempt a different run identity.
+    registry.write_bytes(registry.read_bytes() + b"\n")
+    backfill.retry_backfill(api, row["backfill_id"], "op", now=NOW)
+    assert jobs.work_once(api)
+    attempts = queued_weeks(api, row["backfill_id"])
+    assert [job["status"] for job in attempts] == ["failed", "failed"]
+    assert attempts[0]["run_id"] != attempts[1]["run_id"]
+    with connect(CONFIG.sql, DB) as db:
+        # Deleting the first run also removes the first attempt's job record.
+        assert delete_run(db, str(first["run_id"])) == TEAM
+    backfill.retry_backfill(api, row["backfill_id"], "op", now=NOW)
+    remaining = queued_weeks(api, row["backfill_id"])
+    assert [job["status"] for job in remaining] == ["failed", "queued"]
+    assert len({job["idempotency_key"] for job in remaining}) == 2
 
 
 def test_queued_week_blocks_deleting_the_run_it_would_recreate(
