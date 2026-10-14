@@ -6,20 +6,37 @@ strict JSON-schema output and temperature zero.
 SDK automatic retries are disabled (``max_retries=0``). This is not a preference: the
 pipeline owns a three-attempt policy and records every attempt, and hidden SDK retries
 would silently exceed it and break the audit trail. A timeout or transport error consumes
-one recorded attempt like any other failed call.
+one recorded attempt like any other failed call; the pipeline, not the SDK, waits before
+the next one (honouring ``Retry-After``, surfaced on the error).
 """
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
-from openai import APITimeoutError, OpenAI, OpenAIError
+from openai import APIStatusError, APITimeoutError, OpenAI, OpenAIError
 
 from ..config import LlmConfig
 from .client import Completion, LlmTransportError
 from .response import response_json_schema
 
 __all__ = ["OpenAiLlmClient"]
+
+
+def _retry_after(exc: OpenAIError) -> float | None:
+    """The delay in seconds from a ``Retry-After`` header on an HTTP error, if usable.
+
+    Only the delta-seconds form is read; an HTTP-date or garbage value is ignored and the
+    pipeline's own backoff applies.
+    """
+    if not isinstance(exc, APIStatusError):
+        return None
+    try:
+        seconds = float(exc.response.headers.get("retry-after", ""))
+    except ValueError:
+        return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
 
 
 class OpenAiLlmClient:
@@ -67,7 +84,9 @@ class OpenAiLlmClient:
             raise LlmTransportError("model request timed out", "timeout") from exc
         except OpenAIError as exc:
             raise LlmTransportError(
-                f"model request failed: {type(exc).__name__}", "transport"
+                f"model request failed: {type(exc).__name__}",
+                "transport",
+                retry_after=_retry_after(exc),
             ) from exc
 
         choice = completion.choices[0] if completion.choices else None

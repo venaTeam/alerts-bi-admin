@@ -1,8 +1,8 @@
 """The ``LlmClient`` contract.
 
-One method, deliberately: the pipeline owns the three-attempt policy, the batch identity,
-the validation and the persistence, and a client that could retry or reorder on its own
-would make those guarantees untrue.
+One method, deliberately: the pipeline owns the three-attempt policy, the wait between
+attempts, the batch identity, the validation and the persistence, and a client that could
+retry or reorder on its own would make those guarantees untrue.
 
 A client returns raw response text, optionally with endpoint metadata. Parsing and
 validation happen in the pipeline so the real adapter and fake use identical standards.
@@ -32,11 +32,15 @@ class LlmTransportError(Exception):
         *,
         metadata: dict[str, Any] | None = None,
         response_text: str | None = None,
+        retry_after: float | None = None,
     ) -> None:
         super().__init__(message)
         self.kind = kind
         self.metadata = metadata or {}
         self.response_text = response_text
+        #: Seconds the endpoint asked callers to wait (``Retry-After``). The pipeline
+        #: decides whether and how long to honour it.
+        self.retry_after = retry_after
 
 
 class LlmClient(Protocol):

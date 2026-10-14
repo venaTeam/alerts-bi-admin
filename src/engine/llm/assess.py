@@ -9,6 +9,7 @@ non-zero value reads as a broken classifier.
 from __future__ import annotations
 
 import json
+import random
 import time
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import nullcontext
@@ -35,6 +36,8 @@ from .response import (
 
 __all__ = [
     "MAX_ATTEMPTS",
+    "MAX_RETRY_AFTER_SECONDS",
+    "RETRY_DELAYS_SECONDS",
     "AssessmentOutcome",
     "AssessmentResult",
     "assess_alerts",
@@ -43,6 +46,19 @@ __all__ = [
 
 #: The initial request plus two retries. Not configurable.
 MAX_ATTEMPTS: Final = 3
+
+#: Seconds to wait after the first and second failed live attempts, before the retry. A
+#: failed call is often a rate limit or an overloaded endpoint, which an immediate resend
+#: only repeats. Not configurable, like the attempt count.
+RETRY_DELAYS_SECONDS: Final = (2.0, 5.0)
+
+#: Up to this fraction of the delay is added at random, so concurrent runs do not retry in
+#: lockstep.
+_RETRY_JITTER: Final = 0.25
+
+#: Ceiling for an endpoint's ``Retry-After``: a run must not stall on a hostile or
+#: misconfigured header.
+MAX_RETRY_AFTER_SECONDS: Final = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,8 +105,14 @@ def assess_alerts(
     audit_settings: dict[str, Any] | None = None,
     factored: bool = True,
     reverse_order: bool = False,
+    sleep: Callable[[float], None] | None = None,
 ) -> AssessmentResult:
-    """Assess eligible identities; live requests require durable pre-call SQL audit."""
+    """Assess eligible identities; live requests require durable pre-call SQL audit.
+
+    ``sleep`` waits between a failed live attempt and its retry. By default a client that
+    needs the audit journal (a real endpoint) waits with ``time.sleep``; any other client
+    never touches a network, so it does not wait.
+    """
     if getattr(client, "requires_audit", False) and journal is None:
         raise ValueError("live LLM assessment requires a SQL audit journal")
     if (not factored or reverse_order) and journal is not None and journal.kind != "evaluation":
@@ -122,7 +144,14 @@ def assess_alerts(
             clock=clock or (lambda: now),
             factored=factored,
             reverse_order=reverse_order,
+            sleep=sleep
+            if sleep is not None
+            else (time.sleep if getattr(client, "requires_audit", False) else _no_sleep),
         )
+
+
+def _no_sleep(_seconds: float) -> None:
+    return None
 
 
 def _assess_alerts(
@@ -140,6 +169,7 @@ def _assess_alerts(
     clock: Callable[[], datetime],
     factored: bool,
     reverse_order: bool,
+    sleep: Callable[[float], None],
 ) -> AssessmentResult:
     """Assess every eligible alert."""
     existing = existing_verdicts or {}
@@ -197,6 +227,7 @@ def _assess_alerts(
             batch_attempts=result.batch_attempts,
             journal=journal,
             clock=clock,
+            sleep=sleep,
         )
 
         if verdicts is not None:
@@ -260,8 +291,12 @@ def _attempt_batch(
     batch_attempts: list[dict[str, Any]],
     journal: SqlLlmJournal | None,
     clock: Callable[[], datetime],
+    sleep: Callable[[float], None],
 ) -> tuple[list[Verdict] | None, str, datetime]:
     """Run one batch through at most three attempts.
+
+    A live attempt that fails is followed by a pause (see :func:`_retry_delay`) before the
+    next live attempt; the final failure and attempts replayed from the journal do not wait.
 
     Each retry sends the IDENTICAL batch as a unit: same membership, same ordering, same
     bytes. There is no alert-by-alert fallback, because a verdict attached to the wrong
@@ -278,6 +313,7 @@ def _attempt_batch(
         verdicts: list[Verdict] | None = None
         response_text: str | None = None
         metadata: dict[str, Any] = {}
+        retry_after: float | None = None
         saved = journal.attempt(cycle, attempt) if journal else None
         created_at = saved["created_at"] if saved else clock()
         if journal is not None and saved is None:
@@ -334,6 +370,7 @@ def _attempt_batch(
             )
             metadata = exc.metadata or metadata
             response_text = exc.response_text or response_text
+            retry_after = exc.retry_after
             reason = redact_error(exc)
             failure_reason = f"{status}: {reason}"
             verdicts = None
@@ -394,6 +431,15 @@ def _attempt_batch(
         log.warn(
             "llm.batch_attempt_failed", batch_id=batch.batch_id, attempt=attempt, status=status
         )
+        if saved is None and attempt < MAX_ATTEMPTS:
+            delay = _retry_delay(attempt, retry_after)
+            log.info(
+                "llm.batch_retry_wait",
+                batch_id=batch.batch_id,
+                attempt=attempt,
+                delay_seconds=round(delay, 2),
+            )
+            sleep(delay)
 
     log.error(
         "llm.batch_exhausted",
@@ -404,6 +450,18 @@ def _attempt_batch(
     if journal is not None:
         journal.complete_batch(cycle, succeeded=False)
     return None, f"batch exhausted {MAX_ATTEMPTS} attempts - {failure_reason}"[:500], completed_at
+
+
+def _retry_delay(failed_attempt: int, retry_after: float | None) -> float:
+    """Seconds to wait after ``failed_attempt`` (1-based) fails.
+
+    The fixed schedule, lengthened to the endpoint's ``Retry-After`` when that is larger
+    (capped), plus a little jitter.
+    """
+    base = RETRY_DELAYS_SECONDS[min(failed_attempt, len(RETRY_DELAYS_SECONDS)) - 1]
+    if retry_after is not None:
+        base = max(base, min(retry_after, MAX_RETRY_AFTER_SECONDS))
+    return base * (1 + random.uniform(0, _RETRY_JITTER))
 
 
 def mark_all_unassessed(alerts: Sequence[AlertRecord], reason: str) -> dict[str, AssessmentOutcome]:

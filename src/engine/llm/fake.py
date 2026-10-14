@@ -28,6 +28,8 @@ class ScriptedResult:
     """Raw response text for ``raw`` and ``invalid_json``."""
     build: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     """Response builder for ``ok``."""
+    retry_after: float | None = None
+    """``Retry-After`` seconds carried by ``transport_error`` and ``timeout``."""
 
 
 @dataclass(slots=True)
@@ -70,9 +72,15 @@ class FakeLlmClient:
         result = self.script.get((batch_id, attempt), self.fallback)
 
         if result.kind == "transport_error":
-            raise LlmTransportError(result.text or "scripted transport failure", "transport")
+            raise LlmTransportError(
+                result.text or "scripted transport failure",
+                "transport",
+                retry_after=result.retry_after,
+            )
         if result.kind == "timeout":
-            raise LlmTransportError(result.text or "scripted timeout", "timeout")
+            raise LlmTransportError(
+                result.text or "scripted timeout", "timeout", retry_after=result.retry_after
+            )
         if result.kind == "invalid_json":
             return result.text or "{not valid json"
         if result.kind == "raw":
