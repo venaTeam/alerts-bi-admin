@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
+from threading import Event
 from typing import Any
 
 import pytest
 from alerts_bi_operations.review.publication import publish_run
-from alerts_bi_shared.db.connection import connect
+from alerts_bi_shared.db.connection import Database, connect
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from src.app import build_admin
@@ -21,6 +24,7 @@ from src.engine.db.migrate import reset_test_database
 from src.engine.db.repositories import PersistencePayload, persist_run
 from src.engine.weekly import runner
 from src.engine.weekly.plan import latest_week_end
+from src.runs import delete_run
 
 from tests.helpers.sql import sample_run
 
@@ -387,6 +391,105 @@ def test_console_backfill_flow_from_dialog_to_dismissal(
     assert "data-backfill-url" not in page and "Backfill · 3 weeks" not in page
     assert client.post(f"/backfills/{backfill_id}/cancel", data={}).status_code == 403
     assert client.get("/backfills/" + "0" * 32).status_code == 404
+
+
+def test_queued_manual_runs_keep_submission_order(
+    api: ApiSettings, executed: list[tuple[str, datetime]]
+) -> None:
+    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "manual-order", now=NOW)
+    with connect(CONFIG.sql, DB) as db:
+        week = jobs.claim_queued(db, datetime.now(UTC).replace(tzinfo=None))
+    assert week is not None
+    # Submitted first for the newer week, then for an older one: submission order wins.
+    first = jobs.submit_job(
+        api, RunRequest(team=TEAM, run_at=at("2026-10-12"), llm="fake"), "op", "first-manual"
+    )
+    second = jobs.submit_job(
+        api, RunRequest(team=TEAM, run_at=at("2026-08-03"), llm="fake"), "op", "second-manual"
+    )
+    assert first["status"] == second["status"] == "queued"
+    with connect(CONFIG.sql, DB) as db:
+        jobs.finish_job(db, str(week["job_id"]), "completed")
+    while jobs.work_once(api):
+        pass
+    assert [end for _, end in executed] == [datetime(2026, 10, 12), datetime(2026, 8, 3)]
+
+
+class PausedDeletion(Database):
+    """Stops a deletion after its checks, before it removes any row."""
+
+    def __init__(self, db: Database, paused: Event, release: Event) -> None:
+        super().__init__(db.connection)
+        self.paused, self.release = paused, release
+
+    def execute(self, sql: str, params: dict[str, Any] | None = None) -> None:
+        if sql.startswith("DELETE a FROM llm_review_attempts") and not self.paused.is_set():
+            self.paused.set()
+            assert self.release.wait(30), "The test must release the paused deletion"
+        super().execute(sql, params)
+
+
+@pytest.mark.parametrize("admission", ["backfill", "manual"])
+def test_deletion_cannot_remove_a_week_queued_while_it_runs(
+    api: ApiSettings, admission: str
+) -> None:
+    # Seed a run for the week ending 10 August with the identity a new admission computes.
+    seed = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "seed", now=NOW)
+    target = queued_weeks(api, seed["backfill_id"])[0]
+    with connect(CONFIG.sql, DB) as db:
+        backfill.cancel_backfill(db, seed["backfill_id"], "op")
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=target["run_id"],
+                    run_at=datetime(2026, 8, 10),
+                    window_start=datetime(2026, 8, 3),
+                    window_end=datetime(2026, 8, 10),
+                )
+            ),
+        )
+    if admission == "manual":
+        # A queued backfill week keeps a backfill in progress, so a busy manual run queues.
+        backfill.submit_backfill(api, TEAM, [at("2026-08-24")], "fake", "op", "other", now=NOW)
+    paused, release = Event(), Event()
+
+    def delete() -> str:
+        # The console holds the shared lock around deletion, which makes manual admission
+        # fall back to queueing without the execution lock.
+        with (
+            runner.schedule_lock(CONFIG, DB, allow_manual_job=True),
+            connect(CONFIG.sql, DB) as db,
+        ):
+            return delete_run(PausedDeletion(db, paused, release), str(target["run_id"]))
+
+    def admit() -> dict[str, Any]:
+        if admission == "backfill":
+            row = backfill.submit_backfill(
+                api, TEAM, [at("2026-08-10")], "fake", "op", "during-delete", now=NOW
+            )
+            return queued_weeks(api, row["backfill_id"])[0]
+        request = RunRequest(team=TEAM, run_at=at("2026-08-10"), llm="fake")
+        return jobs.submit_job(api, request, "op", "during-delete")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        deletion = pool.submit(delete)
+        try:
+            assert paused.wait(30)
+            accepted = pool.submit(admit)
+            time.sleep(1.5)
+            assert not accepted.done(), "Admission must wait for the deletion to finish"
+        finally:
+            release.set()
+        assert deletion.result(timeout=60) == TEAM
+        job = accepted.result(timeout=60)
+    assert job["status"] == "queued" and job["run_id"] == target["run_id"]
+    with connect(CONFIG.sql, DB) as db:
+        assert jobs.get_job(db, str(job["job_id"]))["status"] == "queued"
+        assert (
+            db.query_one("SELECT run_id FROM runs WHERE run_id=:id", {"id": target["run_id"]})
+            is None
+        )
 
 
 def test_queued_week_blocks_deleting_the_run_it_would_recreate(

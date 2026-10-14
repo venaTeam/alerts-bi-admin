@@ -36,6 +36,7 @@ from .service import close_client, execute_request, latest_week_end, select_clie
 LOCK_RESOURCE = "alerts-bi-manual-run"
 EXPORT_WARNING = "Analysis saved; CSV export failed. Regenerate exports with the report command."
 ACTIVE_STATES = ("queued", "pending", "running")
+QUEUE_LOCK_PREFIX = "alerts-bi-queue:"
 
 
 class ExecutionBusy(HTTPException):
@@ -94,6 +95,21 @@ def team_jobs(db: Database, team_id: str) -> list[dict[str, Any]]:
     )
 
 
+def lock_team_queue(db: Database, team_id: str, timeout_ms: int = 10000) -> bool:
+    """Hold the team's queue lock until the current transaction ends.
+
+    Every run job insert and run deletion takes it, so a deletion cannot remove a queued
+    week or run accepted after its own checks (backfill admission bypasses the execution lock).
+    """
+    row = db.query_one(
+        "SET NOCOUNT ON; DECLARE @result INT; "
+        "EXEC @result = sp_getapplock @Resource=:resource, @LockMode='Exclusive', "
+        "@LockOwner='Transaction', @LockTimeout=:timeout; SELECT @result AS result",
+        {"resource": (QUEUE_LOCK_PREFIX + team_id)[:255], "timeout": timeout_ms},
+    )
+    return row is not None and int(row["result"]) >= 0
+
+
 def refuse_active_job(db: Database) -> None:
     if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1"):
         raise ExecutionBusy("A run is already pending or running. Try again after it finishes.")
@@ -144,6 +160,8 @@ def _admit(
         registry_sha256=registry.file_sha256,
         model_version=model_version,
     )
+    if not lock_team_queue(db, body.team):
+        raise HTTPException(409, "This team's runs are being changed. Try again.")
     if db.query_one(
         "SELECT run_id FROM review_publications WHERE run_id=:id AND withdrawn_at IS NULL",
         {"id": run_id},
@@ -290,7 +308,9 @@ def claim_queued(db: Database, started: datetime) -> dict[str, Any] | None:
         "SELECT TOP 5 j.job_id FROM run_jobs j "
         "LEFT JOIN run_backfills b ON b.backfill_id=j.backfill_id "
         "WHERE j.status='queued' AND (j.backfill_id IS NULL OR :backfill=1) "
-        "ORDER BY CASE WHEN j.backfill_id IS NULL THEN 0 ELSE 1 END, b.submitted_at, "
+        # Manual runs keep submission order; backfill weeks go by backfill, then oldest week.
+        "ORDER BY CASE WHEN j.backfill_id IS NULL THEN 0 ELSE 1 END, "
+        "CASE WHEN j.backfill_id IS NULL THEN j.submitted_at END, b.submitted_at, "
         "j.run_at, j.submitted_at, j.job_id",
         {"backfill": 1 if _may_claim_backfill(db) else 0},
     )

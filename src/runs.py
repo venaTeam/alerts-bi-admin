@@ -7,6 +7,8 @@ from pathlib import Path
 
 from alerts_bi_shared.db.connection import Database
 
+from .engine.api.jobs import lock_team_queue
+
 
 class DeletionRefused(ValueError):
     """The run is missing or currently in use."""
@@ -32,12 +34,6 @@ def delete_run(db: Database, run_id: str) -> str:
             raise DeletionRefused("Apply database migration 009_run_deletion before deleting runs.")
         if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1"):
             raise DeletionRefused("A run is pending or active. Try deleting after it finishes.")
-        if db.query_one(
-            "SELECT TOP 1 job_id FROM run_jobs WHERE run_id=:run_id AND status='queued'", params
-        ):
-            raise DeletionRefused(
-                "A queued run would recreate this week. Cancel it before deleting."
-            )
         locked = db.query_one(
             "DECLARE @result INT; EXEC @result = sys.sp_getapplock "
             "@Resource=:resource, @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=0; "
@@ -54,6 +50,16 @@ def delete_run(db: Database, run_id: str) -> str:
             raise DeletionRefused("No such run.")
         if run["status"] == "running":
             raise DeletionRefused("This run is active. Try again when it finishes.")
+        # Backfill and queued admission bypass the execution lock; the team's queue lock
+        # makes this check and the job cleanup below atomic with respect to new queued rows.
+        if not lock_team_queue(db, str(run["team_id"])):
+            raise DeletionRefused("Runs for this team are being queued. Try deleting again.")
+        if db.query_one(
+            "SELECT TOP 1 job_id FROM run_jobs WHERE run_id=:run_id AND status='queued'", params
+        ):
+            raise DeletionRefused(
+                "A queued run would recreate this week. Cancel it before deleting."
+            )
         db.execute(
             "DELETE a FROM llm_review_attempts a JOIN llm_review_batches b ON b.cycle_id=a.cycle_id "
             "JOIN llm_review_scopes s ON s.scope_id=b.scope_id "

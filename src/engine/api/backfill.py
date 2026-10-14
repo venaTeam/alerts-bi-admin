@@ -30,7 +30,7 @@ from fastapi import HTTPException
 from ..config import ApiSettings
 from ..run.orchestrator import compute_run_id
 from ..weekly.plan import RETENTION_DAYS, is_week_boundary, latest_week_end
-from .jobs import ACTIVE_STATES, get_job
+from .jobs import ACTIVE_STATES, get_job, lock_team_queue
 from .schemas import LlmMode, RunRequest
 from .service import close_client, select_client
 
@@ -154,14 +154,8 @@ def _in_list(weeks: Sequence[datetime]) -> tuple[str, dict[str, Any]]:
 
 
 def _team_lock(db: Database, team_id: str) -> None:
-    """Serialize backfill admission and retry for one team inside the current transaction."""
-    row = db.query_one(
-        "SET NOCOUNT ON; DECLARE @result INT; "
-        "EXEC @result = sp_getapplock @Resource=:resource, @LockMode='Exclusive', "
-        "@LockOwner='Transaction', @LockTimeout=10000; SELECT @result AS result",
-        {"resource": f"alerts-bi-backfill:{team_id}"[:255]},
-    )
-    if row is None or int(row["result"]) < 0:
+    """Serialize admission, retry and run deletion for one team inside this transaction."""
+    if not lock_team_queue(db, team_id):
         raise HTTPException(
             409, "Another backfill request for this team is being saved. Try again."
         )
