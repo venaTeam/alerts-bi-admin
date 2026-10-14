@@ -45,7 +45,12 @@ def _largest(inputs: SummaryInputs) -> KeyFinding | None:
     body = f"{_count(total.events, f'{schema} event')} from {_count(total.alerts, 'alert')}."
     carriers = [a for a in inputs.alerts if a.schema == schema and rid in a.core_rule_ids]
     others = {tuple(sorted(set(a.core_rule_ids) - {rid})) for a in carriers}
-    if carriers and len(others) == 1 and len(next(iter(others))) == 1:
+    if inputs.facts is not None:
+        others = {
+            tuple(filter(None, value.split(",")))
+            for value in inputs.facts["schemas"][schema]["combinations"].get(rid, [])
+        }
+    if total.alerts and len(others) == 1 and len(next(iter(others))) == 1:
         body += f" The same alerts also have: {problem(next(iter(others))[0]).lower()}."
     return KeyFinding("largest", f"Biggest problem: {problem(rid).lower()}", body, None, rid)
 
@@ -78,15 +83,19 @@ def _concentration(inputs: SummaryInputs) -> KeyFinding | None:
     )
     n = len(alerts)
     total = sum(a.row_count for a in alerts)
+    if inputs.facts is not None:
+        n = inputs.schemas[schema].distinct_alerts
+        total = inputs.schemas[schema].events
     if n <= 2 or total <= 0:
         return None
     acc = 0
     k = 0
-    for alert in alerts:
+    for k, alert in enumerate(alerts, start=1):
         acc += alert.row_count
-        k += 1
-        if acc * 5 >= total * 4:
+        if acc * 5 >= total * 4 or k == n:
             break
+    if inputs.facts is not None:
+        k, acc = inputs.facts["schemas"][schema].get("concentration", [0, 0])
     if k >= n:
         return None
     pct = int(100 * acc / total + 0.5)
@@ -152,10 +161,14 @@ def _is_ready(alert: AlertRow) -> bool:
 
 def _readiness(inputs: SummaryInputs) -> KeyFinding | None:
     v2 = [a for a in inputs.alerts if a.schema == "v2"]
-    if not v2:
+    count = inputs.schemas["v2"].distinct_alerts if inputs.facts else len(v2)
+    if not count:
         return None
     ready = sum(1 for a in v2 if _is_ready(a))
     critical = sum(1 for a in v2 if _is_critical(a) and "R9" in a.readiness_rule_ids)
+    if inputs.facts is not None:
+        ready = inputs.facts["schemas"]["v2"]["ready"]
+        critical = inputs.facts["schemas"]["v2"]["critical"]
     if critical == 0:
         body = "Every critical alert has a runbook."
     elif critical == 1:
@@ -164,7 +177,7 @@ def _readiness(inputs: SummaryInputs) -> KeyFinding | None:
         body = f"{critical:,} critical alerts have no runbook."
     return KeyFinding(
         "readiness",
-        f"{ready:,} of {len(v2):,} v2 alerts are phase-2 ready",
+        f"{ready:,} of {count:,} v2 alerts are phase-2 ready",
         body,
         "Add impact and an https:// runbook, starting with critical alerts.",
         None,

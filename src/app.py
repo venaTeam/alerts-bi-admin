@@ -8,8 +8,8 @@ then redirects back with a message.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode
@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, urlencode
 from alerts_bi_operations.registry import RegistryError, load_registry
 from alerts_bi_operations.review.decisions import DecisionRefused, record_decision
 from alerts_bi_operations.review.publication import PublicationRefused, publish_run, unpublish_run
-from alerts_bi_shared.db.connection import Database, connect
+from alerts_bi_shared.db.connection import Database, WebDatabasePool
 from alerts_bi_shared.logging_setup import log, redact_error
 from alerts_bi_shared.timefmt import iso_instant
 from alerts_bi_shared.versions import APP_VERSION
@@ -71,7 +71,17 @@ Tab = Annotated[str, Query(pattern="^(overview|findings|decisions|activity)$")]
 
 
 def build_admin(settings: AdminSettings) -> FastAPI:
+    pool = WebDatabasePool(settings.config.sql, settings.database)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        try:
+            yield
+        finally:
+            pool.dispose()
+
     app = FastAPI(
+        lifespan=lifespan,
         title="Alerts BI operator console",
         version=APP_VERSION,
         docs_url=None,
@@ -85,7 +95,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @contextmanager
     def database() -> Iterator[Database]:
-        with connect(settings.config.sql, settings.database) as db:
+        with pool.connect() as db:
             yield db
 
     def user_of(request: Request) -> str:
@@ -343,7 +353,12 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 )
                 if tab == "overview" and selected["status"] == "completed":
                     filters = summary.WorklistFilter(
-                        state=state, schema=schema, rule=rule, sort=sort, page=page
+                        state=state,
+                        schema=schema,
+                        rule=rule,
+                        sort=sort,
+                        page=page,
+                        cursor=request.query_params.get("cursor"),
                     )
                     loaded = summary.load_admin_summary(db, team_id, selected_id, filters)
                     content = summary.overview_content(loaded)
@@ -410,7 +425,14 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     ) -> RedirectResponse:
         return RedirectResponse(
             pages.team_url(
-                team_id, run_id, state=state, schema=schema, rule=rule, sort=sort, page=page
+                team_id,
+                run_id,
+                state=state,
+                schema=schema,
+                rule=rule,
+                sort=sort,
+                page=page,
+                cursor=request.query_params.get("cursor"),
             ),
             303,
         )

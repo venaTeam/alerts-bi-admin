@@ -69,6 +69,8 @@ def _too_few_reason(found: int, stop: str) -> str:
 def estimate(inputs: SummaryInputs) -> Estimate:
     """Never stored, never in an output file. See spec 7.1 and 7.2."""
     rules_left = len({v1_rule_key(a) for a in inputs.alerts if a.schema == "v1"})
+    if inputs.facts is not None:
+        rules_left = int(inputs.facts["rules_left"])
     override = inputs.v1_rule_effort_days
     per_rule = override if override is not None else DEFAULT_V1_RULE_EFFORT_DAYS
     effort_days = rules_left * per_rule
@@ -112,6 +114,8 @@ def estimate(inputs: SummaryInputs) -> Estimate:
     for week in earlier:
         seen |= week.v1_rules
     retired = len(seen - selected.v1_rules)
+    if inputs.facts is not None:
+        retired = int(inputs.facts.get("retired", 0))
     if retired < _MIN_RETIRED:
         return build(
             lookback=len(earlier),

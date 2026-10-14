@@ -73,6 +73,7 @@ def delete_run(db: Database, run_id: str) -> str:
         finally:
             db.execute("EXEC sys.sp_set_session_context @key=N'alerts_bi_delete_run', @value=NULL")
         for table in (
+            "run_analysis_checkpoints",
             "review_publications",
             "weekly_review_log",
             "daily_metrics",

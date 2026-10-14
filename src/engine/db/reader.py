@@ -36,6 +36,11 @@ PORTAL_VIEWS: Final = (
     "portal_decisions",
     "portal_rule_totals",
     "portal_daily_metrics",
+    "portal_run_summaries",
+    "portal_alert_list",
+    "portal_rule_membership",
+    "portal_application_daily",
+    "portal_v1_rules",
 )
 
 #: Every table the portal must be unable to touch, directly.
@@ -54,6 +59,12 @@ BASE_TABLES: Final = (
     "llm_review_scopes",
     "llm_review_batches",
     "llm_review_attempts",
+    "run_summaries",
+    "run_alert_list",
+    "run_rule_membership",
+    "run_application_daily",
+    "run_v1_rules",
+    "run_analysis_checkpoints",
 )
 
 

@@ -147,6 +147,7 @@ def execute_request(
             registry_path=settings.registry_path,
             db=db,
             expected_run_id=expected_run_id,
+            resume_analysis=expected_run_id is not None,
         )
         persist_run(db, payload)
         log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)

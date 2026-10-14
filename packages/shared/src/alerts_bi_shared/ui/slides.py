@@ -343,10 +343,9 @@ def _chart_svg(schema: str, points: Sequence[DailyPoint]) -> str:
 
 
 def _fire_line(summary: TeamSummary, schema: str) -> str:
-    counts = [
-        sum(1 for a in summary.inputs.alerts if a.schema == schema and a.fire_pattern == pattern)
-        for pattern in PATTERNS
-    ]
+    from alerts_bi_shared.insights.stored import patterns
+
+    counts = [patterns(summary.inputs, schema).get(pattern, [0])[0] for pattern in PATTERNS]
     text = " · ".join(
         f"{count:,} {pattern}" for count, pattern in zip(counts, PATTERNS, strict=True)
     )
@@ -372,7 +371,11 @@ def _legend() -> str:
 
 def _chart(summary: TeamSummary, schema: str) -> str:
     points = _charted(summary, schema)
-    if summary.inputs.applications is not None and summary.inputs.schemas[schema].distinct_alerts:
+    if (
+        summary.inputs.applications is not None
+        and not points
+        and summary.inputs.schemas[schema].distinct_alerts
+    ):
         body = '<p class="sl-chart-empty">Application breakdown unavailable</p>'
     elif points:
         body = _legend() + _chart_svg(schema, points)

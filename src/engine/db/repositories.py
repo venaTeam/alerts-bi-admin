@@ -27,6 +27,8 @@ from alerts_bi_operations.db.reports import (
 )
 from alerts_bi_shared.db.connection import Database
 
+from .bulk import insert_rows
+
 __all__ = [
     "PersistencePayload",
     "RunIsPublished",
@@ -245,6 +247,7 @@ class PersistencePayload:
     verdicts: list[dict[str, Any]] = field(default_factory=list)
     panel_parses: list[dict[str, Any]] = field(default_factory=list)
     run_panels: list[dict[str, Any]] = field(default_factory=list)
+    application_daily: list[dict[str, Any]] = field(default_factory=list)
 
 
 def persist_run(db: Database, payload: PersistencePayload) -> None:
@@ -291,31 +294,46 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
         else:
             db.execute(_insert_statement("runs", _RUN_COLUMNS), run_values)
 
-        db.execute_many(
-            _insert_statement("daily_metrics", _DAILY_METRIC_COLUMNS),
+        insert_rows(
+            db,
+            "daily_metrics",
+            _DAILY_METRIC_COLUMNS,
             _project(payload.daily_metrics, _DAILY_METRIC_COLUMNS),
         )
-        db.execute_many(
-            _insert_statement("daily_rule_counts", _RULE_COUNT_COLUMNS),
+        insert_rows(
+            db,
+            "daily_rule_counts",
+            _RULE_COUNT_COLUMNS,
             _project(payload.rule_counts, _RULE_COUNT_COLUMNS),
         )
-        db.execute_many(
-            _insert_statement("alert_findings", _FINDING_COLUMNS),
-            _project(payload.findings, _FINDING_COLUMNS),
+        insert_rows(
+            db, "alert_findings", _FINDING_COLUMNS, _project(payload.findings, _FINDING_COLUMNS)
         )
-        db.execute_many(
-            _insert_statement("llm_batch_attempts", _BATCH_ATTEMPT_COLUMNS),
+        insert_rows(
+            db,
+            "llm_batch_attempts",
+            _BATCH_ATTEMPT_COLUMNS,
             _project(payload.batch_attempts, _BATCH_ATTEMPT_COLUMNS),
         )
-        db.execute_many(
-            _insert_statement("run_panels", _RUN_PANEL_COLUMNS),
-            _project(payload.run_panels, _RUN_PANEL_COLUMNS),
+        insert_rows(
+            db, "run_panels", _RUN_PANEL_COLUMNS, _project(payload.run_panels, _RUN_PANEL_COLUMNS)
         )
 
         for verdict in payload.verdicts:
             insert_verdict_if_absent(db, verdict)
         for parse in payload.panel_parses:
             insert_panel_parse_if_absent(db, parse)
+        from .read_models import rebuild_read_models
+
+        db.execute("DELETE FROM run_application_daily WHERE run_id=:run", {"run": run_id})
+        if payload.application_daily:
+            columns = tuple(payload.application_daily[0])
+            insert_rows(db, "run_application_daily", columns, payload.application_daily)
+        rebuild_read_models(db, str(run_id), payload.findings)
+        if payload.run.get("llm_assessed") and not any(
+            row.get("quality_state") == "unassessed" for row in payload.findings
+        ):
+            db.execute("DELETE FROM run_analysis_checkpoints WHERE run_id=:run", {"run": run_id})
 
 
 def insert_verdict_if_absent(db: Database, verdict: dict[str, Any]) -> None:

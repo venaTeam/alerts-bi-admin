@@ -1,5 +1,9 @@
 # Alerts BI — Runtime Flow
 
+## Bounded read paths — accepted 2026-10-13
+
+The [performance contract](read-path-performance.md) governs compact stored summaries, bounded UI reads, pooled web connections, seek navigation and completed-analysis reuse. It supersedes earlier descriptions of full alert loads and unavailable application daily metrics for new runs. Historical missing measurements remain unavailable; CSV definitions, publication isolation, serialized execution and retention policy are unchanged.
+
 ## Standalone HTML output removal — accepted 2026-10-13
 
 The product owner requested complete removal of standalone run HTML output. The supported

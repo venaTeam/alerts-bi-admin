@@ -139,8 +139,8 @@ require ADMIN_SECRET. The shipped deploy/admin.yaml includes a dedicated worker 
 same image, registry, SQL/ES/model configuration and output mount. Its migration init container
 automatically runs db setup before UI/worker startup, targeting ADMIN_DATABASE or SQL_DATABASE.
 Recreate stops the previous pod before initialization; migration failure blocks startup. The
-health endpoint requires the job-key digest column and migration 011 ledger entry, so a
-010-only schema returns 503 until upgraded. Migration 011 backfills
+health endpoint requires the job-key digest, stored read models and private checkpoint
+tables through migration 013, so an older schema returns 503 until upgraded. Migration 011 backfills
 existing submission digests without editing 001–010. Older writers cannot insert the new
 required digest. Keys differing only in case or trailing spaces request distinct attempts.
 Pending/running jobs retain their execution reservation after worker exit. CLI/weekly
@@ -159,7 +159,7 @@ lifecycle. Pending/running jobs prevent permanent deletion. See docs/upstream/as
 Run/report/weekly/acceptance output directories contain three CSV exports. Standalone HTML
 scorecards are removed entirely, including on-demand routes and download links. The normal
 team workspace remains available. POST /runs returns JSON only, without a scorecard field.
-Operations 0.2.0 removes report.html; shared 0.1.3 and CSV columns are unchanged. To clean older generated HTML, use
+Operations 0.2.1 uses shared 0.1.4 with stored summaries and pooled web reads. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect. To clean older generated HTML, use
 `alerts-bi-admin remove-run-html --out <explicit-output-root>`; this preserves CSVs and other
 HTML files and only removes scorecard.html accompanied by all three CSV exports.
 
@@ -187,6 +187,30 @@ only disposable `alerts_bi_test`; run them serially, with no other session testi
 Acceptance uses the original fixed-clock fixture load; never regenerate expected-results.json.
 `scripts/evaluate_llm.py`, `benchmark_streaming.py`, `es_scale_probe.py` and `create_kibana_panels.py`
 retain their existing explicit options. Live model evaluation is opt-in and separate from fake tests.
+
+For a modest local rehearsal that retains six months of history, use:
+
+```powershell
+poetry run python scripts/benchmark_reads.py --seed --teams 3 --weeks 27 --heavy-teams 3 --heavy-identities 500 --heavy-events 10000 --concurrency 2 --requests 84 --read-committed-snapshot --output out/laptop-reads.json
+```
+
+This seeds 40,500 historical findings, then writes another 500 during measurement.
+It verifies local behavior, not capacity at the full target. Run larger tests only on a
+host with sufficient SQL Server memory and storage. The following full-scale command
+is intentionally separate from the small local rehearsal.
+
+`poetry run python scripts/benchmark_reads.py --seed --requests 280` measures the real admin
+and independently installed portal HTTP entry points with 100 teams and 27 weekly runs.
+It requires the portal package installed in that dedicated benchmark environment and resets
+only local `alerts_bi_test`; never run it alongside integration tests. The default distribution
+has one 20,000-identity team, nine 2,000-identity teams and ninety 50-identity teams. Increase
+`--heavy-teams` and `--heavy-identities` explicitly for larger populations. Evidence includes
+cold/warm and concurrent-ingestion timing, SQL rows, memory and storage in `out/scale-reads.json`.
+Use `benchmark_streaming.py --events 1200000 --identities 20000 --mode streaming` for actual
+event-processing cost. See `docs/upstream/read-path-performance.md` for contracts and targets.
+Repeat reads with `--read-committed-snapshot` to measure committed versioned reads during
+ingestion. This option changes only local `alerts_bi_test`; production enablement requires
+the separately authorized, drained-connection procedure documented in the design.
 
 The admin image provides writable `/app/out` for its non-root user. Deployment examples and
 the ordered scheduler/migration transfer, rollback and eventual archival checklist are in

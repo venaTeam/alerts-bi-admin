@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,22 @@ def assert_parity(rows: list[AlertRecord], schema: str, panels: tuple[Panel, ...
     for row in rows:
         stream.add(normalize_row(schema, row.source, hash_document=False))
     stream.finish()
+    # A durable retry must reproduce finalized facts, evidence and visibility exactly.
+    from src.engine.run.checkpoint import decode, encode
+
+    empty_schema = "v2" if schema == "v1" else "v1"
+    empty = SchemaAccumulator(empty_schema, WINDOW, ())
+    empty.finish()
+    team = replace(select_team(load_registry(), "checkout-api"), panels=panels)
+    restored = decode(encode({schema: stream, empty_schema: empty}), team, WINDOW)[schema]
+    assert restored.daily_volume() == stream.daily_volume()
+    assert restored.daily_rules() == stream.daily_rules()
+    assert restored.daily_flagged() == stream.daily_flagged()
+    assert restored.suppression == stream.suppression
+    for key in stream.identities:
+        assert _build_finding_row("r", restored.identities[key], None, None) == _build_finding_row(
+            "r", stream.identities[key], None, None
+        )
     old = evaluate_rows(rows, NOW)
     visibility = evaluate_suppression(rows, panels)
     attach_row_findings(old, build_r5_findings(visibility.suppressed_row_ids, panels))

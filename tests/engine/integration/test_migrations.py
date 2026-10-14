@@ -179,10 +179,10 @@ def test_exact_job_keys_upgrade_preserves_existing_submissions(
         )
         db.commit()
     newly, _ = migrate(CONFIG.sql, database)
-    assert newly == ["011_run_job_keys"]
+    assert newly == [m.version for m in load_migrations() if m.version > "010_run_jobs"]
     digest = bytes.fromhex(sha256_text(key))
     with connect(CONFIG.sql, database) as db:
-        assert current_revision(db) == "011_run_job_keys"
+        assert current_revision(db) == heads()[0]
         row = db.query_one("SELECT * FROM run_jobs WHERE job_id=:id", {"id": "a" * 32})
         assert row is not None
         assert row["idempotency_key"] == key and row["idempotency_key_hash"] == digest
@@ -198,3 +198,48 @@ def test_exact_job_keys_upgrade_preserves_existing_submissions(
             )
         db.rollback()
         assert db.query_one("SELECT COUNT(*) AS n FROM run_jobs") == {"n": 1}
+
+
+def test_populated_read_model_upgrade_preserves_raw_facts(monkeypatch: pytest.MonkeyPatch) -> None:
+    from alembic import command
+    from alerts_bi_shared.insights.reader import read_summary
+    from src.engine.db import migrate as migration_module
+    from src.engine.db.repositories import (
+        _FINDING_COLUMNS,
+        _RUN_COLUMNS,
+        _insert_statement,
+        _project,
+    )
+
+    from tests.engine.helpers.sql import sample_finding, sample_run
+
+    database = CONFIG.sql.test_database
+
+    def before_read_models(sql: object, target: str) -> tuple[list[str], list[str]]:
+        command.upgrade(migration_module.alembic_config(CONFIG.sql, target), "011_run_job_keys")
+        return [], []
+
+    with monkeypatch.context() as patch:
+        patch.setattr(migration_module, "migrate", before_read_models)
+        reset_test_database(CONFIG.sql, database)
+    run = sample_run()
+    finding = sample_finding(
+        core_rule_ids="R1",
+        quality_state="rule_flagged",
+        findings_evidence='[{"rule_id":"R1","matched_rows":4}]',
+    )
+    with connect(CONFIG.sql, database) as db:
+        db.execute_many(_insert_statement("runs", _RUN_COLUMNS), _project([run], _RUN_COLUMNS))
+        db.execute_many(
+            _insert_statement("alert_findings", _FINDING_COLUMNS),
+            _project([finding], _FINDING_COLUMNS),
+        )
+        db.commit()
+        before = db.query("SELECT * FROM alert_findings")
+    migrate(CONFIG.sql, database)
+    with connect(CONFIG.sql, database) as db:
+        assert db.query("SELECT * FROM alert_findings") == before
+        facts, examples, days = read_summary(db, run["run_id"], "admin", ("checkout-api",))
+        assert facts["schemas"]["v1"]["events"] == 4
+        assert facts["schemas"]["v1"]["rules"]["R1"] == [4, 1]
+        assert len(examples) == 1 and days == []  # Never invent historical daily unions.

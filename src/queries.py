@@ -6,6 +6,7 @@ views. Both use the application's SQL credential.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from alerts_bi_shared.db.connection import Database
@@ -51,8 +52,7 @@ def team_overview(db: Database) -> dict[str, dict[str, Any]]:
     """):
         overview.setdefault(str(row["team_id"]), {}).update(row)
     for row in db.query("""
-        SELECT r.*, (SELECT COUNT(*) FROM alert_findings f
-          WHERE f.run_id=r.run_id AND f.quality_state='unassessed') AS unassessed
+        SELECT r.*, (SELECT COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v1.states.unassessed') AS BIGINT),0)+COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v2.states.unassessed') AS BIGINT),0) FROM run_summaries s WHERE s.run_id=r.run_id AND s.scope_kind='team') AS unassessed
         FROM (SELECT *, ROW_NUMBER() OVER
           (PARTITION BY team_id ORDER BY run_at DESC, completed_at DESC, run_id DESC) AS rn
           FROM runs) r WHERE r.rn=1
@@ -71,8 +71,7 @@ def team_runs(db: Database, team_id: str, limit: int = 20, page: int = 1) -> lis
                r.ruleset_version, r.prompt_version,
                p.publication_id, p.published_at, p.published_by, p.review_note,
                (SELECT COUNT(*) FROM weekly_review_log l WHERE l.run_id=r.run_id) AS scheduled,
-               (SELECT COUNT(*) FROM alert_findings f
-                 WHERE f.run_id = r.run_id AND f.quality_state = 'unassessed') AS unassessed,
+               (SELECT COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v1.states.unassessed') AS BIGINT),0)+COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v2.states.unassessed') AS BIGINT),0) FROM run_summaries s WHERE s.run_id=r.run_id AND s.scope_kind='team') AS unassessed,
                (SELECT COUNT(*) FROM review_publications w
                  WHERE w.run_id = r.run_id AND w.withdrawn_at IS NOT NULL) AS withdrawn
         FROM runs AS r
@@ -103,21 +102,24 @@ def alerts_with_findings(db: Database, run_id: str, page: int) -> tuple[list[dic
         "OR readiness_rule_ids <> '')"
     )
     total_row = db.query_one(
-        f"SELECT COUNT(*) AS n FROM alert_findings WHERE {where}", {"run_id": run_id}
+        f"SELECT COUNT(*) AS n FROM run_alert_list WHERE {where}", {"run_id": run_id}
     )
     total = int(total_row["n"]) if total_row else 0
     rows = db.query(
         f"""
-        SELECT alert_schema, application, key_field, message, component, severity, environment, row_count,
-               core_rule_ids, readiness_rule_ids, quality_state, llm_principle_id,
-               llm_confidence, llm_justification, findings_evidence, representative_doc,
-               first_seen, last_seen
-        FROM alert_findings
-        WHERE {where}
-        ORDER BY CASE quality_state WHEN 'rule_flagged' THEN 0 WHEN 'llm_flagged' THEN 1
-                 WHEN 'needs_review' THEN 2 ELSE 3 END, row_count DESC, alert_schema,
-                 application, key_field
-        OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY
+        WITH selected AS (
+            SELECT alert_schema,application,key_field,attention_rank,row_count
+            FROM run_alert_list WHERE {where}
+            ORDER BY attention_rank,row_count DESC,alert_schema,application,key_field
+            OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY
+        )
+        SELECT f.alert_schema,f.application,f.key_field,f.message,f.component,f.severity,f.environment,f.row_count,
+               f.core_rule_ids,f.readiness_rule_ids,f.quality_state,f.llm_principle_id,
+               f.llm_confidence,f.llm_justification,f.findings_evidence,f.representative_doc,
+               f.first_seen,f.last_seen
+        FROM selected s JOIN alert_findings f ON f.run_id=:run_id AND f.alert_schema=s.alert_schema
+          AND f.application=s.application AND f.key_field=s.key_field
+        ORDER BY s.attention_rank,s.row_count DESC,s.alert_schema,s.application,s.key_field
         """,
         {"run_id": run_id, "offset": (max(page, 1) - 1) * PAGE_SIZE, "size": PAGE_SIZE},
     )
@@ -132,14 +134,15 @@ def decision_history(
     if not identities:
         return history
     wanted = set(identities)
-    applications = sorted({application for _, application, _ in identities})
-    params = {f"a{i}": application for i, application in enumerate(applications)}
-    names = ", ".join(f":a{i}" for i in range(len(applications)))
+    params = {"identities": json.dumps(identities)}
     rows = db.query(
-        f"""
+        """
         SELECT alert_schema, application, key_field, finding_id, state, note, decided_at,
                decided_by, run_id
-        FROM finding_decisions WHERE team_id = :team_id AND application IN ({names})
+        FROM finding_decisions d WHERE team_id = :team_id AND EXISTS (
+          SELECT 1 FROM OPENJSON(:identities) WITH
+          (s NVARCHAR(2) '$[0]', a NVARCHAR(256) '$[1]', k NVARCHAR(512) '$[2]') i
+          WHERE i.s=d.alert_schema AND i.a=d.application AND i.k=d.key_field)
         ORDER BY decided_at ASC, decision_id ASC
         """,
         {**params, "team_id": team_id},

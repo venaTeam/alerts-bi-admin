@@ -20,26 +20,76 @@ Two execution paths, matching what each statement actually is:
   ``:word`` as a bind parameter, and the migration DDL carries colons in its comments;
   parsing those would be a change in meaning for no benefit.
 
-Connections are not pooled. Each :func:`connect` builds an engine with ``NullPool``, opens
+Dedicated execution connections are not pooled. Each :func:`connect` builds an engine with ``NullPool``, opens
 one connection and disposes the engine on exit, which is exactly the lifetime the pipeline
 had before. A pool would hold connections open across the guarded test-database reset, which
-drops the database out from under them.
+drops the database out from under them. WebDatabasePool provides separate bounded request
+connections; close application lifespans before resetting a disposable database.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from threading import Lock
 from typing import Any
 
 from sqlalchemy import URL, create_engine, text
-from sqlalchemy.engine import Connection
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import NullPool
 
 from alerts_bi_shared.config.sql import SqlConfig
 from alerts_bi_shared.logging_setup import log, redact_error
 
-__all__ = ["Database", "connect", "engine_url", "quote_identifier"]
+__all__ = ["Database", "WebDatabasePool", "connect", "engine_url", "quote_identifier"]
+
+
+class WebDatabasePool:
+    """One bounded pool per web app; never used for execution locks or DB resets.
+
+    Construction is lazy so creating an application does not contact SQL. A connection
+    belongs to exactly one request and is rolled back on return. Shutdown disposes all
+    idle connections. Worker/migration callers continue to use unpooled ``connect``.
+    """
+
+    def __init__(
+        self, config: SqlConfig, database: str, *, pool_size: int = 5, max_overflow: int = 5
+    ) -> None:
+        if pool_size < 1 or max_overflow < 0:
+            raise ValueError("Web pool limits must be bounded and positive")
+        self.config = config
+        self.database = database
+        self.pool_size = pool_size
+        self.max_overflow = max_overflow
+        self._engine: Engine | None = None
+        self._lock = Lock()
+
+    def _get_engine(self) -> Engine:
+        with self._lock:
+            if self._engine is None:
+                timeout = max(1, self.config.request_timeout_ms // 1000)
+                self._engine = create_engine(
+                    engine_url(self.config, self.database),
+                    pool_size=self.pool_size,
+                    max_overflow=self.max_overflow,
+                    pool_timeout=5,
+                    pool_pre_ping=True,
+                    pool_recycle=1800,
+                    hide_parameters=True,
+                    connect_args={"timeout": timeout, "login_timeout": timeout},
+                )
+            return self._engine
+
+    @contextmanager
+    def connect(self) -> Iterator[Database]:
+        with self._get_engine().connect() as connection:
+            yield Database(connection)
+
+    def dispose(self) -> None:
+        with self._lock:
+            if self._engine is not None:
+                self._engine.dispose()
+                self._engine = None
 
 
 def quote_identifier(name: str) -> str:

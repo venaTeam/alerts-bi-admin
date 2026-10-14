@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 Surface = Literal["admin", "portal"]
 """Which page asks. The portal never shows per-day rates or internals (design 7.10)."""
@@ -121,14 +121,18 @@ class SummaryInputs:
     """The selected run is a currently published week. The estimate needs it."""
     history: tuple[WeekRules, ...]
     """Published weeks of the team up to and including the selected one, oldest first.
-    Empty when the selected run is not published."""
+    Empty when the selected run is not published. With stored facts, only the four
+    relevant week boundaries/basis flags are loaded; exact rule counts and retirements
+    are SQL aggregates in facts rather than materialized identity sets."""
     v1_rule_effort_days: float | None
     """The team's registry override, or None for the default."""
     daily: tuple[DailyPoint, ...] = ()
     """The run's day buckets, ordered by schema then day. Empty when not loaded."""
     applications: tuple[str, ...] | None = None
-    """Portal selection; None means all. Daily buckets are unavailable for a subset.
+    """Portal selection; None means all. Historical subset daily buckets may be unavailable.
     Published phase and readiness percentage always describe the whole team."""
+    facts: dict[str, Any] | None = None
+    """Exact stored aggregates. When present, alerts contains only bounded examples."""
 
 
 @dataclass(frozen=True, slots=True)
