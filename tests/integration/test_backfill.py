@@ -492,6 +492,46 @@ def test_deletion_cannot_remove_a_week_queued_while_it_runs(
         )
 
 
+def test_retried_backfill_stays_visible_after_dismissal_or_a_newer_backfill(
+    client: TestClient,
+    api: ApiSettings,
+    executed: list[tuple[str, datetime]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    latest = latest_week_end(datetime.now(UTC))
+    older = backfill.submit_backfill(api, TEAM, [latest - 3 * WEEK], "fake", "op", "older")
+    panel = f'data-backfill-url="/backfills/{older["backfill_id"]}"'
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Test failure")
+
+    def run_failing_week() -> None:
+        with monkeypatch.context() as patch:
+            patch.setattr(jobs, "execute_request", fail)
+            assert jobs.work_once(api)
+
+    run_failing_week()
+    # One tab dismisses the failed backfill; another still holds its Retry form.
+    dismissed = post(client, f"/backfills/{older['backfill_id']}/dismiss")
+    assert "Backfill+dismissed" in dismissed.headers["location"]
+    assert "Backfill · 1 week" not in client.get(f"/teams/{TEAM}").text
+    retried = post(client, f"/backfills/{older['backfill_id']}/retry")
+    assert "Retry+queued" in retried.headers["location"]
+    page = client.get(f"/teams/{TEAM}").text
+    assert panel in page and "A backfill is already in progress for this team" in page
+    with connect(CONFIG.sql, DB) as db:
+        assert backfill.get_backfill(db, older["backfill_id"])["dismissed_at"] is None
+    # A newer backfill finishes after the older one fails again; retrying the older one
+    # must still show its progress ahead of the newer finished panel.
+    run_failing_week()
+    backfill.submit_backfill(api, TEAM, [latest - 2 * WEEK], "fake", "op", "newer")
+    assert jobs.work_once(api)
+    assert executed == [(TEAM, (latest - 2 * WEEK).replace(tzinfo=None))]
+    assert panel not in client.get(f"/teams/{TEAM}").text
+    post(client, f"/backfills/{older['backfill_id']}/retry")
+    assert panel in client.get(f"/teams/{TEAM}").text
+
+
 def test_queued_week_blocks_deleting_the_run_it_would_recreate(
     client: TestClient, api: ApiSettings
 ) -> None:

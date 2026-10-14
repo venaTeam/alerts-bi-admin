@@ -330,10 +330,19 @@ def get_backfill(db: Database, backfill_id: str) -> dict[str, Any]:
 
 
 def latest_backfill(db: Database, team_id: str) -> dict[str, Any] | None:
-    """The team's newest backfill that is still shown: active, or finished and not dismissed."""
+    """The backfill the team workspace shows.
+
+    An active backfill always wins, even one dismissed before a retry or older than a
+    finished one, so its progress and Cancel/Remove controls stay reachable. Otherwise the
+    newest finished backfill that has not been dismissed.
+    """
     return db.query_one(
-        "SELECT TOP 1 * FROM run_backfills WHERE team_id=:team AND dismissed_at IS NULL "
-        "ORDER BY submitted_at DESC, backfill_id DESC",
+        "SELECT TOP 1 b.* FROM run_backfills b "
+        "CROSS APPLY (SELECT CASE WHEN EXISTS (SELECT 1 FROM run_jobs j "
+        "WHERE j.backfill_id=b.backfill_id AND j.status IN ('queued', 'pending', 'running')) "
+        "THEN 1 ELSE 0 END AS active) a "
+        "WHERE b.team_id=:team AND (a.active=1 OR b.dismissed_at IS NULL) "
+        "ORDER BY a.active DESC, b.submitted_at DESC, b.backfill_id DESC",
         {"team": team_id},
     )
 
@@ -420,6 +429,11 @@ def retry_backfill(
                     409, "Another backfill is in progress for this team. Retry after it finishes."
                 )
             _refuse_locked_weeks(db, team_id, weeks)
+            # A retry from a stale form may follow a dismissal; show the backfill again.
+            db.execute(
+                "UPDATE run_backfills SET dismissed_at=NULL WHERE backfill_id=:id",
+                {"id": backfill_id},
+            )
             submitted = _now()
             for row, end in zip(failed, weeks, strict=True):
                 _insert_week(
@@ -445,13 +459,17 @@ def retry_backfill(
 
 def dismiss_backfill(db: Database, backfill_id: str) -> dict[str, Any]:
     backfill = get_backfill(db, backfill_id)
-    if any(job["status"] in ACTIVE_STATES for job in backfill_jobs(db, backfill_id)):
-        raise HTTPException(409, "This backfill still has weeks to run. Cancel them first.")
-    db.execute(
-        "UPDATE run_backfills SET dismissed_at=:now WHERE backfill_id=:id AND dismissed_at IS NULL",
-        {"id": backfill_id, "now": _now()},
-    )
-    db.commit()
+    # Under the team lock a concurrent retry either precedes this check or follows the
+    # update and clears it again.
+    with db.transaction():
+        _team_lock(db, str(backfill["team_id"]))
+        if any(job["status"] in ACTIVE_STATES for job in backfill_jobs(db, backfill_id)):
+            raise HTTPException(409, "This backfill still has weeks to run. Cancel them first.")
+        db.execute(
+            "UPDATE run_backfills SET dismissed_at=:now "
+            "WHERE backfill_id=:id AND dismissed_at IS NULL",
+            {"id": backfill_id, "now": _now()},
+        )
     return backfill
 
 
