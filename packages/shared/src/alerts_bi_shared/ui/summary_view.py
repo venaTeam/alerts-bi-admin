@@ -37,6 +37,7 @@ from alerts_bi_shared.ui.charts import TIMES, Segment, level_bar, stacked_bar
 from alerts_bi_shared.ui.explain import (
     QUALITY_STATE_LABELS,
     dominant_r6_pattern,
+    dominant_r6_pattern_totals,
     format_instant,
     principle_next_step,
     principle_title,
@@ -159,11 +160,7 @@ def _rule_step(
     if rule_id != "R6":
         return _next_step(rule_id)
     if summary is not None and summary.inputs.facts is not None:
-        return r6_next_step(
-            dominant_r6_pattern(
-                (p, pair[1]) for p, pair in patterns(summary.inputs, schema).items()
-            )
-        )
+        return r6_next_step(dominant_r6_pattern_totals(patterns(summary.inputs, schema)))
     return r6_next_step(
         dominant_r6_pattern(
             (a.fire_pattern, a.row_count) for a in alerts if "R6" in a.core_rule_ids

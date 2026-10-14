@@ -159,7 +159,7 @@ lifecycle. Pending/running jobs prevent permanent deletion. See docs/upstream/as
 Run/report/weekly/acceptance output directories contain three CSV exports. Standalone HTML
 scorecards are removed entirely, including on-demand routes and download links. The normal
 team workspace remains available. POST /runs returns JSON only, without a scorecard field.
-Operations 0.2.1 uses shared 0.1.4 with stored summaries and pooled web reads. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect. To clean older generated HTML, use
+Operations 0.2.2 uses shared 0.1.5 with stored summaries and pooled web reads. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect. To clean older generated HTML, use
 `alerts-bi-admin remove-run-html --out <explicit-output-root>`; this preserves CSVs and other
 HTML files and only removes scorecard.html accompanied by all three CSV exports.
 

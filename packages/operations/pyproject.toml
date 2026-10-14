@@ -1,10 +1,10 @@
 [project]
 name = "alerts-bi-operations"
-version = "0.2.1"
+version = "0.2.2"
 description = "Alerts BI registry validation, operator actions and SQL-only reports"
 requires-python = ">=3.12"
 dependencies = [
-    "alerts-bi-shared==0.1.4",
+    "alerts-bi-shared==0.1.5",
     "jsonschema>=4.23,<5",
 ]
 
