@@ -3,6 +3,10 @@
 Manual analysis can outlast an OpenShift Route timeout. The product owner requested asynchronous
 execution with results displayed when complete, and removal of generated per-run HTML files.
 This amendment supersedes synchronous browser triggering. The subsequent accepted request removes standalone HTML output entirely, including on-demand rendering.
+The 2026-10-14 [backfill contract](backfill.md) adds the `queued` and `cancelled` job states, a
+worker claim order, queueing of manual submissions while a backfill is in progress, and a weekly
+wait for the current backfill week. Statements below that no queue exists apply only while no
+backfill is in progress.
 
 ## HTTP and UI contract
 

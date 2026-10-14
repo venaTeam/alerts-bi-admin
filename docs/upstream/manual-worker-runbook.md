@@ -68,3 +68,13 @@ discard a committed analysis or race a live worker. Record affected job IDs in t
 audit. Never downgrade, edit or stamp over migrations 001–011. Preserve submission records,
 CSV data and committed analyses. After 011, old writers that omit idempotency_key_hash cannot
 accept new jobs: roll forward or use a compatible writer, rather than deploying pre-011 code.
+
+## Backfill weeks (2026-10-14)
+
+Queued backfill weeks hold no slot and wait for the same worker; only the claimed week shows
+as running, so the age checks above apply per week. To stop a backfill, cancel its queued
+weeks from the team workspace; the running week finishes. A weekly invocation that finds a
+backfill week running logs `weekly.waiting_for_backfill` and waits up to three hours while
+holding `alerts-bi-backfill-yield`; the worker claims no further backfill weeks meanwhile. Before
+rolling the application back past migration 014, cancel or finish active backfills: an older
+worker ignores queued rows and leaves them queued. See [the backfill contract](backfill.md).

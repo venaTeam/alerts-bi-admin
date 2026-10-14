@@ -19,7 +19,8 @@
     "/runs/{run_id}/findings",
     "/runs/{run_id}/{name}",
     "/healthz",
-    "/run-jobs/{job_id}"
+    "/run-jobs/{job_id}",
+    "/backfills/{backfill_id}"
   ],
   "write_routes": [
     "/teams/{team_id}/trigger",
@@ -28,7 +29,13 @@
     "/runs/{run_id}/withdraw",
     "/runs/{run_id}/delete",
     "/runs/{run_id}/decide",
-    "/run-jobs"
+    "/run-jobs",
+    "/teams/{team_id}/backfill",
+    "/backfills/{backfill_id}/cancel",
+    "/backfills/{backfill_id}/retry",
+    "/backfills/{backfill_id}/dismiss",
+    "/run-jobs/{job_id}/cancel",
+    "/run-jobs/{job_id}/retry"
   ],
   "team_tabs": [
     "overview",
@@ -38,7 +45,7 @@
   ],
   "run_scope": "An explicitly selected run must belong to the selected team",
   "payload_baseline": "console-openapi.json",
-  "schema_head": "013_analysis_checkpoints",
+  "schema_head": "014_backfills",
   "manual_window": "Monday 00:00 UTC to the selected Monday 00:00 UTC; omitted API/CLI run_at selects the latest completed week",
   "admin_gap_override": false,
   "execution_lock": "Database SQL session lock alerts-bi-weekly shared by manual HTTP/API and CLI runs, standalone CLI reports, weekly scheduling and deletion; held across scan, persistence and report writing, including model-off runs; standalone reports hold it before run-id/team lookup through the final file write; durable manual jobs also use this full-lifecycle lock",
@@ -56,9 +63,11 @@
     "response_status": 202,
     "states": [
       "pending",
+      "queued",
       "running",
       "completed",
-      "failed"
+      "failed",
+      "cancelled"
     ],
     "response_fields": [
       "job_id",
@@ -72,12 +81,24 @@
       "status_url",
       "result_url"
     ],
-    "concurrency": "One active manual job; SQL session lock and active slot constraint; busy returns 409"
+    "concurrency": "One active manual job; SQL session lock and active slot constraint; busy returns 409, except that while a backfill is in progress a busy submission is accepted as queued (queued and cancelled jobs hold no slot)"
   },
   "exports": [
     "daily_metrics.csv",
     "rule_counts.csv",
     "alert_worklist.csv"
   ],
-  "synchronous_response": "JSON summary and three CSV links; no HTML content negotiation or scorecard field"
+  "synchronous_response": "JSON summary and three CSV links; no HTML content negotiation or scorecard field",
+  "backfill": {
+    "approved": "2026-10-14",
+    "contract": "../docs/backfill.md",
+    "scope": "One registered team per backfill; 1-12 distinct completed Monday 00:00 UTC window ends whose window start is within the 84-day Elasticsearch retention",
+    "locked_weeks": "Weeks with a current publication for the team, or a queued, pending or running job for the team",
+    "model_mode": "live, fake or off for every week; live by default",
+    "admission": "Browser form with same-site actor-bound CSRF and a per-form submission key; one run_backfills row and one queued run_jobs row per week in one transaction; no execution lock",
+    "claim_order": "Orphan reconciliation, pending job, queued manual jobs by submission, then backfill weeks by backfill submission and oldest week first",
+    "manual_priority": "While a backfill is in progress a manual submission that finds the slot or execution lock busy is accepted as queued",
+    "weekly_priority": "A weekly invocation blocked during a backfill holds SQL session lock alerts-bi-backfill-yield and waits up to three hours, polling every 30 seconds",
+    "status_route": "GET /backfills/{backfill_id} returns BackfillOut"
+  }
 }

@@ -1,5 +1,13 @@
 # Alerts BI — Runtime Flow
 
+## Multi-week backfill — accepted 2026-10-14
+
+[The backfill contract](backfill.md) replaces the deterministic, model-free backfill step
+below with an operator-selected weekly queue in the admin console: one team, completed Monday
+weeks inside the 84-day retention, one run per week executed oldest first with the New run
+model mode (live by default), published weeks locked, results unpublished. Migration 014
+adds the backfill table and the queued and cancelled job states.
+
 ## Bounded read paths — accepted 2026-10-13
 
 The [performance contract](read-path-performance.md) governs compact stored summaries, bounded UI reads, pooled web connections, seek navigation and completed-analysis reuse. It supersedes earlier descriptions of full alert loads and unavailable application daily metrics for new runs. Historical missing measurements remain unavailable; CSV definitions, publication isolation, serialized execution and retention policy are unchanged.
@@ -272,4 +280,4 @@ remain labeled whole-team context. See the global-filter amendment in the canoni
 
 ## After the MVP
 
-The first next step, an interactive frontend over the persisted runs, is delivered as the read-only review portal (step 10). The second is deterministic historical backfill, processed oldest first and without LLM calls. Later work includes the company-wide unattributed-alert audit, and a cross-team leaderboard. R6 is already built as a core rule (ruleset 1.1.0, judged by firing episodes; design section 7.14).
+The first next step, an interactive frontend over the persisted runs, is delivered as the read-only review portal (step 10). The second is deterministic historical backfill, processed oldest first and without LLM calls (superseded 2026-10-14 by the model-assessed operator backfill; see [the backfill contract](backfill.md)). Later work includes the company-wide unattributed-alert audit, and a cross-team leaderboard. R6 is already built as a core rule (ruleset 1.1.0, judged by firing episodes; design section 7.14).
