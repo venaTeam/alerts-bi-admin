@@ -80,12 +80,13 @@ Cancelling a backfill marks its queued weeks cancelled and records the operator 
 single queued week can also be removed. A failed backfill week can be retried: a new queued job
 joins the same backfill with a freshly captured registry hash and run ID. Retry is refused when
 the week is now published or active, or when another backfill for the team is active. A finished
-backfill can be dismissed from the workspace. Run deletion is refused while a queued job targets
+backfill can be dismissed from the workspace; retrying it later restores it. Run deletion is refused while a queued job targets
 that run; the existing active-slot refusal and job-record removal are unchanged.
 
 ## Display
 
-The newest backfill that is active or finished and not dismissed appears above the team's runs:
+An active backfill always appears above the team's runs, even one dismissed before a retry or
+older than a finished backfill; otherwise the newest finished backfill that is not dismissed does:
 completed/running/queued/failed/cancelled counts, a progress bar of completed weeks, each week's
 status and actions (open the run, remove a queued week, retry a failed week), and cancel, retry
 and dismiss actions. While weeks are active the page polls `GET /backfills/{backfill_id}` every
