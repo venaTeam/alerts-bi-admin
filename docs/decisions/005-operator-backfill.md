@@ -9,4 +9,5 @@ Admin owns the dialog, the queued and cancelled run job states, the worker claim
 weekly wait for a running backfill week, the new console routes and migration 014. Portal
 views, shared/operations interfaces, CSV outputs and deterministic identifiers are unchanged.
 Merge design and admin together; deploy only with separate authorization. Rolling the app back
-leaves the additive revision installed; cancel or finish queued backfill weeks first.
+leaves the additive revision installed; first stop new submissions and drain or terminalize
+every queued job, including New runs queued behind a backfill (see the worker runbook).

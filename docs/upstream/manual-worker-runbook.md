@@ -75,6 +75,23 @@ Queued backfill weeks hold no slot and wait for the same worker; only the claime
 as running, so the age checks above apply per week. To stop a backfill, cancel its queued
 weeks from the team workspace; the running week finishes. A weekly invocation that finds a
 backfill week running logs `weekly.waiting_for_backfill` and waits up to three hours while
-holding `alerts-bi-backfill-yield`; the worker claims no further backfill weeks meanwhile. Before
-rolling the application back past migration 014, cancel or finish active backfills: an older
-worker ignores queued rows and leaves them queued. See [the backfill contract](backfill.md).
+holding `alerts-bi-backfill-yield`; the worker claims no further backfill weeks meanwhile.
+
+Before rolling the application back to an image without migration 014, leave no queued job of
+any kind; an older worker ignores queued rows and leaves them queued indefinitely. Stop new
+submissions by taking the `alerts-bi-admin` Route out of service while the current pod and its
+run-worker keep running. Cancel or finish active backfills from the team workspace, then let
+the current worker complete every remaining queued job, including New runs that were queued
+behind a backfill week (they do not belong to the backfill, so its Cancel does not remove them).
+If draining is impossible, stop all writers, pass the locked-session checks above, and fail the
+remaining queued rows with a status older versions recognize:
+
+```sql
+UPDATE run_jobs
+SET status = 'failed', completed_at = SYSUTCDATETIME(),
+    error_summary = N'Cancelled during controlled rollback. Start a new run to retry.'
+WHERE status = 'queued';
+```
+
+Queued rows hold no slot or analysis, so this cannot discard committed work. Record the affected
+job IDs in the incident audit. See [the backfill contract](backfill.md).

@@ -116,8 +116,12 @@ Migration `014_backfills` adds `run_backfills`, a nullable `run_jobs.backfill_id
 a queue index, and replaces the run job state check so `queued` and `cancelled` rows hold no
 slot. Applied revisions 001–013 are unchanged. Deployment applies 014 through the existing
 migration init container before the UI and worker start; UI and worker must run the same image.
-Before rolling back the application, cancel or finish active backfills: an older worker ignores
-queued rows and leaves them queued. The additive schema can remain installed.
+Before rolling back to an image without migration 014, stop new submissions and leave no queued
+job of any kind: a New run accepted during a backfill is queued outside that backfill, so
+cancelling backfills does not remove it. Cancel or finish active backfills, let the current
+worker run the remaining queued manual jobs, or terminalize them with the worker runbook's
+procedure. An older worker ignores queued rows and leaves them queued indefinitely. The additive
+schema can remain installed.
 
 Portal views, CSV outputs and columns, scoring, prompt text, deterministic identifiers, the
 publication rules and weekly planning are unchanged. No cluster deployment is authorized by this

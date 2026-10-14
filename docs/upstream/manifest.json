@@ -1,16 +1,16 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "c6f35e52c9ea435fcd65649a11ca3574b8388816",
+  "revision": "a7a6855dc6e2906a5724dbcab97b38187324b8cd",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
     "docs/upstream/alerts_bi_design.md": "9135cbf26509562ae7f5176e699f7860b5d2ed47c367c8c60a46040690b01b00",
     "docs/upstream/alerts_bi_flow.md": "65223e8af4f6f6a182ab5362ea3e5e6869cc13b4e0cf3449fc55b5c61aa62738",
     "docs/upstream/alerts_bi_implementation_plan.md": "daf7acf56076ec1b90df2c253ffe4c01d3fcaabb9030f5f097da57e346b35a24",
     "docs/upstream/async-runs.md": "bf5e266e98edccde453778a2f3e2f61e887783a01de03286a0ff4bdc3d16c357",
-    "docs/upstream/backfill.md": "8a70cdb36eae0d942d299032591deb507f422d31e1e3b8e6c353a85124a1b486",
+    "docs/upstream/backfill.md": "1f856b1f76dd544127796d15256dbd37c7e82ff2e2112cf5c47f9a665aee41ea",
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",
-    "docs/upstream/manual-worker-runbook.md": "bec33191b46cfb69aca976975b0c9315a2e2034191d633261d9bc8e0258ce578",
+    "docs/upstream/manual-worker-runbook.md": "b196d07854ce200e5470eed69167b9976587f63a73156cdb89b91f8861bc8ce4",
     "docs/upstream/openshift-deployment.md": "726d25ccf197fb8520a78be666124290ae3010e2c78af10428870b8b1d6fc289",
     "docs/upstream/outputs.md": "04535b2d64966a0f302d9e97b784a86e9f4922faf78bff90c1a546dc0f6e298a",
     "docs/upstream/read-path-performance.md": "6db0e7bf73a2eb57c4706f6597634d8a36ed3b1d841ca8ac38e7a7ebbc4c7e2d",
@@ -34,6 +34,6 @@
     "docs/decisions/002-flat-application-source.md": "6c96813e818816e0f1967c3137a962849e19c6b05a5e13aa63714dd65d8b8b99",
     "docs/decisions/003-runs-retirement.md": "c5c467ffda8f7150c7df157caa0ceabaa4dae656f60899fd3674cae3ef60ff19",
     "docs/decisions/004-admin-run-lifecycle.md": "87325692101d37ee0b422bd9fe096aeee17d9b7292995d97e77f98a3bbc792a0",
-    "docs/decisions/005-operator-backfill.md": "9cd67e60a185dd2544024271aa06ea3bbaa6442b2b6c5b65695f5947d7e4790b"
+    "docs/decisions/005-operator-backfill.md": "e3902ffb8f994916cf90e13f243538c477eba481ab26300278c665702dce1d50"
   }
 }
