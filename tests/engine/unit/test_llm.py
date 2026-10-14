@@ -7,7 +7,13 @@ from typing import Any
 import pytest
 from alerts_bi_shared.versions import PROMPT_VERSION as CURRENT_PROMPT_VERSION
 from src.engine.db.repositories import verdict_key
-from src.engine.llm.assess import MAX_ATTEMPTS, assess_alerts, mark_all_unassessed
+from src.engine.llm.assess import (
+    MAX_ATTEMPTS,
+    MAX_RETRY_AFTER_SECONDS,
+    RETRY_DELAYS_SECONDS,
+    assess_alerts,
+    mark_all_unassessed,
+)
 from src.engine.llm.fake import FakeLlmClient, ScriptedResult, scripted_verdicts
 from src.engine.llm.grouping import (
     MAX_BATCH_SIZE,
@@ -468,6 +474,57 @@ def test_a_batch_stops_after_exactly_three_attempts_and_never_a_fourth() -> None
     result = assess([v1_row(key_field="a")], client)
     assert len(client.calls) == MAX_ATTEMPTS == 3
     assert len(result.batch_attempts) == 3
+
+
+def test_a_failed_attempt_waits_before_the_retry_and_the_last_failure_does_not() -> None:
+    sleeps: list[float] = []
+    client = FakeLlmClient(fallback=ScriptedResult("transport_error"))
+    assess([v1_row(key_field="a")], client, sleep=sleeps.append)
+
+    assert len(client.calls) == MAX_ATTEMPTS
+    assert len(sleeps) == MAX_ATTEMPTS - 1, "wait between attempts, not after the last one"
+    for slept, base in zip(sleeps, RETRY_DELAYS_SECONDS, strict=True):
+        assert base <= slept <= base * 1.25
+
+
+def test_a_first_attempt_success_never_waits() -> None:
+    sleeps: list[float] = []
+    assess([v1_row(key_field="a")], sleep=sleeps.append)
+    assert sleeps == []
+
+
+def test_a_retry_that_succeeds_waits_only_once() -> None:
+    alerts = [v1_row(key_field="a")]
+    sleeps: list[float] = []
+    client = FakeLlmClient()
+    client.on(batches(alerts)[0].batch_id, 1, ScriptedResult("timeout"))
+    result = assess(alerts, client, sleep=sleeps.append)
+
+    assert len(sleeps) == 1
+    assert all(o.state == "assessed_good" for o in result.outcomes.values())
+
+
+def test_an_endpoint_retry_after_lengthens_the_wait_up_to_a_ceiling() -> None:
+    sleeps: list[float] = []
+    alerts = [v1_row(key_field="a")]
+    batch_id = batches(alerts)[0].batch_id
+    client = FakeLlmClient()
+    client.on(batch_id, 1, ScriptedResult("transport_error", retry_after=10))
+    client.on(batch_id, 2, ScriptedResult("transport_error", retry_after=3600))
+    assess(alerts, client, sleep=sleeps.append)
+
+    assert 10 <= sleeps[0] <= 10 * 1.25, "Retry-After beyond the schedule is honoured"
+    assert MAX_RETRY_AFTER_SECONDS <= sleeps[1] <= MAX_RETRY_AFTER_SECONDS * 1.25, "and capped"
+
+
+def test_a_client_without_an_audit_journal_requirement_does_not_wait_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(_seconds: float) -> None:
+        raise AssertionError("an offline client must not sleep")
+
+    monkeypatch.setattr("src.engine.llm.assess.time.sleep", forbidden)
+    assess([v1_row(key_field="a")], FakeLlmClient(fallback=ScriptedResult("transport_error")))
 
 
 def test_an_exhausted_batch_marks_every_member_unassessed_with_the_shared_reason() -> None:
