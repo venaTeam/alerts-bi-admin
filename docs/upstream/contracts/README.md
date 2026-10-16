@@ -39,3 +39,9 @@ console-openapi.json is generated from the actual authenticated console and incl
 run-jobs request body, required Idempotency-Key/CSRF headers and typed status responses.
 trigger-openapi.json remains the legacy synchronous factory baseline. The live console still
 disables public OpenAPI/docs routes; the committed artifact supports API consumers and checks.
+
+The 2026-10-14 backfill amendment (docs/backfill.md) appends migration 014_backfills without
+modifying 001–013: the run_backfills table, run_jobs.backfill_id, and the queued and cancelled
+job states. console-http.json records the backfill routes, claim order and weekly wait, and
+console-openapi.json is regenerated with BackfillOut and the extended job states. Portal views,
+CSV outputs and shared/operations interfaces are unchanged.

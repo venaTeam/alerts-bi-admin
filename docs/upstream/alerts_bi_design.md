@@ -1,5 +1,17 @@
 # Alerts BI — Design Document
 
+## Multi-week backfill — accepted 2026-10-14
+
+The product owner approved an operator-selected backfill in the admin console. An operator
+picks completed Monday weeks inside the 84-day retention for one team; one run per week is
+queued and executed one at a time, oldest first, with the same live/fake/off model mode as
+New run (live by default). Only published weeks are locked, and backfilled weeks complete
+unpublished. [The backfill contract](backfill.md) defines selection, the queued and cancelled
+job states, manual and weekly priority, cancel and retry, display, routes and migration 014.
+It supersedes the deterministic-only, model-free automatic sweep in sections 3.5, 5.1 and 6
+and the excluded-scope entry for model classification of backfilled history. Portal views,
+CSV outputs, scoring, prompt text and deterministic identifiers are unchanged.
+
 ## Read-path performance — 2026-10-13
 
 Approved bounded SQL summaries, application daily facts, pooled web reads, indexed
@@ -313,7 +325,7 @@ This survives the section 2 decision that the tool does not compare runs. The re
 
 Because runs are ad hoc (section 6), the store will have gaps. A gap is recoverable by re-running over those days **while they are still inside the 3-month retention**, and permanent afterwards. That is the only deadline in this design.
 
-**Historical backfill is deferred until after the post-MVP frontend** (ordering revised 2026-08-29). The MVP persists the daily facts covered by each normal 7-day run, but does not sweep the rest of Elasticsearch's retained history. The first post-MVP step is the interactive frontend; the second is a deterministic, day-by-day backfill of every day still available in ES, starting with the oldest. This explicitly accepts that more retained history may expire while the frontend is built and cannot then be recovered.
+**Historical backfill is deferred until after the post-MVP frontend** (ordering revised 2026-08-29). The MVP persists the daily facts covered by each normal 7-day run, but does not sweep the rest of Elasticsearch's retained history. The first post-MVP step is the interactive frontend; the second is a deterministic, day-by-day backfill of every day still available in ES, starting with the oldest. This explicitly accepts that more retained history may expire while the frontend is built and cannot then be recovered. **Superseded 2026-10-14:** backfill is an operator-selected, model-assessed weekly queue; see [the backfill contract](backfill.md).
 
 ### 3.6 Migrating must not make a team look worse
 
@@ -464,7 +476,7 @@ Important caveat: the core rules only detect *bad* — they never confirm *good*
 
   **What it costs.** Company-wide, ~30,000 distinct alerts per day with no key reuse means **~210,000 classifications** if every team is run over the same 7-day period. Each actual run classifies only the selected team's share. Marginally that is roughly 400 input tokens per alert (the alert document — the two guides ride in the cached prefix) and ~100 output tokens. A run overlapping a previous run for the same team costs less, because the overlapping keys already have stored verdicts.
 
-  **There is no cold-start ramp.** A team's first live run classifies that team's distinct keys from exactly the same 7-day window used by every later run. LLM coverage never runs backwards: the post-MVP history backfill is deterministic-only (section 6).
+  **There is no cold-start ramp.** A team's first live run classifies that team's distinct keys from exactly the same 7-day window used by every later run. LLM coverage never runs backwards: the post-MVP history backfill is deterministic-only (section 6). **Superseded 2026-10-14:** backfilled weeks are assessed like any run; see [the backfill contract](backfill.md).
 
   **Alerts are batched per request, grouped by alert rule** (decided 2026-08-27). The request count for a team cannot be estimated until the production group-size distribution is measured: the one-group-per-request rule deliberately leaves small groups undersized.
 
@@ -621,7 +633,7 @@ Run steps:
 
 Step 6 is the one that cannot be skipped — manual runs are fine, as long as every run appends to a store that outlives the 3-month retention.
 
-**Post-MVP sequence.** First build the interactive frontend on top of the persisted run data and pipeline controls; its detailed scope is designed after the MVP. Then read every day still retained in Elasticsearch into the store, oldest first, using deterministic metrics only. LLM classification is not backfilled — roughly 2,700,000 historical keys would be unaffordable and unnecessary. Backfilled rows carry `llm_assessed = false`, so an empty `flagged_by_llm` means *not examined*, not *nothing found*.
+**Post-MVP sequence.** First build the interactive frontend on top of the persisted run data and pipeline controls; its detailed scope is designed after the MVP. Then read every day still retained in Elasticsearch into the store, oldest first, using deterministic metrics only. LLM classification is not backfilled — roughly 2,700,000 historical keys would be unaffordable and unnecessary. Backfilled rows carry `llm_assessed = false`, so an empty `flagged_by_llm` means *not examined*, not *nothing found*. **Superseded 2026-10-14:** the delivered backfill is operator-selected per week and model-assessed by default; see [the backfill contract](backfill.md).
 
 ### Storage and output shape
 
@@ -666,13 +678,13 @@ Both a row count and a distinct count are carried for **flagged** as well as for
 
 The daily per-rule breakdown lets `flagged` be drilled into. **`good` is not `alerts - flagged`** — that would count unexamined alerts as good (section 5.1). Good is `assessed_good`, and `unassessed` is reported next to it. Under exhaustive coverage (section 5.1) `unassessed` should be zero on any day inside the LLM coverage window; a non-zero value is a classifier failure, not a budget decision, and reads as one.
 
-The version fields on the run record exist so that a movement in a team's numbers can always be attributed. `registry_version` separates *their behaviour changed* from *we edited the ownership mapping*; `ruleset_version`, `prompt_version` and `model_version` do the same for *we changed what counts as bad*. `llm_assessed` is false on post-MVP backfilled history, so an empty `flagged_by_llm` there reads as absence of examination rather than absence of findings.
+The version fields on the run record exist so that a movement in a team's numbers can always be attributed. `registry_version` separates *their behaviour changed* from *we edited the ownership mapping*; `ruleset_version`, `prompt_version` and `model_version` do the same for *we changed what counts as bad*. `llm_assessed` is false on post-MVP backfilled history, so an empty `flagged_by_llm` there reads as absence of examination rather than absence of findings. (Amended 2026-10-14: backfilled runs carry `llm_assessed` with its ordinary run-level meaning; see [the backfill contract](backfill.md).)
 
 ### Guiding principle
 
 **Persist facts, not judgments.** `has_impact`, `provider`, `message_template`, `severity` are observations — once ES ages out they are gone forever. "This alert is bad" is a derivation, recomputable at any time. Storing the attributes means all of history can be re-scored when the rule set changes, which is exactly what will be needed when `impact` and `runbook_url` become required.
 
-**The LLM is the one exception, and it is a deliberate one.** A model verdict is a judgment that cannot be recomputed for free, so it is stored as a pinned result rather than re-derived (section 5.1). Everything a rule needs is still persisted as a fact, which is why the post-MVP backfill can reconstruct the retained deterministic history but not the LLM's view of it.
+**The LLM is the one exception, and it is a deliberate one.** A model verdict is a judgment that cannot be recomputed for free, so it is stored as a pinned result rather than re-derived (section 5.1). Everything a rule needs is still persisted as a fact, which is why the post-MVP backfill can reconstruct the retained deterministic history but not the LLM's view of it. (Amended 2026-10-14: the operator backfill re-reads retained weeks from Elasticsearch and assesses them with the model; see [the backfill contract](backfill.md).)
 
 ---
 
@@ -712,8 +724,8 @@ Recorded here so they read as choices rather than oversights.
 * **Cross-team leaderboard** (sections 2, 6) — deferred; the MVP produces one independently timed team scorecard per run.
 * **Interactive frontend** (section 6) — the first post-MVP step (ordered 2026-08-29), **delivered 2026-09-24 as the read-only review portal** (section 7.10). The self-contained HTML scorecard and the three approved CSV exports are unchanged. A local HTTP surface for *starting* a run was added ahead of that design; see section 7.9, which records what it deliberately does not do.
 * **Company-wide attribution audit and `Unattributed` work list** (sections 3.1, 6) — deferred because it requires enumerating operators across all alerts, which conflicts with the MVP's team-filtered queries. The future audit enumerates every operator/application value, subtracts all registered operators and reports the remainder with volumes; application may suggest an owner but never assigns one automatically.
-* **Historical deterministic backfill** (sections 3.5, 6) — the second post-MVP step, after the frontend, run oldest-first over everything still retained in Elasticsearch.
-* **LLM classification of backfilled history** (sections 5.1, 6) — remains excluded even when the deterministic backfill is added; LLM coverage is exhaustive within each reported week and never runs backwards.
+* **Historical deterministic backfill** (sections 3.5, 6) — the second post-MVP step, after the frontend, run oldest-first over everything still retained in Elasticsearch. **Delivered 2026-10-14** as the operator-selected, model-assessed weekly backfill; see [the backfill contract](backfill.md).
+* **LLM classification of backfilled history** (sections 5.1, 6) — remains excluded even when the deterministic backfill is added; LLM coverage is exhaustive within each reported week and never runs backwards. **Superseded 2026-10-14:** backfill uses the New run model mode, live by default; see [the backfill contract](backfill.md).
 * **Any comparison between runs** (section 2) — no trends, deltas, baselines or improvement percentages in the scorecard or the exports. The tool reports one week; people compare. **Amended 2026-09-24:** the review portal plots each team's published weeks over time (section 7.10), still with no delta, percentage or conclusion. **Amended 2026-10-01:** one scoped exception, the estimated time to retire v1 on the team summary (section 7.14), computed at request time from published weeks only and never written to the scorecard or the exports.
 * **Sampling and error bars on `unassessed`** (section 5.1) — withdrawn with the classification budget. Under exhaustive coverage `unassessed` is enumerable, so there is nothing left to estimate.
 * **One verdict per alert rule** (section 5.1) — grouping is an input-side optimisation only. Collapsing a rule to a single classification was considered and rejected: alerts under one rule can differ in `message`, `node_name` or `environment` in ways that matter, and the work list is built from alerts.
@@ -849,7 +861,7 @@ Scope is otherwise unchanged. A run still names one team, `run_at` is still capt
 
 **Every week is Monday 00:00 UTC to the next Monday 00:00 UTC, for every team.** `run_at` is always that Monday boundary, never the moment a scheduler started, so a run that starts late still covers exactly the right week and every team's weeks line up. Each week is still an ordinary single-team run (section 6): the scheduler is a loop over enrolled teams, one at a time, and never an all-teams run.
 
-**Enrolment is one registry field.** A team entry carries `"weekly_review": {"enabled": true}`; absent means not enrolled. Adding a team is: add its entry with its operators (and panels, if any) and the flag, bump `registry_version`, validate with `alerts-bi registry check`, deploy the file. The next scheduled invocation reviews the team's **most recent completed week only**; there is no backfill of earlier weeks.
+**Enrolment is one registry field.** A team entry carries `"weekly_review": {"enabled": true}`; absent means not enrolled. Adding a team is: add its entry with its operators (and panels, if any) and the flag, bump `registry_version`, validate with `alerts-bi registry check`, deploy the file. The next scheduled invocation reviews the team's **most recent completed week only**; there is no backfill of earlier weeks. (Amended 2026-10-14: the scheduler still never backfills on its own; operators can queue earlier retained weeks from the console, see [the backfill contract](backfill.md).)
 
 **`alerts-bi weekly` is the whole schedule.** It is idempotent and meant to be invoked daily - on OpenShift by a `CronJob` - so a missed invocation heals itself. For each enrolled team it works out the due weeks: every completed Monday week after the team's latest published one, oldest first. It runs and persists each, and publishes each automatically **only when healthy** (the run completed and the model assessed every alert it was asked about) and only while every earlier due week was published.
 

@@ -749,6 +749,273 @@
         }
       }
     },
+    "/teams/{team_id}/backfill": {
+      "post": {
+        "summary": "Backfill",
+        "operationId": "backfill_teams__team_id__backfill_post",
+        "parameters": [
+          {
+            "name": "team_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Team Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backfills/{backfill_id}": {
+      "get": {
+        "summary": "Read backfill progress for an authenticated operator",
+        "operationId": "read_backfill_backfills__backfill_id__get",
+        "parameters": [
+          {
+            "name": "backfill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Backfill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackfillOut"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operator identity required"
+          },
+          "404": {
+            "description": "Unknown backfill"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backfills/{backfill_id}/cancel": {
+      "post": {
+        "summary": "Cancel Backfill Route",
+        "operationId": "cancel_backfill_route_backfills__backfill_id__cancel_post",
+        "parameters": [
+          {
+            "name": "backfill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Backfill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backfills/{backfill_id}/retry": {
+      "post": {
+        "summary": "Retry Backfill Route",
+        "operationId": "retry_backfill_route_backfills__backfill_id__retry_post",
+        "parameters": [
+          {
+            "name": "backfill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Backfill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/backfills/{backfill_id}/dismiss": {
+      "post": {
+        "summary": "Dismiss Backfill Route",
+        "operationId": "dismiss_backfill_route_backfills__backfill_id__dismiss_post",
+        "parameters": [
+          {
+            "name": "backfill_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Backfill Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/run-jobs/{job_id}/cancel": {
+      "post": {
+        "summary": "Cancel Week",
+        "operationId": "cancel_week_run_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/run-jobs/{job_id}/retry": {
+      "post": {
+        "summary": "Retry Week",
+        "operationId": "retry_week_run_jobs__job_id__retry_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runs/{run_id}/publish": {
       "post": {
         "summary": "Publish",
@@ -1018,6 +1285,160 @@
   },
   "components": {
     "schemas": {
+      "BackfillOut": {
+        "properties": {
+          "backfill_id": {
+            "type": "string",
+            "title": "Backfill Id"
+          },
+          "team_id": {
+            "type": "string",
+            "title": "Team Id"
+          },
+          "llm_mode": {
+            "type": "string",
+            "enum": [
+              "live",
+              "fake",
+              "off"
+            ],
+            "title": "Llm Mode"
+          },
+          "submitted_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Submitted At"
+          },
+          "cancelled_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelled At"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "weeks": {
+            "items": {
+              "$ref": "#/components/schemas/BackfillWeekOut"
+            },
+            "type": "array",
+            "title": "Weeks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "backfill_id",
+          "team_id",
+          "llm_mode",
+          "submitted_at",
+          "cancelled_at",
+          "active",
+          "weeks"
+        ],
+        "title": "BackfillOut",
+        "description": "Public backfill state for polling; private keys and the actor are excluded."
+      },
+      "BackfillWeekOut": {
+        "properties": {
+          "week_end": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Week End"
+          },
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "queued",
+              "running",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status"
+          },
+          "attempts": {
+            "type": "integer",
+            "title": "Attempts"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "error_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Summary"
+          },
+          "result_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "week_end",
+          "job_id",
+          "run_id",
+          "status",
+          "attempts",
+          "started_at",
+          "completed_at",
+          "error_summary",
+          "result_url"
+        ],
+        "title": "BackfillWeekOut",
+        "description": "The latest attempt for one week of a backfill."
+      },
       "CheckOut": {
         "properties": {
           "ok": {
@@ -1110,9 +1531,11 @@
             "type": "string",
             "enum": [
               "pending",
+              "queued",
               "running",
               "completed",
-              "failed"
+              "failed",
+              "cancelled"
             ],
             "title": "Status"
           },

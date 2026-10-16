@@ -16,6 +16,8 @@ from pydantic import BaseModel, Field, field_validator
 from ..weekly.plan import is_week_boundary
 
 __all__ = [
+    "BackfillOut",
+    "BackfillWeekOut",
     "CheckOut",
     "HealthOut",
     "LlmMode",
@@ -36,6 +38,10 @@ LlmMode = Literal["live", "fake", "off"]
 #: Only the three approved CSV outputs are addressable. A type rather than a runtime check, so
 #: an unknown name is refused by validation before any handler runs.
 OutputFile = Literal["daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"]
+
+#: Durable submission states. ``queued`` holds no slot; ``cancelled`` is terminal
+#: (docs/backfill.md).
+JobStatus = Literal["pending", "queued", "running", "completed", "failed", "cancelled"]
 
 
 class TeamOut(BaseModel):
@@ -110,10 +116,36 @@ class RunJobOut(BaseModel):
     job_id: str
     team_id: str
     run_id: str
-    status: Literal["pending", "running", "completed", "failed"]
+    status: JobStatus
     submitted_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
     error_summary: str | None
     status_url: str
     result_url: str | None
+
+
+class BackfillWeekOut(BaseModel):
+    """The latest attempt for one week of a backfill."""
+
+    week_end: datetime
+    job_id: str
+    run_id: str
+    status: JobStatus
+    attempts: int
+    started_at: datetime | None
+    completed_at: datetime | None
+    error_summary: str | None
+    result_url: str | None
+
+
+class BackfillOut(BaseModel):
+    """Public backfill state for polling; private keys and the actor are excluded."""
+
+    backfill_id: str
+    team_id: str
+    llm_mode: LlmMode
+    submitted_at: datetime
+    cancelled_at: datetime | None
+    active: bool
+    weeks: list[BackfillWeekOut]

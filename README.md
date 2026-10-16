@@ -140,7 +140,8 @@ same image, registry, SQL/ES/model configuration and output mount. Its migration
 automatically runs db setup before UI/worker startup, targeting ADMIN_DATABASE or SQL_DATABASE.
 Recreate stops the previous pod before initialization; migration failure blocks startup. The
 health endpoint requires the job-key digest, stored read models and private checkpoint
-tables through migration 013, so an older schema returns 503 until upgraded. Migration 011 backfills
+tables through migration 013 and the backfill state from migration 014, so an older schema
+returns 503 until upgraded. Migration 011 backfills
 existing submission digests without editing 001–010. Older writers cannot insert the new
 required digest. Keys differing only in case or trailing spaces request distinct attempts.
 Pending/running jobs retain their execution reservation after worker exit. CLI/weekly
@@ -155,6 +156,15 @@ JSON clients use authenticated `POST /run-jobs` with X-CSRF-Token and Idempotenc
 GET the returned status_url. Existing synchronous POST /runs returns JSON only and shares
 the manual SQL gate. Workers retain the shared weekly/manual CLI/report/deletion execution lock for their complete
 lifecycle. Pending/running jobs prevent permanent deletion. See docs/upstream/async-runs.md for the full contract.
+
+Backfill weeks in the team workspace queues one run per selected Monday week for that team,
+oldest first, with the New run model mode (live by default). Only completed weeks inside the
+84-day Elasticsearch retention can be picked, and published weeks are locked. Migration 014
+adds the backfill table and the `queued`/`cancelled` job states; queued weeks hold no slot,
+so other writers are only refused while a week actually runs. The same worker claims queued
+manual runs before the next backfill week. A weekly invocation that finds a backfill week
+running waits up to three hours, keeping the worker off further weeks until it has run.
+Cancel removes only queued weeks; a failed week can be retried. See docs/upstream/backfill.md.
 
 Run/report/weekly/acceptance output directories contain three CSV exports. Standalone HTML
 scorecards are removed entirely, including on-demand routes and download links. The normal

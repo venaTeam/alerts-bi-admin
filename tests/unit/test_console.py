@@ -127,8 +127,23 @@ def test_console_openapi_describes_async_submission_and_status(client: TestClien
     )
     assert schema["components"]["schemas"]["RunJobOut"]["properties"]["status"]["enum"] == [
         "pending",
+        "queued",
         "running",
         "completed",
         "failed",
+        "cancelled",
     ]
+    backfill = schema["paths"]["/backfills/{backfill_id}"]["get"]["responses"]["200"]
+    assert backfill["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/BackfillOut"
+    }
+    for path in (
+        "/teams/{team_id}/backfill",
+        "/backfills/{backfill_id}/cancel",
+        "/backfills/{backfill_id}/retry",
+        "/backfills/{backfill_id}/dismiss",
+        "/run-jobs/{job_id}/cancel",
+        "/run-jobs/{job_id}/retry",
+    ):
+        assert "post" in schema["paths"][path], path
     assert client.get("/openapi.json", headers=USER).status_code == 404

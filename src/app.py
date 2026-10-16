@@ -31,10 +31,23 @@ from starlette.concurrency import run_in_threadpool
 from . import pages, queries, summary
 from .auth import csrf_token, identity, same_site, valid_csrf
 from .config import AdminSettings
+from .engine.api.backfill import (
+    backfill_jobs,
+    cancel_backfill,
+    dismiss_backfill,
+    get_backfill,
+    job_backfill,
+    latest_backfill,
+    parse_weeks,
+    retry_backfill,
+    selectable_weeks,
+    submit_backfill,
+    week_rows,
+)
 from .engine.api.jobs import get_job, submit_job, team_jobs
 from .engine.api.negotiation import wants_html
 from .engine.api.routers.runs import router as runs_router
-from .engine.api.schemas import HealthOut, RunJobOut, RunRequest, TeamsOut
+from .engine.api.schemas import BackfillOut, HealthOut, RunJobOut, RunRequest, TeamsOut
 from .engine.api.service import (
     RunGate,
     WeeklyBusy,
@@ -165,6 +178,10 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     async def form(request: Request) -> dict[str, str]:
         """Parse and authenticate a POSTed form: same site, and a valid token for this user."""
+        return {key: values[-1] for key, values in (await form_values(request)).items()}
+
+    async def form_values(request: Request) -> dict[str, list[str]]:
+        """Every value of each authenticated form field, for repeated checkboxes."""
         if not same_site(request):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, "Cross-site form submissions are refused."
@@ -172,31 +189,34 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         body = await request.body()
         if len(body) > _MAX_FORM:
             raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "The form is too large.")
-        fields = {
-            key: values[-1]
-            for key, values in parse_qs(
-                body.decode("utf-8", "replace"), keep_blank_values=True
-            ).items()
-        }
+        fields = parse_qs(body.decode("utf-8", "replace"), keep_blank_values=True)
         if not valid_csrf(
-            settings.secret, user_of(request), fields.get("csrf", ""), datetime.now(UTC).date()
+            settings.secret,
+            user_of(request),
+            (fields.get("csrf") or [""])[-1],
+            datetime.now(UTC).date(),
         ):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, "The form has expired or did not come from this app."
             )
         return fields
 
-    def back(path: str, message: str, error: bool = False) -> RedirectResponse:
+    def back(
+        path: str, message: str, error: bool = False, anchor: str = "selected-run"
+    ) -> RedirectResponse:
         key = "error" if error else "done"
         separator = "&" if "?" in path else "?"
+        fragment = f"#{anchor}" if anchor else ""
         return RedirectResponse(
-            f"{path}{separator}{urlencode({key: message})}#selected-run", status.HTTP_303_SEE_OTHER
+            f"{path}{separator}{urlencode({key: message})}{fragment}", status.HTTP_303_SEE_OTHER
         )
 
     def run_row(db: Database, run_id: str) -> dict[str, Any]:
         row = db.query_one(
             "SELECT r.*, p.publication_id, p.published_by, p.published_at, p.review_note, "
             "(SELECT COUNT(*) FROM weekly_review_log l WHERE l.run_id=r.run_id) AS scheduled, "
+            "(SELECT COUNT(*) FROM run_jobs j WHERE j.run_id=r.run_id AND j.backfill_id IS NOT NULL "
+            "AND j.status='completed') AS backfilled, "
             "(SELECT TOP 1 l.outcome FROM weekly_review_log l WHERE l.run_id=r.run_id ORDER BY l.log_id DESC) AS schedule_outcome, "
             "(SELECT TOP 1 l.detail FROM weekly_review_log l WHERE l.run_id=r.run_id ORDER BY l.log_id DESC) AS schedule_detail, "
             "(SELECT COALESCE(SUM(CASE WHEN COALESCE(f.core_rule_ids,'')='' THEN 0 ELSE LEN(f.core_rule_ids)-LEN(REPLACE(f.core_rule_ids,',',''))+1 END + "
@@ -309,8 +329,16 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     ) -> HTMLResponse:
         names = {team_id_: name for team_id_, name, _ in registry_teams()}
         enrollment = {t: e for t, _, e in registry_teams()}
+        now = datetime.now(UTC)
         with database() as db:
             jobs = team_jobs(db, team_id)
+            backfill_row = latest_backfill(db, team_id)
+            backfill_weeks = (
+                week_rows(backfill_jobs(db, str(backfill_row["backfill_id"])))
+                if backfill_row
+                else []
+            )
+            calendar = queries.backfill_calendar(db, team_id, selectable_weeks(now)[0])
             if job_id:
                 submitted = get_job(db, job_id)
                 if submitted["team_id"] != team_id:
@@ -393,6 +421,16 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     )
                     content = pages.activity_content(queries.team_log(db, team_id), pubs, selected)
         name = names.get(team_id) or str(runs[0]["team_display_name"])
+        backfill_active = any(
+            week["status"] in ("queued", "pending", "running") for week in backfill_weeks
+        )
+        backfill_html = (
+            pages.backfill_panel(team_id, backfill_row, backfill_weeks, token_for(request))
+            if backfill_row
+            else ""
+        )
+        if not backfill_active and team_id in names:
+            backfill_html = pages.gap_banner(calendar, now) + backfill_html
         return HTMLResponse(
             pages.team_page(
                 user_of(request),
@@ -409,6 +447,13 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 error or done,
                 bool(error),
                 jobs=jobs,
+                backfill=backfill_html,
+                backfill_dialog=pages.backfill_form(
+                    team_id, token_for(request), name, calendar, now
+                )
+                if team_id in names
+                else "",
+                backfill_active=backfill_active,
             )
         )
 
@@ -498,7 +543,9 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         log.info("console.submitted", job_id=job["job_id"], operator=user_of(request))
         return back(
             pages.team_url(team_id, job_id=job["job_id"]),
-            "Run accepted. You can leave this page and return later.",
+            "Run accepted. It starts before the next backfill week. You can leave this page."
+            if job["status"] == "queued"
+            else "Run accepted. You can leave this page and return later.",
         )
 
     def job_status(row: dict[str, Any]) -> dict[str, Any]:
@@ -576,6 +623,168 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     def read_job(job_id: str) -> JSONResponse:
         with database() as db:
             return JSONResponse(jsonable_encoder(job_status(get_job(db, job_id))))
+
+    def backfill_out(backfill: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[str, Any]:
+        weeks = week_rows(jobs)
+        return {
+            "backfill_id": backfill["backfill_id"],
+            "team_id": backfill["team_id"],
+            "llm_mode": backfill["llm_mode"],
+            "submitted_at": iso_instant(backfill["submitted_at"]),
+            "cancelled_at": iso_instant(backfill["cancelled_at"])
+            if backfill["cancelled_at"] is not None
+            else None,
+            "active": any(week["status"] in ("queued", "pending", "running") for week in weeks),
+            "weeks": [
+                {
+                    "week_end": iso_instant(week["run_at"]),
+                    "job_id": week["job_id"],
+                    "run_id": week["run_id"],
+                    "status": week["status"],
+                    "attempts": week["attempts"],
+                    "started_at": iso_instant(week["started_at"])
+                    if week["started_at"] is not None
+                    else None,
+                    "completed_at": iso_instant(week["completed_at"])
+                    if week["completed_at"] is not None
+                    else None,
+                    "error_summary": week["error_summary"],
+                    "result_url": pages.team_url(str(week["team_id"]), str(week["run_id"]))
+                    + "#selected-run"
+                    if week["status"] == "completed"
+                    else None,
+                }
+                for week in weeks
+            ],
+        }
+
+    @app.post("/teams/{team_id}/backfill")
+    async def backfill(request: Request, team_id: str) -> Response:
+        values = await form_values(request)
+        if team_id not in {t for t, _, _ in registry_teams()}:
+            raise HTTPException(404, "No such registered team.")
+        path = pages.team_url(team_id)
+        llm = (values.get("llm") or ["live"])[-1]
+        if llm not in ("live", "fake", "off"):
+            return back(path, "Choose a valid model mode.", True, "")
+        try:
+            weeks = parse_weeks(values.get("week", []))
+            row = await run_in_threadpool(
+                submit_backfill,
+                api_settings,
+                team_id,
+                weeks,
+                llm,  # type: ignore[arg-type]
+                user_of(request),
+                (values.get("submission_key") or [""])[-1],
+            )
+        except HTTPException as exc:
+            return back(path, str(exc.detail), True, "")
+        except Exception as exc:
+            log.error(
+                "console.backfill_failed",
+                team_id=team_id,
+                operator=user_of(request),
+                error=redact_error(exc),
+            )
+            return back(path, "The backfill could not be saved. Check the service logs.", True, "")
+        log.info(
+            "console.backfill_submitted", backfill_id=row["backfill_id"], operator=user_of(request)
+        )
+        count = int(row["week_count"])
+        return back(
+            path,
+            f"Backfill accepted. {count} {'run' if count == 1 else 'runs'} queued, oldest first. "
+            "You can leave this page and return later.",
+            anchor="",
+        )
+
+    @app.get(
+        "/backfills/{backfill_id}",
+        response_model=BackfillOut,
+        summary="Read backfill progress for an authenticated operator",
+        responses={
+            401: {"description": "Operator identity required"},
+            404: {"description": "Unknown backfill"},
+        },
+    )
+    def read_backfill(backfill_id: str) -> JSONResponse:
+        with database() as db:
+            row = get_backfill(db, backfill_id)
+            return JSONResponse(jsonable_encoder(backfill_out(row, backfill_jobs(db, backfill_id))))
+
+    async def backfill_action(
+        request: Request, backfill_id: str, act: Callable[[str], tuple[dict[str, Any], str, bool]]
+    ) -> Response:
+        await form(request)
+        user = user_of(request)
+        with database() as db:
+            team_id = str(get_backfill(db, backfill_id)["team_id"])
+        path = pages.team_url(team_id)
+        try:
+            _, message, failed = await run_in_threadpool(act, user)
+        except HTTPException as exc:
+            return back(path, str(exc.detail), True, "")
+        return back(path, message, failed, "")
+
+    @app.post("/backfills/{backfill_id}/cancel")
+    async def cancel_backfill_route(request: Request, backfill_id: str) -> Response:
+        def act(user: str) -> tuple[dict[str, Any], str, bool]:
+            with database() as db:
+                row, count = cancel_backfill(db, backfill_id, user)
+                running = any(
+                    job["status"] in ("pending", "running")
+                    for job in backfill_jobs(db, backfill_id)
+                )
+            if not count:
+                return row, "No queued weeks were left to cancel.", True
+            noun = "week" if count == 1 else "weeks"
+            message = f"{count} queued {noun} cancelled."
+            return row, message + (" The running week will finish." if running else ""), False
+
+        return await backfill_action(request, backfill_id, act)
+
+    @app.post("/backfills/{backfill_id}/retry")
+    async def retry_backfill_route(request: Request, backfill_id: str) -> Response:
+        def act(user: str) -> tuple[dict[str, Any], str, bool]:
+            row, count = retry_backfill(api_settings, backfill_id, user)
+            noun = "week" if count == 1 else "weeks"
+            return row, f"Retry queued for {count} failed {noun}.", False
+
+        return await backfill_action(request, backfill_id, act)
+
+    @app.post("/backfills/{backfill_id}/dismiss")
+    async def dismiss_backfill_route(request: Request, backfill_id: str) -> Response:
+        def act(user: str) -> tuple[dict[str, Any], str, bool]:
+            with database() as db:
+                return dismiss_backfill(db, backfill_id), "Backfill dismissed.", False
+
+        return await backfill_action(request, backfill_id, act)
+
+    @app.post("/run-jobs/{job_id}/cancel")
+    async def cancel_week(request: Request, job_id: str) -> Response:
+        with database() as db:
+            backfill_id = job_backfill(db, job_id)
+
+        def act(user: str) -> tuple[dict[str, Any], str, bool]:
+            with database() as db:
+                row, count = cancel_backfill(db, backfill_id, user, job_id)
+            if not count:
+                return row, "Only queued weeks can be removed.", True
+            return row, "Week removed from the backfill.", False
+
+        return await backfill_action(request, backfill_id, act)
+
+    @app.post("/run-jobs/{job_id}/retry")
+    async def retry_week(request: Request, job_id: str) -> Response:
+        with database() as db:
+            backfill_id = job_backfill(db, job_id)
+
+        def act(user: str) -> tuple[dict[str, Any], str, bool]:
+            row, _ = retry_backfill(api_settings, backfill_id, user, job_id)
+            return row, "Retry queued for this week.", False
+
+        return await backfill_action(request, backfill_id, act)
 
     @app.post("/runs/{run_id}/publish")
     async def publish(request: Request, run_id: str) -> Response:

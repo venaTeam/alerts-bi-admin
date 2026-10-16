@@ -1,5 +1,13 @@
 # Alerts BI — Implementation Blueprint
 
+## Multi-week backfill — accepted 2026-10-14
+
+[The backfill contract](backfill.md) replaces the deterministic, model-free backfill step
+below with an operator-selected weekly queue in the admin console: one team, completed Monday
+weeks inside the 84-day retention, one run per week executed oldest first with the New run
+model mode (live by default), published weeks locked, results unpublished. Migration 014
+adds the backfill table and the queued and cancelled job states.
+
 ## Bounded read paths — accepted 2026-10-13
 
 The [performance contract](read-path-performance.md) governs compact stored summaries, bounded UI reads, pooled web connections, seek navigation and completed-analysis reuse. It supersedes earlier descriptions of full alert loads and unavailable application daily metrics for new runs. Historical missing measurements remain unavailable; CSV definitions, publication isolation, serialized execution and retention policy are unchanged.
@@ -368,7 +376,7 @@ Build the interactive frontend first, using the persisted run data and pipeline 
 - `persist_run` refuses to replace a run that is currently published.
 - Tests: publication rules, shared SQL configuration, GET-only access, SQL pagination, alert-detail accuracy, earlier-row evidence against the latest firing, advisory and readiness labels, decision history, and portal totals against the stored metrics and CSV exports.
 
-Implement deterministic historical backfill second. Process the oldest period first, reuse the same registry/ruleset versioning and persistence grain, and make no LLM calls. Track completion so ranges can be resumed safely.
+Implement deterministic historical backfill second. Process the oldest period first, reuse the same registry/ruleset versioning and persistence grain, and make no LLM calls. Track completion so ranges can be resumed safely. **Superseded 2026-10-14:** the delivered backfill queues operator-selected weeks as durable run jobs with the New run model mode; see [the backfill contract](backfill.md).
 
 **Automatic weekly reviews delivered 2026-09-24** (design section 7.11): a `weekly_review.enabled` registry flag, `src.weekly` (pure week planning plus a locked, idempotent runner with a health gate), migration `003_weekly_schedule` for the outcome log, and `alerts-bi weekly`, `weekly-status` and `registry check`. The OpenShift CronJob is documented, not proven.
 
