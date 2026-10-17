@@ -173,6 +173,8 @@ Explicit `report`, `run --out`, `weekly --out` and acceptance output directories
 three CSV exports. Standalone HTML
 scorecards are removed entirely, including on-demand routes and download links. The normal
 team workspace remains available. POST /runs returns JSON only, without a scorecard field.
+Since 2026-10-17 it also omits the `out_dir` field and the `X-Alerts-BI-Out-Dir` header, a
+breaking change for callers that read them; use the `files` download links instead.
 Operations 0.2.2 uses shared 0.1.5 with stored summaries and pooled web reads. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect.
 
 The original mock generator, scripts and hand-reviewed oracle now live here. The Compose
