@@ -10,7 +10,6 @@ oauth-proxy sidecar shares the pod's loopback; nothing outside the pod does.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from pathlib import Path
 
 from alerts_bi_shared.config.env import load_dotenv, read_int, read_str
 from alerts_bi_shared.config.sql import SqlConfig, load_sql_config
@@ -58,7 +57,6 @@ class AdminSettings:
     #: Local development only: act as this user when no proxy header is present.
     dev_user: str | None = None
     registry_path: str | None = None
-    out_root: Path = Path("out")
 
     def api_settings(self) -> ApiSettings:
         """Use the local execution engine in-process and preserve the admin SQL override."""
@@ -69,7 +67,6 @@ class AdminSettings:
             port=self.port,
             database=self.database,
             registry_path=self.registry_path,
-            out_root=self.out_root,
         )
 
     def __post_init__(self) -> None:
@@ -102,5 +99,4 @@ def load_admin_settings(
         user_header=read_str("ADMIN_USER_HEADER", DEFAULT_USER_HEADER),
         dev_user=dev_user,
         registry_path=registry_path or (read_str("ADMIN_REGISTRY_PATH") or None),
-        out_root=Path(read_str("ADMIN_OUT_DIR", "out")),
     )

@@ -56,7 +56,6 @@ def test_cli_exports_files_only_from_report_or_an_explicit_out(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str, explicit: bool
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("ADMIN_OUT_DIR", "mounted/reports")
     monkeypatch.setenv("ADMIN_REGISTRY_PATH", "mounted/teams.json")
     monkeypatch.setattr(cli, "connect", MagicMock())
     # Path/registry routing is isolated from both data and execution-lock sessions.
@@ -89,9 +88,7 @@ def test_cli_exports_files_only_from_report_or_an_explicit_out(
     if command == "run" and not explicit:
         render.assert_not_called()
     else:
-        assert render.call_args.args[2] == Path(
-            "explicit-out" if explicit else "mounted/reports/" + "a" * 16
-        )
+        assert render.call_args.args[2] == Path("explicit-out" if explicit else "out/" + "a" * 16)
     if command == "run":
         assert execute.call_args.kwargs["registry_path"] == (
             "explicit.json" if explicit else "mounted/teams.json"

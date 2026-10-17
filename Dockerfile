@@ -16,8 +16,7 @@ RUN /opt/poetry/bin/poetry check --lock \
     && /opt/poetry/bin/poetry --directory packages/operations build --output /app/dist \
     && /opt/poetry/bin/poetry build --format wheel \
     && .venv/bin/python -m pip install --no-deps --force-reinstall dist/*.whl
-RUN mkdir -p /app/out && chgrp -R 0 /app && chmod -R g=u /app
-ENV ADMIN_OUT_DIR=/app/out
+RUN chgrp -R 0 /app && chmod -R g=u /app
 ENV PATH="/app/.venv/bin:$PATH"
 USER 1001
 EXPOSE 8200

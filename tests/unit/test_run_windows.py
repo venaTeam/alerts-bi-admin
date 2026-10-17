@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,7 +14,6 @@ from src.engine.api.schemas import RunRequest
 from src.engine.cli import _command_run
 from src.engine.config import load_config as runtime_config
 from src.engine.weekly.plan import latest_week_end
-from src.runs import remove_run_files
 
 
 @pytest.mark.parametrize(
@@ -71,21 +69,3 @@ def test_default_boundary_is_latest_completed_monday() -> None:
     assert latest_week_end(datetime(2026, 10, 13, 12, tzinfo=UTC)) == datetime(
         2026, 10, 12, tzinfo=UTC
     )
-
-
-def test_report_cleanup_is_scoped_and_idempotent(tmp_path: Path) -> None:
-    run_id = "a" * 64
-    for parent in (tmp_path, tmp_path / "weekly"):
-        directory = parent / run_id[:16]
-        directory.mkdir(parents=True)
-        (directory / "scorecard.html").write_text("run report")
-    unrelated = tmp_path / ("b" * 16)
-    unrelated.mkdir()
-    (unrelated / "scorecard.html").write_text("another run")
-    remove_run_files(tmp_path, run_id)
-    remove_run_files(tmp_path, run_id)
-    assert not (tmp_path / run_id[:16]).exists()
-    assert not (tmp_path / "weekly" / run_id[:16]).exists()
-    assert (unrelated / "scorecard.html").read_text() == "another run"
-    with pytest.raises(ValueError, match="Invalid run id"):
-        remove_run_files(tmp_path, "../outside")

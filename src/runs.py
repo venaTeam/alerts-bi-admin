@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from alerts_bi_shared.db.connection import Database
 
@@ -98,29 +97,3 @@ def delete_run(db: Database, run_id: str) -> str:
         ):
             db.execute(f"DELETE FROM {table} WHERE run_id=:run_id", params)
         return str(run["team_id"])
-
-
-def remove_run_files(out_root: Path, run_id: str) -> None:
-    """Remove the four generated reports in the configured manual and weekly locations.
-
-    Never recurse through arbitrary files or follow a report-directory symlink outside
-    its configured root. Explicit custom CLI output locations are not tracked in SQL.
-    """
-    if re.fullmatch(r"[a-f0-9]{64}", run_id) is None:
-        raise ValueError("Invalid run id.")
-    root = out_root.resolve()
-    for parent in (root, root / "weekly"):
-        directory = parent / run_id[:16]
-        if directory.resolve() != directory or not directory.resolve().is_relative_to(root):
-            raise OSError("The report directory points outside its configured location.")
-        if not directory.exists():
-            continue
-        for name in (
-            "scorecard.html",
-            "daily_metrics.csv",
-            "rule_counts.csv",
-            "alert_worklist.csv",
-        ):
-            (directory / name).unlink(missing_ok=True)
-        if not any(directory.iterdir()):
-            directory.rmdir()

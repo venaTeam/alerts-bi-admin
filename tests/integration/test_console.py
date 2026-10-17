@@ -88,7 +88,6 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
             AdminConfig(CONFIG.sql),
             DB,
             "s" * 40,
-            out_root=Path(tmp_path_factory.mktemp("console-out")),
         )
     )
     with TestClient(app, headers=USER, follow_redirects=False) as test_client:
@@ -381,17 +380,12 @@ def test_permanent_deletion_removes_all_run_records(
         )
     finally:
         gate.release()
-    out_root = client.app.state.settings.out_root  # type: ignore[attr-defined]
-    directory = out_root / run_id[:16]
-    directory.mkdir()
-    (directory / "scorecard.html").write_text("test report")
     deleted = client.post(
         f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
     )
     assert deleted.status_code == 303 and "done=" in deleted.headers["location"]
     assert "run_id=" not in deleted.headers["location"]
     assert client.get(deleted.headers["location"]).status_code == 200
-    assert not directory.exists()
     assert client.get(f"/runs/{run_id}/daily_metrics.csv").status_code == 404
     assert client.get(f"/runs/{run_id}/alert_worklist.csv").status_code == 404
     with connect(CONFIG.sql, DB) as db:
@@ -578,18 +572,18 @@ def test_cli_rerun_blocks_deletion_through_the_entire_lifecycle(
 
 @pytest.mark.parametrize("selector", ["--run-id", "--team"])
 def test_cli_report_blocks_deletion_until_files_are_written(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch, selector: str
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, selector: str
 ) -> None:
-    """Pause after SQL rendering, before mkdir/write, using the configured output root."""
+    """Pause after SQL rendering, before mkdir/write, using an explicit output directory."""
     run_id = "c" * 64
-    out_root = client.app.state.settings.out_root  # type: ignore[attr-defined]
-    monkeypatch.setenv("ADMIN_OUT_DIR", str(out_root))
+    export = tmp_path / "export"
     with connect(CONFIG.sql, DB) as db:
         persist_run(
             db,
             PersistencePayload(run=sample_run(run_id=run_id, run_at=datetime(2026, 9, 7))),
         )
     arguments = ["report", selector, run_id if selector == "--run-id" else TEAM, "--database", DB]
+    arguments += ["--out", str(export)]
     assert main(arguments) == 0
     reached, resume = Event(), Event()
     original = build_run_outputs
@@ -614,7 +608,7 @@ def test_cli_report_blocks_deletion_until_files_are_written(
         finally:
             resume.set()
             assert report.result(timeout=30) == 0
-    assert all((out_root / run_id[:16] / name).exists() for name in report_render.CSV_FILES)
+    assert all((export / name).exists() for name in report_render.CSV_FILES)
     deleted = client.post(
         f"/runs/{run_id}/delete", data={"csrf": token(client), "confirm_delete": "1"}
     )
@@ -623,7 +617,6 @@ def test_cli_report_blocks_deletion_until_files_are_written(
         assert (
             db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id}) is None
         )
-    assert not (out_root / run_id[:16]).exists()
 
 
 @pytest.mark.usefixtures("client")

@@ -1,8 +1,7 @@
 """Configuration for the HTTP trigger surface (design section 7.8).
 
 Separate from :mod:`alerts_bi_admin.engine.config.app` because these are properties of *this deployment
-of the service* - where it listens, which database it writes, where it puts reports - rather
-than of the backing services the pipeline talks to. The pipeline itself runs identically
+of the service* - where it listens and which database it writes - rather than of the backing services the pipeline talks to. The pipeline itself runs identically
 whether it was started from the command line or from a request.
 
 The surface holds no runtime state: the lock that serializes runs lives with the code that
@@ -12,7 +11,6 @@ runs them, in :mod:`alerts_bi_admin.engine.api.service`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from alerts_bi_shared.config.env import read_int, read_str
 
@@ -39,7 +37,6 @@ class ApiSettings:
     registry_path: str | None = None
     #: Target database; ``None`` means ``SQL_DATABASE``.
     database: str | None = None
-    out_root: Path = Path("out")
 
     @property
     def target_database(self) -> str:
@@ -56,7 +53,6 @@ def load_api_settings(
     port: int | None = None,
     registry_path: str | None = None,
     database: str | None = None,
-    out_root: Path | None = None,
 ) -> ApiSettings:
     """Read the surface's settings from the environment, with explicit overrides winning.
 
@@ -70,5 +66,4 @@ def load_api_settings(
         port=port or read_int("API_PORT", DEFAULT_PORT),
         registry_path=registry_path or (read_str("API_REGISTRY_PATH") or None),
         database=database or (read_str("API_DATABASE") or None),
-        out_root=out_root or Path(read_str("API_OUT_DIR", "out")),
     )

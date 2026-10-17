@@ -41,9 +41,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> AdminSettings:
     except Exception as exc:
         pytest.skip(f"Local SQL Server unavailable: {exc}")
     reset_test_database(CONFIG.sql, DB)
-    return AdminSettings(
-        AdminConfig(CONFIG.sql), DB, "j" * 40, out_root=tmp_path_factory.mktemp("job-outputs")
-    )
+    return AdminSettings(AdminConfig(CONFIG.sql), DB, "j" * 40)
 
 
 @pytest.fixture
@@ -170,7 +168,7 @@ def test_restart_does_not_mistake_older_result_for_interrupted_job(
             {"id": row["job_id"], "at": started},
         )
         db.commit()
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
     status = client.get(row["status_url"]).json()
     assert status["status"] == "failed" and "interrupted" in status["error_summary"]
     assert "Worker interrupted" in client.get("/teams/checkout-api").text
@@ -218,19 +216,18 @@ def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
     )
     assert response.status_code == 303 and "error=" in response.headers["location"]
     assert client.get(row["status_url"]).json()["status"] == "pending"
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root))
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB))
     response = client.post(
         f"/runs/{row['run_id']}/delete", data={"csrf": token, "confirm_delete": "1"}
     )
     assert response.status_code == 303 and "done=" in response.headers["location"]
     assert client.get(row["status_url"]).status_code == 404
-    assert not (settings.out_root / row["run_id"][:16]).exists()
 
 
 @pytest.mark.parametrize("state", ["pending", "running"])
 @pytest.mark.parametrize("command", ["run", "weekly", "verify-acceptance", "report"])
 def test_orphan_blocks_installed_writers_until_recovery(
-    client: TestClient, settings: AdminSettings, command: str, state: str
+    client: TestClient, tmp_path: Path, command: str, state: str
 ) -> None:
     row = submit(client, "orphan-before-persist-" + command).json()
     # The worker claimed the job, then died without committing analysis. Its SQL
@@ -249,14 +246,14 @@ def test_orphan_blocks_installed_writers_until_recovery(
         arguments += ["--as-of", "2026-08-25T18:00:00Z", "--fake-llm"]
     elif command == "report":
         arguments += ["--run-id", row["run_id"]]
-    arguments += ["--out", str(settings.out_root / command)]
+    arguments += ["--out", str(tmp_path / command)]
     refused = subprocess.run(arguments, capture_output=True, text=True, timeout=180)
     assert refused.returncode != 0, refused.stdout
     assert "manual job" in refused.stderr, refused.stderr
     with connect(CONFIG.sql, DB) as db:
         assert db.query_one("SELECT run_id FROM runs") is None
         assert db.query_one("SELECT log_id FROM weekly_review_log") is None
-    api = ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
+    api = ApiSettings(CONFIG, database=DB)
     assert jobs.work_once(api) is (state == "pending")
     status = client.get(row["status_url"]).json()
     if state == "pending":
@@ -294,7 +291,7 @@ def test_changed_registry_is_refused_before_execution(
 ) -> None:
     registry = tmp_path / "teams.json"
     registry.write_bytes(Path("config/teams.json").read_bytes())
-    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry), out_root=settings.out_root)
+    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry))
     row = jobs.submit_job(api, RunRequest.model_validate(BODY), "job-tester", uuid4().hex)
     registry.write_bytes(registry.read_bytes() + b"\n")
 
@@ -354,9 +351,7 @@ def test_slow_worker_keeps_status_and_navigation_responsive(
 
     monkeypatch.setattr(jobs, "execute_request", delayed)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(
-            jobs.work_once, ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
-        )
+        future = executor.submit(jobs.work_once, ApiSettings(CONFIG, database=DB))
         try:
             assert entered.wait(10)
             assert client.get(row["status_url"]).json()["status"] == "running"
@@ -389,7 +384,7 @@ def test_distinct_exact_keys_create_new_attempts(
         raise RuntimeError("Finish the attempt without running analysis")
 
     monkeypatch.setattr(jobs, "execute_request", fail)
-    api = ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
+    api = ApiSettings(CONFIG, database=DB)
     first = submit(client, first_key)
     assert first.status_code == 202, first.text
     assert jobs.work_once(api)
@@ -419,7 +414,7 @@ def test_idle_worker_never_takes_execution_locks(
         pytest.fail("An empty queue must not contend for any execution lock")
 
     monkeypatch.setattr(jobs, "execution_lock", unexpected)
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
 
 
 def test_job_status_follows_operator_wide_access_model(client: TestClient) -> None:

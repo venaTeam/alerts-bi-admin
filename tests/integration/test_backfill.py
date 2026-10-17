@@ -54,14 +54,12 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> AdminSettings:
     except Exception as exc:
         pytest.skip(f"Local SQL Server unavailable: {exc}")
     reset_test_database(CONFIG.sql, DB)
-    return AdminSettings(
-        AdminConfig(CONFIG.sql), DB, "b" * 40, out_root=tmp_path_factory.mktemp("backfill")
-    )
+    return AdminSettings(AdminConfig(CONFIG.sql), DB, "b" * 40)
 
 
 @pytest.fixture
 def api(settings: AdminSettings) -> ApiSettings:
-    return ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
+    return ApiSettings(CONFIG, database=DB)
 
 
 @pytest.fixture
@@ -538,7 +536,7 @@ def test_retry_still_queues_after_an_earlier_attempts_run_is_deleted(
 ) -> None:
     registry = tmp_path / "teams.json"
     registry.write_bytes(Path("config/teams.json").read_bytes())
-    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry), out_root=settings.out_root)
+    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry))
 
     def fail(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("Test failure")

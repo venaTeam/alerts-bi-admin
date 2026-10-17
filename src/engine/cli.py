@@ -66,7 +66,7 @@ def add_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]
     report = subparsers.add_parser("report", help="re-render a stored run from SQL only")
     report.add_argument("--run-id", help="run to render")
     report.add_argument("--team", help="render that team's most recent completed run")
-    report.add_argument("--out", help="output directory")
+    report.add_argument("--out", help="output directory; default out/<run id prefix>")
     report.add_argument("--database", help="target database; default SQL_DATABASE")
 
     database = subparsers.add_parser("db", help="database maintenance")
@@ -221,9 +221,7 @@ def _command_report(args: argparse.Namespace, config: AppConfig) -> int:
                 return 1
             run_id = str(latest["run_id"])
 
-        out_dir = (
-            Path(args.out) if args.out else Path(read_str("ADMIN_OUT_DIR", "out")) / run_id[:16]
-        )
+        out_dir = Path(args.out) if args.out else Path("out") / run_id[:16]
         files = render_run_report(db, run_id, out_dir)
 
     sys.stdout.write("\n".join(f"wrote {path}" for path in files) + "\n")
