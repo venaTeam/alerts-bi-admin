@@ -1,5 +1,22 @@
 # Alerts BI — Design Document
 
+## SQL connection encryption — accepted 2026-10-17
+
+`SQL_ENCRYPT` and `SQL_TRUST_SERVER_CERTIFICATE` were read but never applied, so
+`SQL_ENCRYPT=true` claimed a protection the connections did not have. Shared 0.1.6 applies
+it. With `SQL_ENCRYPT=true`, every SQL connection from admin, its migrations, workers and
+jobs, and the portal requests required TLS, so FreeTDS does not fall back to plaintext. This
+needs pymssql 2.4.3 or later, the first release that applies the encryption request per
+connection. On 2026-10-17, pymssql 2.3.13 and 2.4.2 connected to SQL Server 2022
+unencrypted when asked to require encryption, while 2.4.3 and 2.4.4 connected encrypted.
+Admin and portal lock pymssql 2.4.4, and shared stops startup when `SQL_ENCRYPT=true` meets
+an older driver. The driver cannot validate the server certificate from application
+settings. Encryption therefore trusts the certificate, and `SQL_TRUST_SERVER_CERTIFICATE=false`
+with `SQL_ENCRYPT=true` stops startup instead of silently skipping validation. The default
+stays `SQL_ENCRYPT=false`: existing deployments connect as before, and each process logs
+`sql.unencrypted` once. Enable encryption per deployment after confirming that the SQL Server
+accepts TLS. Operations 0.2.3 pins shared 0.1.6.
+
 ## Multi-week backfill — accepted 2026-10-14
 
 The product owner approved an operator-selected backfill in the admin console. An operator

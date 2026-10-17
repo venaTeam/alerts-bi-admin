@@ -267,9 +267,13 @@ Keep the independently built portal Deployment/Service/Route and its allowlist. 
 It queries only portal_* views using the existing SQL settings. The SQL credential may have
 broader rights, so retain reader network isolation and query/import boundaries.
 
-SQL_ENCRYPT and SQL_TRUST_SERVER_CERTIFICATE remain configuration-only flags that the current
-pymssql adapter does not enforce. This migration does not change that limitation. Preserve the
-approved database network protections; do not infer encryption from those settings.
+SQL_ENCRYPT=true requires TLS on every admin, migration, job and portal SQL connection (shared
+0.1.6 with the locked pymssql 2.4.4; see the 2026-10-17 design amendment). It is false by
+default. Before enabling it, confirm the SQL Server accepts encrypted connections, because a
+server that does not will stop the migration init container, admin and portal from
+connecting. The server certificate is not validated: keep SQL_TRUST_SERVER_CERTIFICATE=true,
+because false stops startup. With encryption off, each process logs `sql.unencrypted` once.
+Preserve the approved database network protections either way.
 
 Validate login denial, authenticated health, run navigation, a permitted test execution,
 publication, decision attribution, withdrawal, exports and portal visibility, then observe a
