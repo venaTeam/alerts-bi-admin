@@ -1,5 +1,14 @@
 # Alerts BI — Implementation Blueprint
 
+## Run output files removed — accepted 2026-10-17
+
+Remove `render_run_report` from manual HTTP/worker execution, orphan recovery and the weekly
+runner (weekly renders only with `--out`; CLI `run` only with `--out`). Delete the export
+warning, app-side `remove_run_files`, `remove-run-html`, `ADMIN_OUT_DIR`/`API_OUT_DIR`, the
+`out_dir` response field and `X-Alerts-BI-Out-Dir` header, and the output `emptyDir` mounts.
+Keep SQL-rendered CSV downloads, `report`, and acceptance `--out`. Verify job completion and
+recovery without warnings, deletion without file cleanup, and CSV downloads in the browser.
+
 ## Multi-week backfill — accepted 2026-10-14
 
 [The backfill contract](backfill.md) replaces the deterministic, model-free backfill step
@@ -24,7 +33,7 @@ the CSV filename validator refuses `scorecard.html`. This supersedes all older s
 HTML/four-output requirements below. Operations 0.2.0 removes `report.html` and changes the
 public renderer to three CSV outputs; shared 0.1.3, CSV columns and portal views are unchanged.
 Existing immutable operations versions remain historical artifacts. Legacy HTML cleanup
-remains available for old output directories. See [output meanings](outputs.md).
+was removed on 2026-10-17 with run output files. See [output meanings](outputs.md).
 
 ## Async manual execution amendment — 2026-10-13
 
@@ -38,7 +47,7 @@ Implement design section 7.12's Monday-only picker and server validation on form
 entry points; default to the latest completed Monday. Remove the admin gap override while
 preserving missing-week checks and scheduler/CLI exceptions. Add authenticated CSRF-protected
 `POST /runs/{run_id}/delete` with explicit confirmation, manual/scheduler/model-review locks,
-atomic SQL run-owned cleanup and configured report cleanup. Add migration 009 permitting
+atomic SQL run-owned cleanup (report cleanup removed 2026-10-17). Add migration 009 permitting
 decision deletion only within a connection/run-scoped whole-run deletion allowance, with
 a checked parent foreign key preventing orphan inserts; ordinary decisions remain immutable.
 Verify published/unpublished/withdrawn/failed deletion, rollback, neighboring run preservation,

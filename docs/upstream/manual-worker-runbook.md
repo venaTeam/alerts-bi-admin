@@ -19,7 +19,7 @@ FROM run_jobs WHERE active_slot = 1;
 ```
 
 Inspect the run-worker container's restart count and recent run.job_submitted,
-run.job_started, run.job_finished, run.job_failed and run.export_recovery_failed events.
+run.job_started, run.job_finished and run.job_failed events.
 Check ES/SQL/model availability and positive finite ES_REQUEST_TIMEOUT_MS, LLM_TIMEOUT_MS
 and SQL_REQUEST_TIMEOUT_MS settings. SQL's millisecond value is converted to whole seconds:
 use at least 1000 so it does not become the driver's unlimited zero timeout. Defaults are
@@ -41,12 +41,11 @@ three model attempts per batch, so these are not a whole-job deadline or heartbe
    writer; let the compatible worker reconcile first. All run-writing entry points must
    use the updated version. The replacement worker reconciles running jobs only after
    acquiring those locks. A result
-   committed by this attempt has all CSVs regenerated and becomes completed. CSV regeneration
-   failure remains completed with a visible export warning. An uncommitted attempt becomes
+   committed by this attempt becomes completed (amended 2026-10-17: nothing is regenerated;
+   its CSVs render from SQL). An uncommitted attempt becomes
    failed with an interruption message. Pending work proceeds normally.
-5. Confirm status, CSV bytes and unpublished result. Retry failed analysis with a new key;
-   retrying the previous key returns that same failed attempt. Regenerate warned exports with
-   `alerts-bi-admin report --run-id <id> --database <database> --out <explicit-run-directory>`.
+5. Confirm status, CSV downloads and unpublished result. Retry failed analysis with a new key;
+   retrying the previous key returns that same failed attempt.
 
 ## Rollback with durable submissions
 

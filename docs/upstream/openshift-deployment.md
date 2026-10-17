@@ -1,6 +1,7 @@
 # OpenShift deployment: unified admin and read-only portal
 
-Current topology, approved 2026-10-12. Examples are unexecuted rollout preparation, not cluster
+Current topology, approved 2026-10-12; amended 2026-10-17 to remove run output files and their
+mounts. Examples are unexecuted rollout preparation, not cluster
 validation. Admin is the only operator/analysis image. The separate portal remains read-only.
 See [retirement cutover and rollback](runs-retirement.md) before changing existing deployments.
 
@@ -24,7 +25,6 @@ Do not commit generated secrets or apply the placeholder manifests unchanged.
 | ADMIN_HOST=127.0.0.1, ADMIN_PORT=8200, ADMIN_USER_HEADER=X-Forwarded-User | Authenticated admin listener only |
 | ADMIN_SECRET | Private random value of at least 32 characters, signs actor-bound CSRF tokens |
 | ADMIN_DATABASE | Optional UI/worker/migration database override; unset uses SQL_DATABASE |
-| ADMIN_OUT_DIR=/app/out | Writable HTTP execution output; jobs use --out |
 | ADMIN_REGISTRY_PATH or --registry | Mounted admin-owned registry at /etc/alerts-bi/teams.json |
 | COOKIE_SECRET | Existing proxy session secret; keep its supported encoding and rotation procedure |
 | PORTAL_HOST, PORTAL_PORT, PORTAL_ALLOWED_NETWORKS | Existing standalone reader configuration, port 8100 |
@@ -131,25 +131,20 @@ spec:
           env:
             - {name: ADMIN_HOST, value: "127.0.0.1"}
             - {name: ADMIN_PORT, value: "8200"}
-            - {name: ADMIN_OUT_DIR, value: "/app/out"}
           envFrom:
             - configMapRef: {name: alerts-bi-config}
             - secretRef: {name: alerts-bi-secrets}
             - secretRef: {name: alerts-bi-admin-secrets}
           volumeMounts:
             - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
-            - {name: output, mountPath: /app/out}
         - name: run-worker
           image: ADMIN_IMAGE_DIGEST
           command: ["alerts-bi-admin", "run-worker", "--registry", "/etc/alerts-bi/teams.json"]
-          env:
-            - {name: ADMIN_OUT_DIR, value: "/app/out"}
           envFrom:
             - configMapRef: {name: alerts-bi-config}
             - secretRef: {name: alerts-bi-secrets}
           volumeMounts:
             - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
-            - {name: output, mountPath: /app/out}
         - name: oauth-proxy
           image: OAUTH_PROXY_IMAGE_DIGEST
           args:
@@ -167,7 +162,6 @@ spec:
             - {name: proxy-tls, mountPath: /etc/tls/private}
             - {name: proxy-secrets, mountPath: /etc/proxy/secrets}
       volumes:
-        - {name: output, emptyDir: {}}
         - {name: registry, configMap: {name: alerts-bi-registry}}
         - {name: proxy-tls, secret: {secretName: alerts-bi-admin-tls}}
         - {name: proxy-secrets, secret: {secretName: alerts-bi-admin-secrets}}
@@ -211,8 +205,8 @@ subjects:
   - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: standardization-team}
 ```
 
-The existing pod security policy must grant the non-root application write access to /app/out
-and mounted output volumes. SQL remains authoritative; output files can be regenerated. Keep
+Runs write no files, so the application needs no writable output volume; CSV downloads render
+from SQL. Remove any existing ADMIN_OUT_DIR setting and output mount when applying this. Keep
 the image/registry access policies and resource limits appropriate to the existing deployment.
 
 ## One weekly scheduler
@@ -244,16 +238,14 @@ spec:
           containers:
             - name: weekly
               image: ADMIN_IMAGE_DIGEST
-              command: ["alerts-bi-admin", "weekly", "--registry", "/etc/alerts-bi/teams.json", "--out", "/app/out/weekly"]
+              command: ["alerts-bi-admin", "weekly", "--registry", "/etc/alerts-bi/teams.json"]
               envFrom:
                 - configMapRef: {name: alerts-bi-config}
                 - secretRef: {name: alerts-bi-secrets}
               volumeMounts:
                 - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
-                - {name: output, mountPath: /app/out}
           volumes:
             - {name: registry, configMap: {name: alerts-bi-registry}}
-            - {name: output, emptyDir: {}}
 ```
 
 The example starts suspended. Enable only one scheduler after verifying `weekly --dry-run` and

@@ -1,5 +1,28 @@
 # Alerts BI — Design Document
 
+## Run output files removed — accepted 2026-10-17
+
+The product owner approved removing CSV file writing from runs. Manual HTTP and worker runs,
+worker interruption recovery and the weekly scheduler persist to SQL and write no files. The
+three CSV downloads were already rendered from committed SQL on every request; their routes,
+filenames and columns are unchanged. The deployed output directory was an `emptyDir` volume
+wiped on every restart, so nothing read those files.
+
+Removed with the files: the post-commit export warning (a committed result is a clean
+completion), deletion-time generated report cleanup and its distinct failure message, the
+`remove-run-html` command, the `ADMIN_OUT_DIR` and `API_OUT_DIR` settings, and the output
+volume mounts in the deployment manifests. `POST /runs` no longer returns the `out_dir` field
+or the `X-Alerts-BI-Out-Dir` header; its other fields and its `files` download links are
+unchanged. Removing the field breaks any API consumer that reads `out_dir`.
+
+File export remains an explicit operator action: `alerts-bi-admin report` (`--out`, default
+`out/<run id prefix>` in the working directory), `run --out`, `weekly --out` and acceptance
+verification `--out`. Without `--out`, CLI `run` and `weekly` write no files. Commands that
+export still hold the shared execution lock through their file writes. This supersedes the
+file-writing, export-warning, recovery-regeneration and generated-file cleanup statements in
+section 7.12, [async-runs.md](async-runs.md) and the 2026-10-13 amendments below. No migration
+is added; SQL views, CSV columns and the shared/operations libraries are unchanged.
+
 ## Multi-week backfill — accepted 2026-10-14
 
 The product owner approved an operator-selected backfill in the admin console. An operator
@@ -40,7 +63,7 @@ the CSV filename validator refuses `scorecard.html`. This supersedes all older s
 HTML/four-output requirements below. Operations 0.2.0 removes `report.html` and changes the
 public renderer to three CSV outputs; shared 0.1.3, CSV columns and portal views are unchanged.
 Existing immutable operations versions remain historical artifacts. Legacy HTML cleanup
-remains available for old output directories. See [output meanings](outputs.md).
+was removed on 2026-10-17 with run output files. See [output meanings](outputs.md).
 
 ## Asynchronous manual runs — 2026-10-13
 
@@ -930,9 +953,8 @@ Contending HTTP runs/deletion return 409; the CLI fails with a busy message. Bot
 and failure release the lock. Roll out updated manual CLI clients alongside the app;
 an older CLI that does not take the shared lock cannot coordinate with deletion.
 
-Generated reports in the configured manual and weekly output locations are removed after
-SQL commit; a cleanup failure is reported distinctly. Custom CLI export locations are not
-tracked and need separate cleanup. Shared prompt artifacts, verdict caches and panel parses
+**Amended 2026-10-17:** runs write no files, so deletion removes no generated reports.
+Explicit CLI export locations are not tracked and need separate cleanup. Shared prompt artifacts, verdict caches and panel parses
 remain because other runs can use them. Deleting a published run removes it from the portal
 and all its download routes. The weekly schedule may recreate a deleted due week; deletion
 does not disable enrollment. No stored run is deleted as part of installing this change.

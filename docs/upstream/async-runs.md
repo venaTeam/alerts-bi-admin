@@ -1,5 +1,10 @@
 # Durable manual runs — accepted 2026-10-13
 
+**Amended 2026-10-17:** runs no longer write CSV files (design section "Run output files
+removed"). Worker execution and recovery persist to SQL only; downloads render from SQL on
+each request. The export warning, recovery regeneration, `remove-run-html`, the output
+settings and the output mount below are removed, and `POST /runs` drops `out_dir`.
+
 Manual analysis can outlast an OpenShift Route timeout. The product owner requested asynchronous
 execution with results displayed when complete, and removal of generated per-run HTML files.
 This amendment supersedes synchronous browser triggering. The subsequent accepted request removes standalone HTML output entirely, including on-demand rendering.
@@ -29,6 +34,7 @@ backfill is in progress.
   separately from analysis failure and polling retries automatically. No progress percentage is invented.
 - `POST /runs` retains synchronous execution, returning a JSON summary and three CSV links.
   Standalone HTML responses and the `scorecard` field are removed, including for `Accept: text/html`.
+  Amended 2026-10-17: the `out_dir` field and `X-Alerts-BI-Out-Dir` header are removed.
   Both operator API paths share the durable manual-execution gate. Busy submissions return 409;
   validation retains existing 400/422 behavior. Authentication and CSRF failures remain 401/403.
 
@@ -71,13 +77,12 @@ After the previous SQL session releases its lock, a replacement worker reconcile
 jobs. Other run writers remain refused while that durable reservation exists, so they
 cannot replace the deterministic run ID between a worker's exit and reconciliation.
 A completed run counts only when its started_at belongs to this attempt, not an older
-run with the same deterministic ID. A committed result has all three CSV exports regenerated from SQL under the existing
-execution locks before it becomes completed. If export recovery fails, completion carries
-the same visible export warning as a live CSV-write failure. Otherwise an uncommitted job
-becomes failed with an interruption message. No automatic re-execution of interrupted analysis
-occurs. Pending jobs survive restart and execute normally. Infrastructure failures exit the
-worker for its supervisor to restart. A CSV-write failure after SQL persistence reports the
-analysis as completed with an export warning; exports can be regenerated from SQL.
+run with the same deterministic ID. **Amended 2026-10-17:** a committed result becomes
+completed with no warning; nothing is regenerated, because its CSVs render from SQL on
+request. An uncommitted job becomes failed with an interruption message. No automatic
+re-execution of interrupted analysis occurs. Pending jobs survive restart and execute
+normally. Infrastructure failures exit the worker for its supervisor to restart. A failure
+after SQL persistence still reports the committed analysis as completed.
 
 Permanent deletion refuses pending/running manual jobs and removes related terminal submission
 records in the same SQL transaction as the run. Their status URLs then return 404. Idempotency
@@ -85,23 +90,24 @@ records live until explicit deletion of their parent run.
 
 ## Outputs and rollout
 
-Admin run, weekly, report and acceptance commands write daily_metrics.csv, rule_counts.csv and
-alert_worklist.csv. They remove the exact legacy scorecard.html in their selected output
+**Amended 2026-10-17:** manual HTTP, worker and weekly runs write no files. Only explicit
+exports write daily_metrics.csv, rule_counts.csv and alert_worklist.csv: `report` (`--out`,
+default `out/<run id prefix>`), `run --out`, `weekly --out` and acceptance verification
+`--out`. They remove the exact legacy scorecard.html in their selected output
 directory. Standalone HTML routes, rendering and download links are removed entirely. The
 normal authenticated team workspace remains the way to view results. Operations 0.2.0
 builds/writes only the three CSVs and removes `report.html`; earlier immutable versions are
 not rewritten. Consumers of that removed module must migrate to the workspace or CSV exports.
 
-To remove existing generated HTML after rollout, use `alerts-bi-admin remove-run-html --out
-<explicit-output-root>`. It removes only scorecard.html accompanied by all three CSV exports,
-stays inside that output root, and preserves other HTML and all CSV data.
+The `remove-run-html` command was removed on 2026-10-17: generated HTML existed only on the
+emptyDir output volume, which every restart wipes.
 
 Deploy the updated admin manifest with the same image digest in migration initialization,
 UI and worker. Recreate terminates the old pod, then the new pod's migration init container
 automatically applies missing revisions through 011 before any app container starts.
 Failure blocks startup until initialization succeeds; no separate migration launch is needed. The
-shipped admin manifest includes the dedicated executor with matching image, registry,
-SQL/ES/model settings and output mount. Keep both writers on the updated version: older
+shipped admin manifest includes the dedicated executor with matching image, registry and
+SQL/ES/model settings (no output mount since 2026-10-17). Keep both writers on the updated version: older
 writers do not supply the required key digest introduced by 011. Verify rapid acceptance, completion/failure, duplicate submission, restart
 recovery, authentication, publication separation and exports. No cluster deployment is authorized
 by this source change. Preserve the additive job audit table and exact key identities during rollback; use a

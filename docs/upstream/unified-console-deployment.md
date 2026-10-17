@@ -11,6 +11,7 @@ UI and manual worker. Recreate stops the previous pod; initialization automatica
 missing migrations through 011 before the UI/worker start. Failure blocks startup. The SQL
 login must allow schema migrations. No separate migration job is needed for normal rollout.
 Run one dedicated manual worker using
-`alerts-bi-admin run-worker` with matching registry, SQL/ES/model and ADMIN_OUT_DIR settings.
+`alerts-bi-admin run-worker` with matching registry and SQL/ES/model settings (ADMIN_OUT_DIR was
+removed on 2026-10-17; runs write no files).
 See [async runs](async-runs.md). Run one UI worker/replica and exactly one weekly scheduler. This is deployment preparation,
 not a claim that infrastructure has been changed or verified on a cluster.
