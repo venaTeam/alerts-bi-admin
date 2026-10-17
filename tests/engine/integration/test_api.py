@@ -139,6 +139,8 @@ def test_a_run_returns_only_json_even_when_html_is_requested(client: TestClient)
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
     assert "scorecard" not in response.json()
+    assert "out_dir" not in response.json()
+    assert "x-alerts-bi-out-dir" not in response.headers
     assert set(response.json()["files"]) == set(OUTPUT_FILES)
     assert len(response.headers["x-alerts-bi-run-id"]) == 64
 

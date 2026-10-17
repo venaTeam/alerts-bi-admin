@@ -38,13 +38,8 @@ _LatestTeam = Annotated[str | None, Query(description='required when run_id is "
 # A plain def, not async: a run is minutes of blocking work, so FastAPI runs it in the
 # thread pool instead of stalling the event loop for every other request.
 def create_run(settings: SettingsDep, gate: GateDep, body: RunRequest) -> Response:
-    result = start_run(settings, gate, body)
-    summary = result.summary
-    headers = {
-        "X-Alerts-BI-Run-Id": summary.run_id,
-        "X-Alerts-BI-Team": summary.team_id,
-        "X-Alerts-BI-Out-Dir": str(result.out_dir),
-    }
+    summary = start_run(settings, gate, body)
+    headers = {"X-Alerts-BI-Run-Id": summary.run_id, "X-Alerts-BI-Team": summary.team_id}
     return JSONResponse(
         RunOut(
             run_id=summary.run_id,
@@ -55,7 +50,6 @@ def create_run(settings: SettingsDep, gate: GateDep, body: RunRequest) -> Respon
             v2=VolumeOut(rows=summary.v2_rows, distinct=summary.v2_identities),
             llm_assessed=summary.llm_assessed,
             llm_eligible=summary.llm_eligible,
-            out_dir=str(result.out_dir),
             files={name: f"/runs/{summary.run_id}/{name}" for name in OUTPUT_FILES},
         ).model_dump(),
         headers=headers,
