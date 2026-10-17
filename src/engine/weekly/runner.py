@@ -319,7 +319,7 @@ def _run_team(
     llm_client: LlmClient | None,
     llm_disabled_reason: str | None,
     registry_path: str | None,
-    out_root: Path,
+    out_root: Path | None,
     dry_run: bool,
 ) -> list[Outcome]:
     plan = plan_weeks(_latest_published_end(db, team.team_id), now)
@@ -372,7 +372,9 @@ def _run_team(
                 run_id = summary.run_id
             else:
                 log.info("weekly.reused_run", team_id=team.team_id, run_id=run_id)
-            render_run_report(db, run_id, out_root / run_id[:16])
+            # Files only on an explicit --out; downloads render from SQL on request.
+            if out_root is not None:
+                render_run_report(db, run_id, out_root / run_id[:16])
         except Exception as exc:
             log.error("weekly.run_failed", team_id=team.team_id, error=redact_error(exc))
             outcomes.append(Outcome(team.team_id, end, "failed", detail=redact_error(exc)))
@@ -420,7 +422,7 @@ def run_weekly(
     llm_disabled_reason: str | None = None,
     registry_path: str | None = None,
     teams: Sequence[str] = (),
-    out_root: Path = Path("out") / "weekly",
+    out_root: Path | None = None,
     dry_run: bool = False,
     es_client: EsClient | None = None,
 ) -> list[Outcome]:

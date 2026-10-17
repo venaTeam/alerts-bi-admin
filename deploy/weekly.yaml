@@ -20,13 +20,11 @@ spec:
           containers:
             - name: weekly
               image: ADMIN_IMAGE_DIGEST
-              command: ["alerts-bi-admin", "weekly", "--registry", "/etc/alerts-bi/teams.json", "--out", "/app/out/weekly"]
+              command: ["alerts-bi-admin", "weekly", "--registry", "/etc/alerts-bi/teams.json"]
               envFrom:
                 - configMapRef: {name: alerts-bi-config}
                 - secretRef: {name: alerts-bi-secrets}
               volumeMounts:
                 - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
-                - {name: output, mountPath: /app/out}
           volumes:
             - {name: registry, configMap: {name: alerts-bi-registry}}
-            - {name: output, emptyDir: {}}

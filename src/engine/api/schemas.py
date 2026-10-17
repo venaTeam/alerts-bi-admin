@@ -106,7 +106,6 @@ class RunOut(BaseModel):
     v2: VolumeOut
     llm_assessed: bool
     llm_eligible: int
-    out_dir: str
     files: dict[str, str]
 
 

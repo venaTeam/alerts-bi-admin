@@ -63,7 +63,8 @@ The single worker claims work under the existing execution locks in this order: 
 orphaned running jobs, then a pending job, then queued manual jobs by submission time, then
 backfill weeks by backfill submission time and oldest week first. A claimed week becomes running
 and takes the active slot. Execution, the refusal of changed registry/model inputs, interruption
-recovery, CSV regeneration and completion are unchanged; completion never publishes.
+recovery and completion are unchanged (since 2026-10-17 recovery regenerates no CSV files);
+completion never publishes.
 
 Manual submissions are unchanged when no backfill is in progress, including the 409 while busy.
 While a backfill has queued, pending or running weeks, a manual submission that finds the slot or

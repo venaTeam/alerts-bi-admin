@@ -1,4 +1,4 @@
-"""Only the exact legacy run HTML is removed, preserving CSV bytes and other files."""
+"""An explicit CSV export removes only the exact legacy run HTML, preserving other files."""
 
 from pathlib import Path
 from typing import cast
@@ -25,15 +25,3 @@ def test_csv_export_removes_legacy_html_and_preserves_other_files(
     assert paths[0].read_bytes() == b"a\r\n1\r\n"
     assert not (tmp_path / "scorecard.html").exists()
     assert (tmp_path / "notes.html").read_text() == "keep"
-
-
-def test_cleanup_only_removes_scorecards_with_all_run_exports(tmp_path: Path) -> None:
-    run = tmp_path / "run"
-    run.mkdir()
-    for name in outputs.CSV_FILES:
-        (run / name).write_bytes(b"keep\r\n")
-    (run / "scorecard.html").write_text("generated")
-    (tmp_path / "scorecard.html").write_text("unrelated")
-    assert outputs.remove_run_html(tmp_path) == [run / "scorecard.html"]
-    assert (tmp_path / "scorecard.html").read_text() == "unrelated"
-    assert all((run / name).read_bytes() == b"keep\r\n" for name in outputs.CSV_FILES)

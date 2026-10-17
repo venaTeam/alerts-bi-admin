@@ -1,5 +1,31 @@
 # Alerts BI — Design Document
 
+## Run output files removed — accepted 2026-10-17
+
+The product owner approved removing CSV file writing from runs. Manual HTTP and worker runs,
+worker interruption recovery and the weekly scheduler persist to SQL and write no files. The
+three CSV downloads were already rendered from committed SQL on every request; their routes,
+filenames and columns are unchanged. The deployed output directory was an `emptyDir` volume
+wiped on every restart, so nothing read those files.
+
+Removed with the files: the post-commit export warning (a committed result is a clean
+completion), deletion-time generated report cleanup and its distinct failure message, the
+`remove-run-html` command, the `ADMIN_OUT_DIR` and `API_OUT_DIR` settings, and the output
+volume mounts in the deployment manifests. `POST /runs` no longer returns the `out_dir` field
+or the `X-Alerts-BI-Out-Dir` header; its other fields and its `files` download links are
+unchanged. Removing the field breaks any API consumer that reads `out_dir`.
+
+File export remains an explicit operator action: `alerts-bi-admin report` (`--out`, default
+`out/<run id prefix>` in the working directory), `run --out`, `weekly --out` and acceptance
+verification `--out`. Without `--out`, CLI `run` and `weekly` write no files. Commands that
+export still hold the shared execution lock through their file writes. Deleting a run removes
+nothing from disk: CSVs an operator exported, including `alert_worklist.csv`, stay where they
+were written until removed by hand. Files on an earlier image's emptyDir output volume are
+discarded when its pod is replaced. This supersedes the
+file-writing, export-warning, recovery-regeneration and generated-file cleanup statements in
+section 7.12, [async-runs.md](async-runs.md) and the 2026-10-13 amendments below. No migration
+is added; SQL views, CSV columns and the shared/operations libraries are unchanged.
+
 ## Multi-week backfill — accepted 2026-10-14
 
 The product owner approved an operator-selected backfill in the admin console. An operator
@@ -40,7 +66,7 @@ the CSV filename validator refuses `scorecard.html`. This supersedes all older s
 HTML/four-output requirements below. Operations 0.2.0 removes `report.html` and changes the
 public renderer to three CSV outputs; shared 0.1.3, CSV columns and portal views are unchanged.
 Existing immutable operations versions remain historical artifacts. Legacy HTML cleanup
-remains available for old output directories. See [output meanings](outputs.md).
+was removed on 2026-10-17 with run output files. See [output meanings](outputs.md).
 
 ## Asynchronous manual runs — 2026-10-13
 
@@ -81,7 +107,7 @@ The approved mock has three workspace navigation items: Teams, Schedule and Deci
 
 New run is scoped to the selected registered team, takes a UTC window end and live/fake/off model mode, and invokes the existing synchronous execution/persistence/reporting path under the existing process gate. Its window is exactly the preceding 168 hours. UI and JSON triggers share the gate. Manual completion does not publish. Existing publish/replace/gap, withdraw-with-reason and published-run decision rules remain authoritative. Actions return to the selected team/run; an explicit cross-team run selection is refused. No migration, scoring, prompt, deterministic identifier or output-content changes are authorized by this consolidation.
 
-All console and API routes require the proxy identity (or an explicitly supplied local `--dev-user`). The listener refuses non-loopback addresses and requires `ADMIN_SECRET` of at least 32 characters. Browser writes use same-site CSRF forms; JSON `POST /runs` requires `X-CSRF-Token` obtained from authenticated `GET /csrf`. No unauthenticated trigger Service remains in the deployment topology. Existing request/response payloads and export routes are retained behind authentication; the old API factory is a compatibility/test harness, not a deployment entry point. Default port is 8200; `ADMIN_*` configuration is retained, with `ADMIN_OUT_DIR` for writable execution output and existing `SQL_*`, `ES_*` and `LLM_*` runtime settings. One replica and one worker preserve the existing process-local gate guarantee.
+All console and API routes require the proxy identity (or an explicitly supplied local `--dev-user`). The listener refuses non-loopback addresses and requires `ADMIN_SECRET` of at least 32 characters. Browser writes use same-site CSRF forms; JSON `POST /runs` requires `X-CSRF-Token` obtained from authenticated `GET /csrf`. No unauthenticated trigger Service remains in the deployment topology. Existing request/response payloads and export routes are retained behind authentication; the old API factory is a compatibility/test harness, not a deployment entry point. Default port is 8200; `ADMIN_*` configuration is retained (`ADMIN_OUT_DIR` was removed on 2026-10-17; runs write no files) with existing `SQL_*`, `ES_*` and `LLM_*` runtime settings. One replica and one worker preserve the existing process-local gate guarantee.
 
 The implementation remains server-rendered with a content-addressed stylesheet and a small same-origin script for accessible dialogs, team selection, UTC-window previews and trigger feedback. Empty teams, failed runs, refusal messages, keyboard-accessible forms and narrow viewports are required states. Infrastructure rollout is a separate authorized action; see `unified-console-deployment.md`.
 
@@ -930,9 +956,9 @@ Contending HTTP runs/deletion return 409; the CLI fails with a busy message. Bot
 and failure release the lock. Roll out updated manual CLI clients alongside the app;
 an older CLI that does not take the shared lock cannot coordinate with deletion.
 
-Generated reports in the configured manual and weekly output locations are removed after
-SQL commit; a cleanup failure is reported distinctly. Custom CLI export locations are not
-tracked and need separate cleanup. Shared prompt artifacts, verdict caches and panel parses
+**Amended 2026-10-17:** runs write no files, so deletion removes no generated reports.
+Explicit CLI exports (`report`, default `out/<run id prefix>`, and any `--out`) are not
+tracked; deleting the run leaves them, including `alert_worklist.csv`, until removed by hand. Shared prompt artifacts, verdict caches and panel parses
 remain because other runs can use them. Deleting a published run removes it from the portal
 and all its download routes. The weekly schedule may recreate a deleted due week; deletion
 does not disable enrollment. No stored run is deleted as part of installing this change.

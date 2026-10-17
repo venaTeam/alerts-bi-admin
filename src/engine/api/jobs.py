@@ -23,7 +23,6 @@ from fastapi import HTTPException
 
 from ..config import ApiSettings
 from ..run.orchestrator import compute_run_id
-from ..run.outputs import render_run_report
 from ..weekly.runner import (
     BACKFILL_YIELD_RESOURCE,
     WeeklyBusy,
@@ -34,7 +33,6 @@ from .schemas import RunRequest
 from .service import close_client, execute_request, latest_week_end, select_client
 
 LOCK_RESOURCE = "alerts-bi-manual-run"
-EXPORT_WARNING = "Analysis saved; CSV export failed. Regenerate exports with the report command."
 ACTIVE_STATES = ("queued", "pending", "running")
 QUEUE_LOCK_PREFIX = "alerts-bi-queue:"
 
@@ -262,12 +260,7 @@ def finish_job(db: Database, job_id: str, state: str, error: str | None = None) 
         },
     )
     db.commit()
-    log.info(
-        "run.job_finished",
-        job_id=job_id,
-        status=state,
-        export_warning=state == "completed" and error is not None,
-    )
+    log.info("run.job_finished", job_id=job_id, status=state)
 
 
 def committed_result(db: Database, job: dict[str, Any]) -> bool:
@@ -337,35 +330,17 @@ def work_once(settings: ApiSettings) -> bool:
         try:
             with execution_lock(db, settings):
                 for orphan in db.query("SELECT * FROM run_jobs WHERE status='running'"):
+                    # A result this attempt committed is complete: its CSVs render from SQL.
                     completed = committed_result(db, orphan)
-                    error: str | None = (
-                        "Worker interrupted. Retry this week."
-                        if orphan.get("backfill_id")
-                        else "Worker interrupted. Start a new run to retry."
-                    )
-                    if completed:
-                        try:
-                            # The prior worker may have died between SQL commit and the
-                            # final CSV write. Rebuild every export before clearing the job.
-                            render_run_report(
-                                db,
-                                str(orphan["run_id"]),
-                                settings.out_root / str(orphan["run_id"])[:16],
-                            )
-                            error = None
-                        except Exception as exc:
-                            db.rollback()
-                            log.error(
-                                "run.export_recovery_failed",
-                                job_id=orphan["job_id"],
-                                error=redact_error(exc),
-                            )
-                            error = EXPORT_WARNING
                     finish_job(
                         db,
                         str(orphan["job_id"]),
                         "completed" if completed else "failed",
-                        error,
+                        None
+                        if completed
+                        else "Worker interrupted. Retry this week."
+                        if orphan.get("backfill_id")
+                        else "Worker interrupted. Start a new run to retry.",
                     )
                 started = datetime.now(UTC).replace(tzinfo=None)
                 started = started.replace(microsecond=started.microsecond // 1000 * 1000)
@@ -411,7 +386,7 @@ def work_once(settings: ApiSettings) -> bool:
                         db,
                         str(job["job_id"]),
                         "completed" if completed else "failed",
-                        EXPORT_WARNING
+                        None
                         if completed
                         else "Analysis failed. Check the service logs, then retry this week."
                         if job.get("backfill_id")

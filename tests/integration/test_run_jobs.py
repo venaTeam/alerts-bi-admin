@@ -41,9 +41,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> AdminSettings:
     except Exception as exc:
         pytest.skip(f"Local SQL Server unavailable: {exc}")
     reset_test_database(CONFIG.sql, DB)
-    return AdminSettings(
-        AdminConfig(CONFIG.sql), DB, "j" * 40, out_root=tmp_path_factory.mktemp("job-outputs")
-    )
+    return AdminSettings(AdminConfig(CONFIG.sql), DB, "j" * 40)
 
 
 @pytest.fixture
@@ -114,26 +112,25 @@ def test_submission_and_status_timestamps_preserve_sql_utc_instants(client: Test
         assert_instants(finished.json(), jobs.get_job(db, row["job_id"]))
 
 
-def test_installed_worker_completes_and_outputs_have_no_html(
-    client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
+def test_installed_worker_completes_without_writing_files(
+    client: TestClient, tmp_path: Path
 ) -> None:
     row = submit(client, "installed-worker").json()
-    monkeypatch.setenv("ADMIN_OUT_DIR", str(settings.out_root))
+    # Run from an empty directory; an absolute registry keeps the submitted registry hash.
+    registry = str(Path("config/teams.json").resolve())
+    worker = [sys.executable, "-m", "alerts_bi_admin", "run-worker", "--database", DB, "--once"]
     subprocess.run(
-        [sys.executable, "-m", "alerts_bi_admin", "run-worker", "--database", DB, "--once"],
+        [*worker, "--registry", registry],
         check=True,
         timeout=180,
+        cwd=tmp_path,
     )
     row = client.get(row["status_url"]).json()
     assert row["status"] == "completed", row
     assert client.get(row["result_url"]).status_code == 200
     assert client.get(f"/runs/{row['run_id']}/scorecard.html").status_code == 422
-    directory = settings.out_root / row["run_id"][:16]
-    assert {p.name for p in directory.iterdir()} == {
-        "daily_metrics.csv",
-        "rule_counts.csv",
-        "alert_worklist.csv",
-    }
+    assert client.get(f"/runs/{row['run_id']}/daily_metrics.csv").status_code == 200
+    assert not any(tmp_path.iterdir())
     with connect(CONFIG.sql, DB) as db:
         assert db.query_one("SELECT run_id FROM review_publications") is None
 
@@ -174,27 +171,16 @@ def test_restart_does_not_mistake_older_result_for_interrupted_job(
             {"id": row["job_id"], "at": started},
         )
         db.commit()
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
     status = client.get(row["status_url"]).json()
     assert status["status"] == "failed" and "interrupted" in status["error_summary"]
     assert "Worker interrupted" in client.get("/teams/checkout-api").text
 
 
-@pytest.mark.parametrize("exports", ["missing", "stale", "partial"])
 def test_restart_recognizes_commit_before_job_completion(
-    client: TestClient, settings: AdminSettings, exports: str
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    row = submit(client, "commit-recovery-" + exports).json()
-    directory = settings.out_root / row["run_id"][:16]
-    directory.mkdir(exist_ok=True)
-    # Remove previous output for this deterministic ID, then reproduce each crash state.
-    for path in directory.iterdir():
-        path.unlink()
-    if exports != "missing":
-        for name in ("daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
-            (directory / name).write_text("stale or truncated")
-            if exports == "partial":
-                break
+    row = submit(client, "commit-recovery").json()
     started = datetime(2026, 10, 13)
     with connect(CONFIG.sql, DB) as db:
         db.execute(
@@ -214,12 +200,15 @@ def test_restart_recognizes_commit_before_job_completion(
             ),
         )
         expected = build_run_outputs(db, row["run_id"])
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    # Recovery needs no registry, so it can run from an empty directory and leave it empty.
+    monkeypatch.chdir(tmp_path)
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
+    assert not any(tmp_path.iterdir())
     status = client.get(row["status_url"]).json()
     assert status["status"] == "completed" and status["error_summary"] is None
-    assert {p.name: p.read_bytes() for p in directory.iterdir()} == {
-        name: content.encode("utf-8") for name, content in expected.items()
-    }
+    # Nothing is regenerated on recovery: each download renders the committed SQL.
+    for name, content in expected.items():
+        assert client.get(f"/runs/{row['run_id']}/{name}").content == content.encode("utf-8")
 
 
 def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
@@ -235,19 +224,18 @@ def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
     )
     assert response.status_code == 303 and "error=" in response.headers["location"]
     assert client.get(row["status_url"]).json()["status"] == "pending"
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root))
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB))
     response = client.post(
         f"/runs/{row['run_id']}/delete", data={"csrf": token, "confirm_delete": "1"}
     )
     assert response.status_code == 303 and "done=" in response.headers["location"]
     assert client.get(row["status_url"]).status_code == 404
-    assert not (settings.out_root / row["run_id"][:16]).exists()
 
 
 @pytest.mark.parametrize("state", ["pending", "running"])
 @pytest.mark.parametrize("command", ["run", "weekly", "verify-acceptance", "report"])
 def test_orphan_blocks_installed_writers_until_recovery(
-    client: TestClient, settings: AdminSettings, command: str, state: str
+    client: TestClient, tmp_path: Path, command: str, state: str
 ) -> None:
     row = submit(client, "orphan-before-persist-" + command).json()
     # The worker claimed the job, then died without committing analysis. Its SQL
@@ -266,14 +254,14 @@ def test_orphan_blocks_installed_writers_until_recovery(
         arguments += ["--as-of", "2026-08-25T18:00:00Z", "--fake-llm"]
     elif command == "report":
         arguments += ["--run-id", row["run_id"]]
-    arguments += ["--out", str(settings.out_root / command)]
+    arguments += ["--out", str(tmp_path / command)]
     refused = subprocess.run(arguments, capture_output=True, text=True, timeout=180)
     assert refused.returncode != 0, refused.stdout
     assert "manual job" in refused.stderr, refused.stderr
     with connect(CONFIG.sql, DB) as db:
         assert db.query_one("SELECT run_id FROM runs") is None
         assert db.query_one("SELECT log_id FROM weekly_review_log") is None
-    api = ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
+    api = ApiSettings(CONFIG, database=DB)
     assert jobs.work_once(api) is (state == "pending")
     status = client.get(row["status_url"]).json()
     if state == "pending":
@@ -311,7 +299,7 @@ def test_changed_registry_is_refused_before_execution(
 ) -> None:
     registry = tmp_path / "teams.json"
     registry.write_bytes(Path("config/teams.json").read_bytes())
-    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry), out_root=settings.out_root)
+    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry))
     row = jobs.submit_job(api, RunRequest.model_validate(BODY), "job-tester", uuid4().hex)
     registry.write_bytes(registry.read_bytes() + b"\n")
 
@@ -340,20 +328,21 @@ def test_model_mode_drift_is_refused_before_elasticsearch(
     assert client.get(row["status_url"]).json()["status"] == "failed"
 
 
-def test_export_failure_preserves_committed_analysis_and_shows_warning(
-    client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
+def test_failure_after_commit_completes_without_a_warning(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    row = submit(client, "export-failure").json()
+    row = submit(client, "post-commit-failure").json()
 
-    def fail(*args: Any, **kwargs: Any) -> Any:
-        raise OSError("Test export failure")
+    def persist_then_fail(*args: Any, **kwargs: Any) -> None:
+        persist_run(*args, **kwargs)
+        raise RuntimeError("Test failure after commit")
 
-    monkeypatch.setattr(service, "render_run_report", fail)
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root))
+    monkeypatch.setattr(service, "persist_run", persist_then_fail)
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB))
     status = client.get(row["status_url"]).json()
-    assert status["status"] == "completed" and "CSV export failed" in status["error_summary"]
+    assert status["status"] == "completed" and status["error_summary"] is None
     assert client.get(status["result_url"]).status_code == 200
-    assert "CSV export failed" in client.get("/teams/checkout-api").text
+    assert client.get(f"/runs/{row['run_id']}/daily_metrics.csv").status_code == 200
 
 
 def test_slow_worker_keeps_status_and_navigation_responsive(
@@ -370,9 +359,7 @@ def test_slow_worker_keeps_status_and_navigation_responsive(
 
     monkeypatch.setattr(jobs, "execute_request", delayed)
     with ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(
-            jobs.work_once, ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
-        )
+        future = executor.submit(jobs.work_once, ApiSettings(CONFIG, database=DB))
         try:
             assert entered.wait(10)
             assert client.get(row["status_url"]).json()["status"] == "running"
@@ -405,7 +392,7 @@ def test_distinct_exact_keys_create_new_attempts(
         raise RuntimeError("Finish the attempt without running analysis")
 
     monkeypatch.setattr(jobs, "execute_request", fail)
-    api = ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
+    api = ApiSettings(CONFIG, database=DB)
     first = submit(client, first_key)
     assert first.status_code == 202, first.text
     assert jobs.work_once(api)
@@ -428,41 +415,6 @@ def test_distinct_exact_keys_create_new_attempts(
     assert jobs.work_once(api)
 
 
-def test_recovery_export_failure_remains_visible(
-    client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    row = submit(client, "recovery-export-warning").json()
-    started = datetime(2026, 10, 13)
-    with connect(CONFIG.sql, DB) as db:
-        db.execute(
-            "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
-            {"id": row["job_id"], "at": started},
-        )
-        db.commit()
-        persist_run(
-            db,
-            PersistencePayload(
-                run=sample_run(
-                    run_id=row["run_id"],
-                    started_at=started + timedelta(seconds=1),
-                    completed_at=started + timedelta(seconds=2),
-                )
-            ),
-        )
-
-    def fail(*args: Any, **kwargs: Any) -> Any:
-        raise OSError("Recovery export failed")
-
-    monkeypatch.setattr(jobs, "render_run_report", fail)
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
-    status = client.get(row["status_url"]).json()
-    assert status["status"] == "completed" and "CSV export failed" in status["error_summary"]
-    assert client.get(status["result_url"]).status_code == 200
-    assert "CSV export failed" in client.get("/teams/checkout-api").text
-    with connect(CONFIG.sql, DB) as db:
-        assert jobs.get_job(db, row["job_id"])["active_slot"] is None
-
-
 def test_idle_worker_never_takes_execution_locks(
     settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -470,7 +422,7 @@ def test_idle_worker_never_takes_execution_locks(
         pytest.fail("An empty queue must not contend for any execution lock")
 
     monkeypatch.setattr(jobs, "execution_lock", unexpected)
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
 
 
 def test_job_status_follows_operator_wide_access_model(client: TestClient) -> None:

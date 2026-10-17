@@ -40,25 +40,20 @@ spec:
           env:
             - {name: ADMIN_HOST, value: "127.0.0.1"}
             - {name: ADMIN_PORT, value: "8200"}
-            - {name: ADMIN_OUT_DIR, value: "/app/out"}
           envFrom:
             - configMapRef: {name: alerts-bi-config}
             - secretRef: {name: alerts-bi-secrets}
             - secretRef: {name: alerts-bi-admin-secrets}
           volumeMounts:
             - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
-            - {name: output, mountPath: /app/out}
         - name: run-worker
           image: ADMIN_IMAGE_DIGEST
           command: ["alerts-bi-admin", "run-worker", "--registry", "/etc/alerts-bi/teams.json"]
-          env:
-            - {name: ADMIN_OUT_DIR, value: "/app/out"}
           envFrom:
             - configMapRef: {name: alerts-bi-config}
             - secretRef: {name: alerts-bi-secrets}
           volumeMounts:
             - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
-            - {name: output, mountPath: /app/out}
         - name: oauth-proxy
           image: OAUTH_PROXY_IMAGE_DIGEST
           args:
@@ -76,7 +71,6 @@ spec:
             - {name: proxy-tls, mountPath: /etc/tls/private}
             - {name: proxy-secrets, mountPath: /etc/proxy/secrets}
       volumes:
-        - {name: output, emptyDir: {}}
         - {name: registry, configMap: {name: alerts-bi-registry}}
         - {name: proxy-tls, secret: {secretName: alerts-bi-admin-tls}}
         - {name: proxy-secrets, secret: {secretName: alerts-bi-admin-secrets}}

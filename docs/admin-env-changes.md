@@ -40,8 +40,8 @@ matching schema; changing a name does not convert documents between schemas.
 - The mock generator, scale probe, and Kibana data-view lookup now use the same
   index settings. These scripts also load `.env`. Kibana looks up data views
   whose titles exactly match the configured source expressions.
-- CLI commands now honor the existing registry and report-directory variables
-  described below, alongside the web listener.
+- CLI commands now honor the existing registry variable described below, alongside
+  the web listener. (The report-directory variable was removed on 2026-10-17.)
 
 ## Existing variables with broader support
 
@@ -49,19 +49,17 @@ These variables already existed; add them only if you need custom paths:
 
 ```dotenv
 ADMIN_REGISTRY_PATH=config/teams.json
-ADMIN_OUT_DIR=out
 ```
 
 | Variable | Behavior after this change |
 | --- | --- |
 | `ADMIN_REGISTRY_PATH` | Used by the listener, `registry check`, `run`, `weekly`, `weekly-status`, and the scale probe. When unset or empty, service commands retain their packaged default registry; the scale probe retains its repository `config/teams.json`. |
-| `ADMIN_OUT_DIR` | Sets the listener's output root and the CLI report root. `run` and `report` write `<root>/<first 16 characters of run_id>`; `weekly` writes `<root>/weekly`. Default root: `out`. |
+| `ADMIN_OUT_DIR` | Removed 2026-10-17, with `API_OUT_DIR`. Runs and weekly jobs write no files; CSV downloads render from SQL. Remove it from existing configuration; it is ignored. |
 
-Explicit `--registry` and `--out` flags override the corresponding environment
-settings where those flags exist. `verify-acceptance` retains its own `--out`
-option and `out/acceptance` default. Paths are resolved relative to the process's
-working directory unless you supply absolute paths. Ensure the configured report
-directory is writable by the service account.
+An explicit `--registry` overrides `ADMIN_REGISTRY_PATH`. File exports are explicit:
+`report --out` (default `out/<first 16 characters of run_id>`), `run --out`,
+`weekly --out`, and `verify-acceptance --out` (default `out/acceptance`). Paths are
+resolved relative to the process's working directory unless you supply absolute paths.
 
 ## Applying the configuration
 
@@ -70,8 +68,8 @@ directory is writable by the service account.
 2. Add the three `ES_*` variables above to the deployment environment or local
    uncommitted `.env`, using the correct source names. Supply the same values to
    separate CLI and scheduler processes that should read those sources.
-3. Set the two `ADMIN_*` path variables if custom registry or output locations
-   are needed. Check existing values: CLI jobs now honor them too.
+3. Set `ADMIN_REGISTRY_PATH` if a custom registry location is needed. Check existing
+   values: CLI jobs now honor it too.
 4. After deploying the changed application and configuration, restart the admin
    process so it loads the settings. Check authenticated `/healthz`; healthy
    responses have `ok: true` and `checks.elasticsearch.ok: true`.

@@ -65,7 +65,7 @@ def test_init_applies_missing_revision_once_to_admin_database(
             {"id": "c" * 32, "hash": "0" * 64},
         )
         db.commit()
-    settings = AdminSettings(AdminConfig(CONFIG.sql), DB, "m" * 40, out_root=tmp_path)
+    settings = AdminSettings(AdminConfig(CONFIG.sql), DB, "m" * 40)
     with TestClient(
         build_admin(settings), headers={"X-Forwarded-User": "migration-test"}
     ) as client:
