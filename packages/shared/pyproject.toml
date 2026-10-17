@@ -1,11 +1,11 @@
 [project]
 name = "alerts-bi-shared"
-version = "0.1.5"
+version = "0.1.6"
 description = "Alerts BI common values, SQL connection, summaries and pure presentation"
 requires-python = ">=3.12"
 dependencies = [
     "sqlalchemy>=2.0,<3",
-    "pymssql>=2.3,<3",
+    "pymssql>=2.4.3,<3",
 ]
 
 [build-system]

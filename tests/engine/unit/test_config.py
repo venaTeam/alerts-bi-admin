@@ -92,6 +92,17 @@ def test_environment_overrides_defaults(monkeypatch: pytest.MonkeyPatch) -> None
     assert config.sql.port == 1444
 
 
+def test_sql_encryption_settings_default_off_and_trusting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sql = load_config().sql
+    assert (sql.encrypt, sql.trust_server_certificate) == (False, True)
+    monkeypatch.setenv("SQL_ENCRYPT", "true")
+    monkeypatch.setenv("SQL_TRUST_SERVER_CERTIFICATE", "false")
+    sql = load_config().sql
+    assert (sql.encrypt, sql.trust_server_certificate) == (True, False)
+
+
 def test_index_settings_load_from_dotenv_with_environment_precedence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

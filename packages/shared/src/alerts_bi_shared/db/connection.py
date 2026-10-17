@@ -25,12 +25,18 @@ one connection and disposes the engine on exit, which is exactly the lifetime th
 had before. A pool would hold connections open across the guarded test-database reset, which
 drops the database out from under them. WebDatabasePool provides separate bounded request
 connections; close application lifespans before resetting a disposable database.
+
+``SQL_ENCRYPT=true`` makes every connection require TLS; see :func:`encryption_connect_args`.
+The default leaves connections unencrypted, and each process logs that once when its first
+pool or connection is set up, so the condition shows in every service's startup output.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from importlib.metadata import version as installed_version
 from threading import Lock
 from typing import Any
 
@@ -41,7 +47,63 @@ from sqlalchemy.pool import NullPool
 from alerts_bi_shared.config.sql import SqlConfig
 from alerts_bi_shared.logging_setup import log, redact_error
 
-__all__ = ["Database", "WebDatabasePool", "connect", "engine_url", "quote_identifier"]
+__all__ = [
+    "Database",
+    "WebDatabasePool",
+    "connect",
+    "encryption_connect_args",
+    "engine_url",
+    "quote_identifier",
+]
+
+# pymssql applies its ``encryption`` argument per connection only from 2.4.3. Earlier wheels
+# accept it and connect in plaintext (checked against SQL Server 2022 on 2026-10-17).
+_MIN_ENCRYPTING_PYMSSQL = (2, 4, 3)
+
+_unencrypted_warned: set[tuple[str, int]] = set()
+_unencrypted_lock = Lock()
+
+
+def encryption_connect_args(config: SqlConfig) -> dict[str, str]:
+    """Driver arguments that apply SQL_ENCRYPT, refusing settings the driver cannot enforce.
+
+    With ``encrypt`` the connection requires TLS: FreeTDS refuses a server that will not
+    encrypt instead of falling back to plaintext. FreeTDS validates the server certificate
+    only through its own configuration file, which this application does not manage, so the
+    certificate is trusted, and a request to validate it is refused rather than skipped.
+    Without ``encrypt`` nothing changes, and the process logs that once per server.
+    """
+    if not config.encrypt:
+        _warn_unencrypted(config)
+        return {}
+    if not config.trust_server_certificate:
+        raise ValueError(
+            "SQL_TRUST_SERVER_CERTIFICATE=false is not supported: the pymssql driver cannot "
+            "validate the SQL Server certificate. Set SQL_TRUST_SERVER_CERTIFICATE=true to "
+            "encrypt without certificate validation."
+        )
+    driver = installed_version("pymssql")
+    release = re.match(r"(\d+)\.(\d+)\.(\d+)", driver)
+    if release is None or tuple(map(int, release.groups())) < _MIN_ENCRYPTING_PYMSSQL:
+        raise RuntimeError(
+            f"SQL_ENCRYPT=true needs pymssql 2.4.3 or later; pymssql {driver} would connect "
+            "unencrypted."
+        )
+    return {"encryption": "require"}
+
+
+def _warn_unencrypted(config: SqlConfig) -> None:
+    with _unencrypted_lock:
+        server = (config.host, config.port)
+        if server in _unencrypted_warned:
+            return
+        _unencrypted_warned.add(server)
+    log.warn(
+        "sql.unencrypted",
+        host=config.host,
+        port=config.port,
+        detail="SQL_ENCRYPT=false: SQL Server traffic is not encrypted",
+    )
 
 
 class WebDatabasePool:
@@ -57,6 +119,8 @@ class WebDatabasePool:
     ) -> None:
         if pool_size < 1 or max_overflow < 0:
             raise ValueError("Web pool limits must be bounded and positive")
+        # Resolved now so an unenforceable SQL_ENCRYPT setting stops the app at startup.
+        self._encryption = encryption_connect_args(config)
         self.config = config
         self.database = database
         self.pool_size = pool_size
@@ -76,7 +140,11 @@ class WebDatabasePool:
                     pool_pre_ping=True,
                     pool_recycle=1800,
                     hide_parameters=True,
-                    connect_args={"timeout": timeout, "login_timeout": timeout},
+                    connect_args={
+                        "timeout": timeout,
+                        "login_timeout": timeout,
+                        **self._encryption,
+                    },
                 )
             return self._engine
 
@@ -191,7 +259,11 @@ def connect(
         # Audit parameters contain full alerts and model responses; never print them
         # through a SQLAlchemy exception when a database write fails.
         hide_parameters=True,
-        connect_args={"timeout": timeout_seconds, "login_timeout": timeout_seconds},
+        connect_args={
+            "timeout": timeout_seconds,
+            "login_timeout": timeout_seconds,
+            **encryption_connect_args(config),
+        },
     )
     connection = engine.connect()
     if autocommit:

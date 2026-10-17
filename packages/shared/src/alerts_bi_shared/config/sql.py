@@ -3,6 +3,9 @@
 ``test_database`` is not merely another target: it is the only database the guarded reset
 in :mod:`alerts_bi_admin.engine.db.migrate` will destroy, so it is configuration in its own right rather
 than a value a caller passes in.
+
+``encrypt`` and ``trust_server_certificate`` are applied, or refused when the driver cannot
+enforce them, by :func:`alerts_bi_shared.db.connection.encryption_connect_args`.
 """
 
 from __future__ import annotations
