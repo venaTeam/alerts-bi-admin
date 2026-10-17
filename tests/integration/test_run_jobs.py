@@ -177,7 +177,9 @@ def test_restart_does_not_mistake_older_result_for_interrupted_job(
     assert "Worker interrupted" in client.get("/teams/checkout-api").text
 
 
-def test_restart_recognizes_commit_before_job_completion(client: TestClient) -> None:
+def test_restart_recognizes_commit_before_job_completion(
+    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     row = submit(client, "commit-recovery").json()
     started = datetime(2026, 10, 13)
     with connect(CONFIG.sql, DB) as db:
@@ -198,7 +200,10 @@ def test_restart_recognizes_commit_before_job_completion(client: TestClient) -> 
             ),
         )
         expected = build_run_outputs(db, row["run_id"])
+    # Recovery needs no registry, so it can run from an empty directory and leave it empty.
+    monkeypatch.chdir(tmp_path)
     assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
+    assert not any(tmp_path.iterdir())
     status = client.get(row["status_url"]).json()
     assert status["status"] == "completed" and status["error_summary"] is None
     # Nothing is regenerated on recovery: each download renders the committed SQL.

@@ -614,3 +614,15 @@ def test_queued_manual_status_is_public_and_shown_in_the_workspace(
     assert response.json()["status"] == "queued"
     page = client.get(f"/teams/{TEAM}").text
     assert "Queued. It starts before the next backfill week." in page
+
+
+def test_interrupted_week_fails_and_asks_to_retry_the_week(api: ApiSettings) -> None:
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "op", "lost", now=NOW)
+    with connect(CONFIG.sql, DB) as db:
+        # A worker claimed the week, then died before committing any analysis.
+        claimed = jobs.claim_queued(db, datetime.now(UTC).replace(tzinfo=None))
+    assert claimed is not None and claimed["backfill_id"] == row["backfill_id"]
+    assert jobs.work_once(api) is False
+    (week,) = queued_weeks(api, row["backfill_id"])
+    assert week["status"] == "failed" and week["active_slot"] is None
+    assert week["error_summary"] == "Worker interrupted. Retry this week."

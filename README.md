@@ -66,13 +66,16 @@ using `ADMIN_REGISTRY_PATH` or an explicit `--registry`. The listener, registry 
 manual runs, weekly jobs and weekly status all honor that environment variable.
 Runs and weekly jobs write no files: the three CSV downloads render from SQL on request.
 `report` exports a stored run's CSVs to `--out` (default `out/<run id prefix>`), and
-`run --out` and `weekly --out` also export. An explicit `--registry` takes precedence over
+`run --out` and `weekly --out` also export. Deploy the updated manifests (no ADMIN_OUT_DIR,
+output mounts or weekly `--out`) with this image; roll back with the previous manifests and image. An explicit `--registry` takes precedence over
 `ADMIN_REGISTRY_PATH`.
 
 Delete run is an authenticated, CSRF-protected POST with explicit permanent-deletion
 confirmation. It removes the run's SQL results, publications, decisions, schedule rows and
 model audit transactionally. It retains shared caches and prompt artifacts. Runs write no
-report files; explicit CLI exports are not tracked and need manual cleanup. Active
+report files. CLI exports are not tracked: CSVs written by `report` (default
+`out/<run id prefix>`) or any `--out`, including `alert_worklist.csv`, stay on that disk after
+deletion until removed by hand. Active
 manual/model/weekly work blocks deletion. Manual HTTP and CLI runs take the same SQL
 execution lock as scheduling and deletion, covering scanning, persistence and report
 writing even with assessment off. Roll out the updated manual CLI alongside the app;
