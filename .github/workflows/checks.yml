@@ -20,6 +20,16 @@ jobs:
       - run: poetry run pytest tests/unit tests/engine/unit
       - run: poetry build
       - run: poetry run python scripts/build_libraries.py
+      - name: Record the CI-built library wheel hashes
+        run: cd dist && sha256sum alerts_bi_shared-*.whl alerts_bi_operations-*.whl | tee SHA256SUMS
+      - name: Publish the CI-built library wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: alerts-bi-libraries-${{ github.sha }}
+          path: |
+            dist/alerts_bi_shared-*.whl
+            dist/alerts_bi_operations-*.whl
+            dist/SHA256SUMS
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 30
