@@ -144,13 +144,11 @@ def test_a_run_returns_only_json_even_when_html_is_requested(client: TestClient)
     assert len(response.headers["x-alerts-bi-run-id"]) == 64
 
 
-def test_a_run_writes_no_files_and_its_links_render_from_sql(
-    client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.chdir(tmp_path)
+def test_a_run_writes_no_files_and_its_links_render_from_sql(client: TestClient) -> None:
     response = client.post("/runs", json=run_body())
     run_id = response.headers["x-alerts-bi-run-id"]
-    assert not any(tmp_path.iterdir())
+    # The removed API_OUT_DIR defaulted to out/<run id prefix> in the working directory.
+    assert not (Path("out") / run_id[:16]).exists()
     for link in response.json()["files"].values():
         download = client.get(link)
         assert download.status_code == 200

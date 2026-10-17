@@ -116,8 +116,11 @@ def test_installed_worker_completes_without_writing_files(
     client: TestClient, tmp_path: Path
 ) -> None:
     row = submit(client, "installed-worker").json()
+    # Run from an empty directory; an absolute registry keeps the submitted registry hash.
+    registry = str(Path("config/teams.json").resolve())
+    worker = [sys.executable, "-m", "alerts_bi_admin", "run-worker", "--database", DB, "--once"]
     subprocess.run(
-        [sys.executable, "-m", "alerts_bi_admin", "run-worker", "--database", DB, "--once"],
+        [*worker, "--registry", registry],
         check=True,
         timeout=180,
         cwd=tmp_path,
