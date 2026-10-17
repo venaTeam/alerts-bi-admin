@@ -15,6 +15,7 @@ from pathlib import Path
 __all__ = ["load_dotenv", "read_bool", "read_int", "read_str"]
 
 _TRUTHY = {"1", "true", "yes", "on"}
+_FALSY = {"0", "false", "no", "off"}
 
 
 def load_dotenv(path: str | Path = ".env") -> None:
@@ -51,8 +52,17 @@ def read_int(name: str, fallback: int) -> int:
         raise ValueError(f"env {name} must be an integer, got {value!r}") from exc
 
 
-def read_bool(name: str, fallback: bool) -> bool:
+def read_bool(name: str, fallback: bool, *, strict: bool = False) -> bool:
+    """Read a flag; anything not truthy is false unless ``strict`` rejects unknown values.
+
+    ``strict`` is for flags where a typo must not silently mean "off", such as a
+    security setting.
+    """
     value = os.environ.get(name)
     if value is None or value == "":
         return fallback
-    return value.lower() in _TRUTHY
+    normalized = value.lower()
+    if strict and normalized not in _TRUTHY | _FALSY:
+        allowed = ", ".join(sorted(_TRUTHY | _FALSY))
+        raise ValueError(f"env {name} must be one of {allowed}; got {value!r}")
+    return normalized in _TRUTHY
