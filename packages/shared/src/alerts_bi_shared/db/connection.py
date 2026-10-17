@@ -27,8 +27,9 @@ drops the database out from under them. WebDatabasePool provides separate bounde
 connections; close application lifespans before resetting a disposable database.
 
 ``SQL_ENCRYPT=true`` makes every connection require TLS; see :func:`encryption_connect_args`.
-The default leaves connections unencrypted, and each process logs that once when its first
-pool or connection is set up, so the condition shows in every service's startup output.
+The default leaves connections unencrypted, and each process logs that once per SQL server
+(host and port) when its first pool or connection to it is set up, so the condition shows in
+every service's startup output.
 """
 
 from __future__ import annotations
@@ -71,6 +72,7 @@ def encryption_connect_args(config: SqlConfig) -> dict[str, str]:
     encrypt instead of falling back to plaintext. FreeTDS validates the server certificate
     only through its own configuration file, which this application does not manage, so the
     certificate is trusted, and a request to validate it is refused rather than skipped.
+    Trusting it means TLS stops passive reading but not an active interceptor.
     Without ``encrypt`` nothing changes, and the process logs that once per server.
     """
     if not config.encrypt:

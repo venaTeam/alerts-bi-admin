@@ -47,6 +47,12 @@ jobs:
         run: RESET=1 STATS_PATH="$RUNNER_TEMP/mock-stats.json" poetry run python scripts/generate_mock_alerts.py
       - name: Real SQL/ES job and critical acceptance regressions
         run: poetry run python scripts/ci_integration.py
+      - name: Encrypted SQL smoke (SQL_ENCRYPT=true, including Alembic migrations)
+        env:
+          SQL_ENCRYPT: "true"
+        run: >-
+          poetry run pytest -q tests/integration/test_sql_encryption.py
+          tests/engine/integration/test_migrations.py
       - name: Dependency logs on failure
         if: failure()
         run: docker compose logs --no-color es sqlserver

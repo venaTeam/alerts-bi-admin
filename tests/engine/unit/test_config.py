@@ -103,6 +103,23 @@ def test_sql_encryption_settings_default_off_and_trusting(
     assert (sql.encrypt, sql.trust_server_certificate) == (True, False)
 
 
+@pytest.mark.parametrize("value", ["require", "enabled", "ture", "2"])
+def test_an_unknown_sql_encrypt_value_fails_instead_of_meaning_plaintext(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("SQL_ENCRYPT", value)
+    with pytest.raises(ValueError, match="env SQL_ENCRYPT must be one of"):
+        load_config()
+
+
+@pytest.mark.parametrize(("value", "expected"), [("ON", True), ("1", True), ("off", False)])
+def test_sql_encrypt_accepts_the_usual_flag_spellings(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: bool
+) -> None:
+    monkeypatch.setenv("SQL_ENCRYPT", value)
+    assert load_config().sql.encrypt is expected
+
+
 def test_index_settings_load_from_dotenv_with_environment_precedence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

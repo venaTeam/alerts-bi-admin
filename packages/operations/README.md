@@ -11,5 +11,5 @@ Build from the admin repository with `poetry --directory packages/operations bui
 both this wheel and the matching `alerts-bi-shared` release.
 
 Version 0.2.0 removes the standalone HTML scorecard renderer and export. The three CSV
-formats and columns remain unchanged. Version 0.2.3 uses alerts-bi-shared 0.1.6; the portal consumes
+formats and columns remain unchanged. Version 0.2.4 uses alerts-bi-shared 0.1.7; the portal consumes
 that shared library independently and has no operations dependency.

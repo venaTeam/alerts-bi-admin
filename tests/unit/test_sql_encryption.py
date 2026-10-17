@@ -7,9 +7,12 @@ import json
 from typing import Any
 
 import pytest
+import sqlalchemy
+from alembic import command
 from alerts_bi_shared.config.sql import SqlConfig
 from alerts_bi_shared.db import connection
 from alerts_bi_shared.db.connection import WebDatabasePool, connect, encryption_connect_args
+from src.engine.db.migrate import alembic_config
 
 CONFIG = SqlConfig(
     host="sql.internal",
@@ -111,3 +114,31 @@ def test_a_driver_that_would_connect_unencrypted_is_refused(
         WebDatabasePool(ENCRYPTED, ENCRYPTED.database)
     monkeypatch.setattr(connection, "installed_version", lambda name: "2.4.3")
     assert encryption_connect_args(ENCRYPTED) == {"encryption": "require"}
+
+
+class _EngineCreated(Exception):
+    pass
+
+
+@pytest.mark.parametrize("encrypt", [False, True])
+def test_migrations_connect_with_the_same_encryption(
+    monkeypatch: pytest.MonkeyPatch, encrypt: bool
+) -> None:
+    """The Alembic environment builds its own engine; it must not bypass SQL_ENCRYPT."""
+    seen: list[dict[str, Any]] = []
+
+    def create_engine(url: object, **kwargs: Any) -> None:
+        seen.append(kwargs)
+        raise _EngineCreated
+
+    # migrations/env.py imports create_engine from sqlalchemy each time Alembic runs it.
+    monkeypatch.setattr(sqlalchemy, "create_engine", create_engine)
+    config = dataclasses.replace(CONFIG, encrypt=encrypt)
+    with pytest.raises(_EngineCreated):
+        command.upgrade(alembic_config(config, config.database), "head")
+    assert seen == [
+        {
+            "poolclass": seen[0]["poolclass"],
+            "connect_args": {"encryption": "require"} if encrypt else {},
+        }
+    ]

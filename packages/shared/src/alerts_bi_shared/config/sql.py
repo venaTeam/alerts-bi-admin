@@ -38,7 +38,8 @@ def load_sql_config() -> SqlConfig:
         password=read_str("SQL_PASSWORD"),
         database=read_str("SQL_DATABASE", "alerts_bi_dev"),
         test_database=read_str("SQL_TEST_DATABASE", "alerts_bi_test"),
-        encrypt=read_bool("SQL_ENCRYPT", False),
+        # Strict: a typo such as SQL_ENCRYPT=require must not silently mean plaintext.
+        encrypt=read_bool("SQL_ENCRYPT", False, strict=True),
         trust_server_certificate=read_bool("SQL_TRUST_SERVER_CERTIFICATE", True),
         request_timeout_ms=read_int("SQL_REQUEST_TIMEOUT_MS", 60000),
     )
