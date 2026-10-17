@@ -282,6 +282,19 @@ configuration does not set SQL_TRUST_SERVER_CERTIFICATE=false. With encryption o
 process logs `sql.unencrypted` once for each SQL server. Preserve the approved database
 network protections either way.
 
+Enable encryption in this order:
+
+1. Before rolling out shared 0.1.7 images, check the live Secret and ConfigMap. SQL_ENCRYPT
+   must be a true/false spelling, because any other value now stops startup.
+   SQL_TRUST_SERVER_CERTIFICATE must not be false while SQL_ENCRYPT is true.
+2. Roll out the new images with SQL_ENCRYPT=false and observe a normal cycle.
+3. Confirm the SQL Server completes a TLS handshake from the cluster network.
+4. Set SQL_ENCRYPT=true. The migration init container is the first encrypted connection and is
+   a no-op when the schema is current. Then confirm admin and portal pages load, and run one
+   worker job and one CronJob manually (`oc create job --from=cronjob/alerts-bi-weekly <job-name>`).
+5. Rollback: images built before shared 0.1.7 ignore SQL_ENCRYPT and connect in plaintext.
+   Set SQL_ENCRYPT=false when rolling back, so the configuration does not claim encryption.
+
 Validate login denial, authenticated health, run navigation, a permitted test execution,
 publication, decision attribution, withdrawal, exports and portal visibility, then observe a
 scheduled cycle. Follow the retirement document for old-trigger removal, rollback and archival.

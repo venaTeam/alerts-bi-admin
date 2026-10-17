@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "0a58a7d13b8696c94a403a4324b6ffc3653e7bcb",
+  "revision": "d656e42690ba0fb55771f12f2ee3713199f7fe61",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
     "docs/upstream/alerts_bi_design.md": "1d2c9d4b522eb781569508800dc14ad2ee0170dbab7435f2aae1fb111ec1dd44",
@@ -11,7 +11,7 @@
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",
     "docs/upstream/manual-worker-runbook.md": "b196d07854ce200e5470eed69167b9976587f63a73156cdb89b91f8861bc8ce4",
-    "docs/upstream/openshift-deployment.md": "c7e0596dcddeb949133af6ab852ebaa595fe33ee4b8ca628ad5f46c7418defee",
+    "docs/upstream/openshift-deployment.md": "e1b3c49c7bc312e68b9b52b387efa3163d067cc9ea7ccf968fab6c0493caab52",
     "docs/upstream/outputs.md": "04535b2d64966a0f302d9e97b784a86e9f4922faf78bff90c1a546dc0f6e298a",
     "docs/upstream/read-path-performance.md": "6db0e7bf73a2eb57c4706f6597634d8a36ed3b1d841ca8ac38e7a7ebbc4c7e2d",
     "docs/upstream/repository-separation-plan.md": "fe214a73e2e619b6525f36c7c3bce50ebd5a784c41add6c266936e8bcde5bf5c",
