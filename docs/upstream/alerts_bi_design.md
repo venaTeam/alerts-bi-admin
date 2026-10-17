@@ -3,19 +3,30 @@
 ## SQL connection encryption — accepted 2026-10-17
 
 `SQL_ENCRYPT` and `SQL_TRUST_SERVER_CERTIFICATE` were read but never applied, so
-`SQL_ENCRYPT=true` claimed a protection the connections did not have. Shared 0.1.6 applies
+`SQL_ENCRYPT=true` claimed a protection the connections did not have. Shared 0.1.7 applies
 it. With `SQL_ENCRYPT=true`, every SQL connection from admin, its migrations, workers and
 jobs, and the portal requests required TLS, so FreeTDS does not fall back to plaintext. This
 needs pymssql 2.4.3 or later, the first release that applies the encryption request per
 connection. On 2026-10-17, pymssql 2.3.13 and 2.4.2 connected to SQL Server 2022
 unencrypted when asked to require encryption, while 2.4.3 and 2.4.4 connected encrypted.
-Admin and portal lock pymssql 2.4.4, and shared stops startup when `SQL_ENCRYPT=true` meets
-an older driver. The driver cannot validate the server certificate from application
-settings. Encryption therefore trusts the certificate, and `SQL_TRUST_SERVER_CERTIFICATE=false`
-with `SQL_ENCRYPT=true` stops startup instead of silently skipping validation. The default
-stays `SQL_ENCRYPT=false`: existing deployments connect as before, and each process logs
-`sql.unencrypted` once. Enable encryption per deployment after confirming that the SQL Server
-accepts TLS. Operations 0.2.3 pins shared 0.1.6.
+Admin and portal lock pymssql 2.4.4. `SQL_ENCRYPT` accepts only the usual true/false
+spellings, so a typo fails instead of meaning plaintext.
+
+The driver cannot validate the server certificate from application settings. Encryption
+therefore trusts any certificate. That stops passive reading of SQL traffic but not an
+active interceptor, so the database network protections remain required. Shared refuses
+two settings it cannot enforce, both before any SQL connection opens:
+`SQL_TRUST_SERVER_CERTIFICATE=false` with `SQL_ENCRYPT=true`, and `SQL_ENCRYPT=true` with a
+driver older than 2.4.3. The admin and portal web apps fail at startup, when they build their
+SQL pools. The migration init container, workers, commands and CronJobs fail at their first
+SQL connection.
+
+The default stays `SQL_ENCRYPT=false`: existing deployments connect as before, and each
+process logs `sql.unencrypted` once for each SQL server. Enable encryption per deployment
+after confirming that the SQL Server accepts TLS. Validating the server certificate, for
+example through a managed FreeTDS CA configuration, is an open follow-up that requires a
+separate approved change. Operations 0.2.4 pins shared 0.1.7. Shared 0.1.6 and operations
+0.2.3 were superseded during review and never reached main.
 
 ## Portal SQL login residual risk — recorded 2026-10-17
 

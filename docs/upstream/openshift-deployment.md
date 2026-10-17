@@ -271,12 +271,16 @@ SQL_USER and SQL_PASSWORD through a portal-only Secret without code changes; see
 2026-10-17 design note on the portal SQL login.
 
 SQL_ENCRYPT=true requires TLS on every admin, migration, job and portal SQL connection (shared
-0.1.6 with the locked pymssql 2.4.4; see the 2026-10-17 design amendment). It is false by
-default. Before enabling it, confirm the SQL Server accepts encrypted connections, because a
-server that does not will stop the migration init container, admin and portal from
-connecting. The server certificate is not validated: keep SQL_TRUST_SERVER_CERTIFICATE=true,
-because false stops startup. With encryption off, each process logs `sql.unencrypted` once.
-Preserve the approved database network protections either way.
+0.1.7 with the locked pymssql 2.4.4; see the 2026-10-17 design amendment). It is false by
+default, and only true/false spellings are accepted. Before enabling it, confirm the SQL Server
+accepts encrypted connections. A server that does not will stop the migration init container,
+admin, portal, workers and CronJobs from connecting. The server certificate is not validated,
+so TLS does not stop an active interceptor. Keep SQL_TRUST_SERVER_CERTIFICATE=true: false is
+refused before any SQL connection. Web apps fail at startup, and the init container, workers
+and CronJobs fail at their first connection. Before enabling encryption, confirm the live
+configuration does not set SQL_TRUST_SERVER_CERTIFICATE=false. With encryption off, each
+process logs `sql.unencrypted` once for each SQL server. Preserve the approved database
+network protections either way.
 
 Validate login denial, authenticated health, run navigation, a permitted test execution,
 publication, decision attribution, withdrawal, exports and portal visibility, then observe a
