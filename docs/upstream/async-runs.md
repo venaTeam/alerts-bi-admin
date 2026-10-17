@@ -41,8 +41,8 @@ backfill is in progress.
 ## Execution, recovery and compatibility
 
 Admin owns migration 010_run_jobs and `alerts-bi-admin run-worker`. The UI only submits and
-reads jobs. Run one dedicated worker process using the same admin image, registry mount,
-SQL/ES/model settings and writable output configuration as the UI. No broker is required. Immutable migration 009_run_deletion is preserved; job state is additive revision 010.
+reads jobs. Run one dedicated worker process using the same admin image, registry mount and
+SQL/ES/model settings as the UI (no writable output since 2026-10-17). No broker is required. Immutable migration 009_run_deletion is preserved; job state is additive revision 010.
 Migration 011_run_job_keys adds a binary SHA-256 identity for the exact ASCII submission key,
 backfills existing keys and replaces text-based uniqueness. It preserves case and trailing
 spaces independently of database collation; raw keys remain in the private job audit.

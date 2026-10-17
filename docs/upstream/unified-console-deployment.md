@@ -3,7 +3,8 @@
 Use one admin image for the authenticated UI, migration jobs and weekly jobs, plus the separate
 read-only portal image. Admin contains maintained engine source; no runtime wheel or separate
 trigger image is needed. Preserve the existing login proxy and loopback-only application port
-8200, identity header, CSRF tokens, SQL/ES/LLM settings, registry mount and writable output.
+8200, identity header, CSRF tokens, SQL/ES/LLM settings and registry mount. Since 2026-10-17
+runs write no files, so no writable output is needed.
 
 Follow [the OpenShift examples](openshift-deployment.md) and [ordered cutover/rollback](runs-retirement.md).
 Apply the updated admin Deployment with the same image digest in its migration init container,

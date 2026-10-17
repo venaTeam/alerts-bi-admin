@@ -214,6 +214,7 @@ Admin's `POST /runs/{run_id}/delete` requires same-site actor-bound form CSRF an
 all its GET report and download routes then return 404. The redirect selects the team
 without the deleted run id. SQL views and CSV columns are unchanged. See design section
 7.12 for retained shared caches and scheduler recreation; runs write no files to clean up.
+CSVs an operator exported with the CLI stay on that operator's disk after deletion.
 
 The response is always a JSON summary, including for `Accept: text/html`:
 

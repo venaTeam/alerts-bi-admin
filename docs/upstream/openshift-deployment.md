@@ -206,7 +206,11 @@ subjects:
 ```
 
 Runs write no files, so the application needs no writable output volume; CSV downloads render
-from SQL. Remove any existing ADMIN_OUT_DIR setting and output mount when applying this. Keep
+from SQL. Apply these manifests with the image that contains this change, removing any existing
+ADMIN_OUT_DIR setting, output mounts and the weekly `--out`. Earlier images write files after
+every run, so a rollback redeploys the previous manifests with the previous image (ADMIN_OUT_DIR,
+the output emptyDir mounts and the weekly `--out /app/out/weekly`). CSVs left on an old emptyDir
+are discarded with its pod; no cleanup is needed. Keep
 the image/registry access policies and resource limits appropriate to the existing deployment.
 
 ## One weekly scheduler
