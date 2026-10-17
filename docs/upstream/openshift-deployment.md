@@ -265,7 +265,10 @@ operational avoidance of overlapping manual and scheduled execution for the same
 Keep the independently built portal Deployment/Service/Route and its allowlist. Its command is
 `alerts-bi-portal`; its shared wheel is produced by admin and has no engine or operations imports.
 It queries only portal_* views using the existing SQL settings. The SQL credential may have
-broader rights, so retain reader network isolation and query/import boundaries.
+broader rights, so retain reader network isolation and query/import boundaries. A login in
+the `alerts_bi_reader` role, created by the database-owning team, can replace the portal's
+SQL_USER and SQL_PASSWORD through a portal-only Secret without code changes; see the
+2026-10-17 design note on the portal SQL login.
 
 SQL_ENCRYPT=true requires TLS on every admin, migration, job and portal SQL connection (shared
 0.1.6 with the locked pymssql 2.4.4; see the 2026-10-17 design amendment). It is false by
