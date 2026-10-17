@@ -31,12 +31,11 @@ def test_health_checks_both_configured_indexes_and_closes_client(
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_weekly_cli_honors_registry_and_output_environment(
+def test_weekly_cli_honors_registry_environment_and_writes_files_only_on_request(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, explicit: bool
 ) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("ADMIN_REGISTRY_PATH", "mounted/teams.json")
-    monkeypatch.setenv("ADMIN_OUT_DIR", "mounted/reports")
     from src.engine.weekly import runner
 
     weekly = MagicMock(return_value=[])
@@ -48,12 +47,12 @@ def test_weekly_cli_honors_registry_and_output_environment(
     assert cli.dispatch(args) == 0
     kwargs = weekly.call_args.kwargs
     assert kwargs["registry_path"] == ("explicit.json" if explicit else "mounted/teams.json")
-    assert kwargs["out_root"] == Path("explicit-reports" if explicit else "mounted/reports/weekly")
+    assert kwargs["out_root"] == (Path("explicit-reports") if explicit else None)
 
 
 @pytest.mark.parametrize("command", ["run", "report"])
 @pytest.mark.parametrize("explicit", [False, True])
-def test_cli_report_directories_honor_environment(
+def test_cli_exports_files_only_from_report_or_an_explicit_out(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, command: str, explicit: bool
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -87,9 +86,12 @@ def test_cli_report_directories_honor_environment(
         )
     )
     assert cli.dispatch(args) == 0
-    assert render.call_args.args[2] == Path(
-        "explicit-out" if explicit else "mounted/reports/" + "a" * 16
-    )
+    if command == "run" and not explicit:
+        render.assert_not_called()
+    else:
+        assert render.call_args.args[2] == Path(
+            "explicit-out" if explicit else "mounted/reports/" + "a" * 16
+        )
     if command == "run":
         assert execute.call_args.kwargs["registry_path"] == (
             "explicit.json" if explicit else "mounted/teams.json"

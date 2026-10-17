@@ -145,15 +145,16 @@ def test_a_run_returns_only_json_even_when_html_is_requested(client: TestClient)
     assert len(response.headers["x-alerts-bi-run-id"]) == 64
 
 
-def test_a_run_writes_only_csvs_and_html_export_is_unavailable(
-    client: TestClient,
+def test_a_run_writes_no_files_and_its_links_render_from_sql(
+    client: TestClient, settings: ApiSettings
 ) -> None:
     response = client.post("/runs", json=run_body())
-    out_dir = Path(response.headers["x-alerts-bi-out-dir"])
-    assert sorted(p.name for p in out_dir.iterdir()) == sorted(
-        name for name in OUTPUT_FILES if name.endswith(".csv")
-    )
     run_id = response.headers["x-alerts-bi-run-id"]
+    assert not settings.out_root.exists() or not any(settings.out_root.iterdir())
+    for link in response.json()["files"].values():
+        download = client.get(link)
+        assert download.status_code == 200
+        assert download.headers["content-type"].startswith("text/csv")
     assert client.get(f"/runs/{run_id}/scorecard.html").status_code == 422
 
 

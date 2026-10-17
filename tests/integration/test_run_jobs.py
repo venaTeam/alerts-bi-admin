@@ -114,26 +114,22 @@ def test_submission_and_status_timestamps_preserve_sql_utc_instants(client: Test
         assert_instants(finished.json(), jobs.get_job(db, row["job_id"]))
 
 
-def test_installed_worker_completes_and_outputs_have_no_html(
-    client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
+def test_installed_worker_completes_without_writing_files(
+    client: TestClient, tmp_path: Path
 ) -> None:
     row = submit(client, "installed-worker").json()
-    monkeypatch.setenv("ADMIN_OUT_DIR", str(settings.out_root))
     subprocess.run(
         [sys.executable, "-m", "alerts_bi_admin", "run-worker", "--database", DB, "--once"],
         check=True,
         timeout=180,
+        cwd=tmp_path,
     )
     row = client.get(row["status_url"]).json()
     assert row["status"] == "completed", row
     assert client.get(row["result_url"]).status_code == 200
     assert client.get(f"/runs/{row['run_id']}/scorecard.html").status_code == 422
-    directory = settings.out_root / row["run_id"][:16]
-    assert {p.name for p in directory.iterdir()} == {
-        "daily_metrics.csv",
-        "rule_counts.csv",
-        "alert_worklist.csv",
-    }
+    assert client.get(f"/runs/{row['run_id']}/daily_metrics.csv").status_code == 200
+    assert not any(tmp_path.iterdir())
     with connect(CONFIG.sql, DB) as db:
         assert db.query_one("SELECT run_id FROM review_publications") is None
 
@@ -180,21 +176,8 @@ def test_restart_does_not_mistake_older_result_for_interrupted_job(
     assert "Worker interrupted" in client.get("/teams/checkout-api").text
 
 
-@pytest.mark.parametrize("exports", ["missing", "stale", "partial"])
-def test_restart_recognizes_commit_before_job_completion(
-    client: TestClient, settings: AdminSettings, exports: str
-) -> None:
-    row = submit(client, "commit-recovery-" + exports).json()
-    directory = settings.out_root / row["run_id"][:16]
-    directory.mkdir(exist_ok=True)
-    # Remove previous output for this deterministic ID, then reproduce each crash state.
-    for path in directory.iterdir():
-        path.unlink()
-    if exports != "missing":
-        for name in ("daily_metrics.csv", "rule_counts.csv", "alert_worklist.csv"):
-            (directory / name).write_text("stale or truncated")
-            if exports == "partial":
-                break
+def test_restart_recognizes_commit_before_job_completion(client: TestClient) -> None:
+    row = submit(client, "commit-recovery").json()
     started = datetime(2026, 10, 13)
     with connect(CONFIG.sql, DB) as db:
         db.execute(
@@ -214,12 +197,12 @@ def test_restart_recognizes_commit_before_job_completion(
             ),
         )
         expected = build_run_outputs(db, row["run_id"])
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
     status = client.get(row["status_url"]).json()
     assert status["status"] == "completed" and status["error_summary"] is None
-    assert {p.name: p.read_bytes() for p in directory.iterdir()} == {
-        name: content.encode("utf-8") for name, content in expected.items()
-    }
+    # Nothing is regenerated on recovery: each download renders the committed SQL.
+    for name, content in expected.items():
+        assert client.get(f"/runs/{row['run_id']}/{name}").content == content.encode("utf-8")
 
 
 def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
@@ -340,20 +323,21 @@ def test_model_mode_drift_is_refused_before_elasticsearch(
     assert client.get(row["status_url"]).json()["status"] == "failed"
 
 
-def test_export_failure_preserves_committed_analysis_and_shows_warning(
-    client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
+def test_failure_after_commit_completes_without_a_warning(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    row = submit(client, "export-failure").json()
+    row = submit(client, "post-commit-failure").json()
 
-    def fail(*args: Any, **kwargs: Any) -> Any:
-        raise OSError("Test export failure")
+    def persist_then_fail(*args: Any, **kwargs: Any) -> None:
+        persist_run(*args, **kwargs)
+        raise RuntimeError("Test failure after commit")
 
-    monkeypatch.setattr(service, "render_run_report", fail)
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root))
+    monkeypatch.setattr(service, "persist_run", persist_then_fail)
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB))
     status = client.get(row["status_url"]).json()
-    assert status["status"] == "completed" and "CSV export failed" in status["error_summary"]
+    assert status["status"] == "completed" and status["error_summary"] is None
     assert client.get(status["result_url"]).status_code == 200
-    assert "CSV export failed" in client.get("/teams/checkout-api").text
+    assert client.get(f"/runs/{row['run_id']}/daily_metrics.csv").status_code == 200
 
 
 def test_slow_worker_keeps_status_and_navigation_responsive(
@@ -426,41 +410,6 @@ def test_distinct_exact_keys_create_new_attempts(
         assert second_row["idempotency_key"] == second_key
         assert first_row["idempotency_key_hash"] != second_row["idempotency_key_hash"]
     assert jobs.work_once(api)
-
-
-def test_recovery_export_failure_remains_visible(
-    client: TestClient, settings: AdminSettings, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    row = submit(client, "recovery-export-warning").json()
-    started = datetime(2026, 10, 13)
-    with connect(CONFIG.sql, DB) as db:
-        db.execute(
-            "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
-            {"id": row["job_id"], "at": started},
-        )
-        db.commit()
-        persist_run(
-            db,
-            PersistencePayload(
-                run=sample_run(
-                    run_id=row["run_id"],
-                    started_at=started + timedelta(seconds=1),
-                    completed_at=started + timedelta(seconds=2),
-                )
-            ),
-        )
-
-    def fail(*args: Any, **kwargs: Any) -> Any:
-        raise OSError("Recovery export failed")
-
-    monkeypatch.setattr(jobs, "render_run_report", fail)
-    assert jobs.work_once(ApiSettings(CONFIG, database=DB, out_root=settings.out_root)) is False
-    status = client.get(row["status_url"]).json()
-    assert status["status"] == "completed" and "CSV export failed" in status["error_summary"]
-    assert client.get(status["result_url"]).status_code == 200
-    assert "CSV export failed" in client.get("/teams/checkout-api").text
-    with connect(CONFIG.sql, DB) as db:
-        assert jobs.get_job(db, row["job_id"])["active_slot"] is None
 
 
 def test_idle_worker_never_takes_execution_locks(

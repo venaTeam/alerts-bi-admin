@@ -48,7 +48,7 @@ def add_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]
     run = subparsers.add_parser("run", help="analyse one team, persist, and render")
     run.add_argument("--team", required=True, help="registry team_id; never defaults")
     run.add_argument("--run-at", help="Monday 00:00 UTC; defaults to the latest completed Monday")
-    run.add_argument("--out", help="output directory; default out/<run id prefix>")
+    run.add_argument("--out", help="also export the three CSVs to this directory")
     run.add_argument("--registry", help="registry path; default config/teams.json")
     run.add_argument("--database", help="target database; default SQL_DATABASE")
     llm = run.add_mutually_exclusive_group()
@@ -106,7 +106,7 @@ def add_commands(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]
     weekly.add_argument(
         "--dry-run", action="store_true", help="show the due weeks without running anything"
     )
-    weekly.add_argument("--out", help="report directory root; default out/weekly")
+    weekly.add_argument("--out", help="also export each week's CSVs under this directory")
     weekly.add_argument("--registry", help="registry path; default config/teams.json")
     weekly.add_argument("--database", help="target database; default SQL_DATABASE")
     weekly_llm = weekly.add_mutually_exclusive_group()
@@ -178,12 +178,8 @@ def _command_run(args: argparse.Namespace, config: AppConfig) -> int:
         persist_run(db, payload)
         log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
 
-        out_dir = (
-            Path(args.out)
-            if args.out
-            else Path(read_str("ADMIN_OUT_DIR", "out")) / summary.run_id[:16]
-        )
-        files = render_run_report(db, summary.run_id, out_dir)
+        # Files only on an explicit --out; downloads render from SQL on request.
+        files = render_run_report(db, summary.run_id, Path(args.out)) if args.out else []
 
     readiness = (
         "n/a (no v2 identities)" if summary.readiness is None else f"{summary.readiness:.1f}%"
@@ -342,9 +338,7 @@ def _command_weekly(args: argparse.Namespace, config: AppConfig) -> int:
             llm_disabled_reason=reason,
             registry_path=args.registry or read_str("ADMIN_REGISTRY_PATH") or None,
             teams=args.team,
-            out_root=Path(args.out)
-            if args.out
-            else Path(read_str("ADMIN_OUT_DIR", "out")) / "weekly",
+            out_root=Path(args.out) if args.out else None,
             dry_run=args.dry_run,
         )
     except WeeklyBusy as exc:

@@ -24,7 +24,6 @@ from ..llm.client import LlmClient
 from ..llm.fake import FakeLlmClient
 from ..llm.openai_client import OpenAiLlmClient
 from ..run.orchestrator import RunSummary, execute_run, select_llm_client
-from ..run.outputs import render_run_report
 from ..weekly.plan import latest_week_end as latest_week_end
 from ..weekly.runner import WeeklyBusy as WeeklyBusy
 from ..weekly.runner import schedule_lock as schedule_lock
@@ -142,7 +141,7 @@ def execute_request(
         )
         persist_run(db, payload)
         log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
-        render_run_report(db, summary.run_id, settings.out_root / summary.run_id[:16])
+        # No files: the CSV downloads render from the committed SQL on each request.
         return summary
     finally:
         es_client.close()
