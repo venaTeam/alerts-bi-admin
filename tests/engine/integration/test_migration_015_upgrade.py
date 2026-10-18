@@ -108,13 +108,15 @@ def test_015_upgrades_a_populated_database_and_readiness_requires_it(
         with pytest.raises(ValueError, match="015_case_sensitive_applications"):
             check_schema(db)
 
-    applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["015_case_sensitive_applications"]
+    # Stop at 015 so this sees exactly what 015 did; 016 has its own upgrade test.
+    command.upgrade(migrations.alembic_config(CONFIG.sql, DB), "015_case_sensitive_applications")
 
     with connect(CONFIG.sql, DB) as db:
         assert migrations.current_revision(db) == "015_case_sensitive_applications"
         assert _counts(db) == before
-        check_schema(db)
+        # Readiness also needs 016 now; test_migration_016_upgrade.py applies it.
+        with pytest.raises(ValueError, match="016_case_sensitive_key_fields"):
+            check_schema(db)
         stored = db.query(
             "SELECT application FROM alert_findings WHERE run_id=:run ORDER BY application",
             {"run": run["run_id"]},
@@ -175,7 +177,8 @@ def test_a_failed_015_rolls_back_completely_and_a_retry_applies_it(
             db.execute("DROP VIEW IF EXISTS dbo.blocks_015")
             db.commit()
 
-    applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["015_case_sensitive_applications"]
+    # Stop at 015, as above; migrating to head would also apply 016.
+    command.upgrade(migrations.alembic_config(CONFIG.sql, DB), "015_case_sensitive_applications")
     with connect(CONFIG.sql, DB) as db:
+        assert migrations.current_revision(db) == "015_case_sensitive_applications"
         assert _counts(db) == before
