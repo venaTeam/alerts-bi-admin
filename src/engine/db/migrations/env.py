@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from alembic import context
-from alerts_bi_shared.db.connection import engine_url
+from alerts_bi_shared.db.connection import encryption_connect_args, engine_url
 from sqlalchemy import create_engine
 from sqlalchemy.pool import NullPool
 
@@ -33,7 +33,11 @@ def run_migrations_online() -> None:
     sql = config.attributes.get("sql_config") or load_config().sql
     database = config.attributes.get("database") or sql.database
 
-    engine = create_engine(engine_url(sql, database), poolclass=NullPool)
+    engine = create_engine(
+        engine_url(sql, database),
+        poolclass=NullPool,
+        connect_args=encryption_connect_args(sql),
+    )
     with engine.connect() as connection:
         # Before anything is applied: an applied migration whose file has changed is a hard
         # error, which Alembic's own version table cannot detect.

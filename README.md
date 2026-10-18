@@ -169,7 +169,7 @@ Cancel removes only queued weeks; a failed week can be retried. See docs/upstrea
 Run/report/weekly/acceptance output directories contain three CSV exports. Standalone HTML
 scorecards are removed entirely, including on-demand routes and download links. The normal
 team workspace remains available. POST /runs returns JSON only, without a scorecard field.
-Operations 0.2.2 uses shared 0.1.5 with stored summaries and pooled web reads. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect. To clean older generated HTML, use
+Operations 0.2.4 uses shared 0.1.7 with stored summaries and pooled web reads. Shared 0.1.7 applies `SQL_ENCRYPT=true` as required TLS through pymssql 2.4.3 or later; the server certificate is not validated, so TLS stops passive reading but not an active interceptor. It rejects unknown `SQL_ENCRYPT` values, refuses `SQL_TRUST_SERVER_CERTIFICATE=false` (the driver cannot validate certificates), and logs `sql.unencrypted` once per process for each SQL server when encryption is off. Web apps refuse an unenforceable setting at startup; commands and jobs refuse it before their first SQL connection. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect. To clean older generated HTML, use
 `alerts-bi-admin remove-run-html --out <explicit-output-root>`; this preserves CSVs and other
 HTML files and only removes scorecard.html accompanied by all three CSV exports.
 
