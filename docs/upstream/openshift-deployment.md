@@ -41,7 +41,15 @@ Accepted 2026-10-13: the admin Deployment now runs `db setup` in a regular `migr
 init container before the UI, manual worker and proxy start. It uses the same admin image
 digest, SQL settings and credentials, selecting ADMIN_DATABASE when nonempty and otherwise
 SQL_DATABASE (the CLI default is alerts_bi_dev). It applies only missing revisions after
-checking the immutable ledger; current head is 011_run_job_keys. No data reset occurs.
+checking the immutable ledger; current head is 015_case_sensitive_applications. No data
+reset occurs.
+
+015_case_sensitive_applications (2026-10-18) rebuilds the primary keys and indexes on every
+stored `application` column. Its duration grows with the stored findings, verdicts and read
+models, and it holds schema locks while it runs. Deploy it outside the weekly job's schedule.
+Once 015 is applied, an earlier admin image's `migrate` init container stops with `Can't
+locate revision identified by '015_case_sensitive_applications'`. Roll forward instead of
+redeploying that image.
 
 Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
 new pod. A migration failure keeps the application containers unstarted and OpenShift retries
