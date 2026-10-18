@@ -19,6 +19,7 @@ from alerts_bi_operations.review.decisions import DecisionRefused, record_decisi
 from alerts_bi_operations.review.publication import PublicationRefused, publish_run, unpublish_run
 from alerts_bi_shared.db.connection import Database, WebDatabasePool
 from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.team_urls import decode_team_id
 from alerts_bi_shared.timefmt import iso_instant
 from alerts_bi_shared.versions import APP_VERSION
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
@@ -81,6 +82,13 @@ SchemaFilter = Annotated[str, Query(pattern="^(all|v1|v2)$")]
 RuleFilter = Annotated[str, Query(pattern=summary.RULE_PATTERN)]
 SortOrder = Annotated[str, Query(pattern="^(" + "|".join(summary.SORTS) + ")$")]
 Tab = Annotated[str, Query(pattern="^(overview|findings|decisions|activity)$")]
+
+
+def _team_id_from_path(value: str) -> str:
+    try:
+        return decode_team_id(value)
+    except ValueError as exc:
+        raise HTTPException(404, "Invalid team URL.") from exc
 
 
 def build_admin(settings: AdminSettings) -> FastAPI:
@@ -327,6 +335,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         page: Page = 1,
         finding: Annotated[str, Query(max_length=24, pattern=r"^[a-f0-9]*$")] = "",
     ) -> HTMLResponse:
+        team_id = _team_id_from_path(team_id)
         names = {team_id_: name for team_id_, name, _ in registry_teams()}
         enrollment = {t: e for t, _, e in registry_teams()}
         now = datetime.now(UTC)
@@ -468,6 +477,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         sort: SortOrder = "events",
         page: Page = 1,
     ) -> RedirectResponse:
+        team_id = _team_id_from_path(team_id)
         return RedirectResponse(
             pages.team_url(
                 team_id,
@@ -508,6 +518,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.post("/teams/{team_id}/trigger")
     async def trigger(request: Request, team_id: str) -> Response:
+        team_id = _team_id_from_path(team_id)
         fields = await form(request)
         if team_id not in {t for t, _, _ in registry_teams()}:
             raise HTTPException(404, "No such registered team.")
@@ -660,6 +671,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.post("/teams/{team_id}/backfill")
     async def backfill(request: Request, team_id: str) -> Response:
+        team_id = _team_id_from_path(team_id)
         values = await form_values(request)
         if team_id not in {t for t, _, _ in registry_teams()}:
             raise HTTPException(404, "No such registered team.")

@@ -8,6 +8,7 @@ error is invisible in the output.
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import dataclass
 from importlib.resources import files
 from importlib.resources.abc import Traversable
@@ -137,9 +138,8 @@ def validate_registry(
 ) -> tuple[TeamEntry, ...]:
     """Validate against the checked-in JSON Schema plus the cross-entry rules.
 
-    The schema cannot express the rules that span entries, and those are precisely the
-    ones that corrupt attribution: an operator claimed by two teams, or an entry with no
-    source operator at all.
+    Team IDs must be unique and every entry needs a source operator. Operator values
+    may repeat within an entry and across teams; each run selects one team's mapping.
     """
     schema = json.loads(schema_path.read_bytes().decode("utf-8"))
     validator = Draft202012Validator(schema)
@@ -154,13 +154,18 @@ def validate_registry(
 
     problems: list[str] = []
     seen_team_ids: set[str] = set()
-    # Exact, case-sensitive operator value -> owning team_id.
-    seen_operators: dict[str, str] = {}
     entries: list[TeamEntry] = []
 
     for raw_team in document["teams"]:
         team = TeamEntry.from_dict(raw_team)
         entries.append(team)
+
+        if team.team_id != team.team_id.strip():
+            problems.append(f'team_id "{team.team_id}" must not have surrounding whitespace')
+        if any(unicodedata.category(char) in ("Cc", "Cs") for char in team.team_id):
+            problems.append("team_id must not contain control characters or Unicode surrogates")
+        elif len(team.team_id.encode("utf-16-le")) // 2 > 128:
+            problems.append("team_id exceeds SQL storage limit of 128 UTF-16 code units")
 
         if team.team_id in seen_team_ids:
             problems.append(f'duplicate team_id "{team.team_id}"')
@@ -173,22 +178,6 @@ def validate_registry(
                 f'team "{team.team_id}" has no source operator: '
                 "v1_operators is empty and v2_operator is null"
             )
-
-        # Uniqueness is a CROSS-team rule. One team may legitimately carry the same string
-        # as both a v1 operator and its v2 operator - a team that kept its name through
-        # the migration - so the same value twice inside one entry is not a conflict.
-        own = set(team.v1_operators)
-        if team.v2_operator is not None:
-            own.add(team.v2_operator)
-        for operator in sorted(own):
-            owner = seen_operators.get(operator)
-            if owner is not None and owner != team.team_id:
-                problems.append(
-                    f'operator "{operator}" is claimed by both "{owner}" and '
-                    f'"{team.team_id}" (matching is exact and case-sensitive)'
-                )
-            else:
-                seen_operators[operator] = team.team_id
 
         panel_ids: set[str] = set()
         for panel in team.panels:

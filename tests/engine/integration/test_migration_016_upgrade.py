@@ -111,10 +111,10 @@ def test_016_upgrades_a_populated_database_and_readiness_requires_it(
             check_schema(db)
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["016_case_sensitive_key_fields"]
+    assert applied == ["016_case_sensitive_key_fields", "017_case_sensitive_teams"]
 
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "016_case_sensitive_key_fields"
+        assert migrations.current_revision(db) == "017_case_sensitive_teams"
         assert _counts(db) == before
         check_schema(db)
         stored = db.query(
@@ -194,7 +194,7 @@ def test_a_failed_016_rolls_back_completely_and_a_retry_applies_it(
             db.commit()
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["016_case_sensitive_key_fields"]
+    assert applied == ["016_case_sensitive_key_fields", "017_case_sensitive_teams"]
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "016_case_sensitive_key_fields"
+        assert migrations.current_revision(db) == "017_case_sensitive_teams"
         assert _counts(db) == before

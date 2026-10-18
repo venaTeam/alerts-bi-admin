@@ -1,9 +1,11 @@
 """Preserve required scope, actor defaults and withdrawal evidence at the new CLI."""
 
 import argparse
+import json
+from pathlib import Path
 
 import pytest
-from src.cli import _operator, build_parser
+from src.cli import _operator, build_parser, main
 
 
 @pytest.mark.parametrize(
@@ -26,3 +28,31 @@ def test_publication_options_are_preserved() -> None:
     )
     assert args.run_id == "run" and args.by == "alice"
     assert args.replace and args.allow_gap
+
+
+def test_registry_check_accepts_shared_operators_and_non_slug_ids(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = tmp_path / "teams.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "registry_version": "test",
+                "teams": [
+                    {
+                        "team_id": team_id,
+                        "display_name": team_id,
+                        "v1_operators": ["shared", "shared"],
+                        "v2_operator": "shared",
+                    }
+                    for team_id in ["Team_A", "Team B"]
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main(["registry", "check", "--registry", str(registry)]) == 0
+    output = capsys.readouterr()
+    assert "is valid: 2 teams" in output.out
+    assert "Team_A" in output.out and "Team B" in output.out
+    assert not output.err

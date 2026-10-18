@@ -1,6 +1,6 @@
 {
   "source_commit": "06feb519a0fc970c95efe25084e27a8f69f2df1b",
-  "schema_head": "016_case_sensitive_key_fields",
+  "schema_head": "017_case_sensitive_teams",
   "files": {
     "001_initial_schema.sql": "7c4f43ce0aa698bcf82b1694143fe9dd5f68a35430c1a8461c7296f958dde41a",
     "002_review_portal.sql": "593539fb7f5e3b458f107b79e348ee62a5d74841a220be97e0bd01fcbae012c6",
@@ -33,7 +33,9 @@
     "015_case_sensitive_applications.sql": "cdd2b31cd8376260b8577b33a561e2041482dc650f84c7e29a48dad0b02aef6f",
     "versions/015_case_sensitive_applications.py": "afb9a7d6cb5a637dae24760fdc917650512a7e7119dac755b8ea4c25321afe69",
     "016_case_sensitive_key_fields.sql": "0e00c5e58a97738b87a2e8445cd63c89f80ea67472218f302f1d230a8d9a9096",
-    "versions/016_case_sensitive_key_fields.py": "4f1d114a87b1a9f16bd4d0eedd8dc28d41de1c4122106a814e3fcc6953be630a"
+    "versions/016_case_sensitive_key_fields.py": "4f1d114a87b1a9f16bd4d0eedd8dc28d41de1c4122106a814e3fcc6953be630a",
+    "017_case_sensitive_teams.sql": "a6b9ddfbbb26ddb7f77a501a1f4eecad67b846d594872196d853dec62344b1e5",
+    "versions/017_case_sensitive_teams.py": "0264e894a546f751295eb83351827f26fb5968bb8c785eba44f1c5278b6344d8"
   },
   "amended": "2026-10-18"
 }

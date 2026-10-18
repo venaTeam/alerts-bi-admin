@@ -41,7 +41,7 @@ Accepted 2026-10-13: the admin Deployment now runs `db setup` in a regular `migr
 init container before the UI, manual worker and proxy start. It uses the same admin image
 digest, SQL settings and credentials, selecting ADMIN_DATABASE when nonempty and otherwise
 SQL_DATABASE (the CLI default is alerts_bi_dev). It applies only missing revisions after
-checking the immutable ledger; current head is 016_case_sensitive_key_fields. No data reset
+checking the immutable ledger; current head is 017_case_sensitive_teams. No data reset
 occurs.
 
 015_case_sensitive_applications (2026-10-18) rebuilds the primary keys and indexes on every
@@ -51,12 +51,16 @@ reads of the eight refreshed views, and every query on the seven tables, wait un
 commits. Once it is applied, an earlier admin image's `migrate` init container stops with
 `Can't locate revision identified by '015_case_sensitive_applications'`, and the revision
 refuses to downgrade. Restoring the database is then the only way back to an earlier image.
-Before the rollout:
+Before any rollout containing unapplied revisions 015, 016 or 017:
 
-1. Take a database backup and confirm that it restores.
-2. Record the row counts of `alert_findings`, `llm_verdicts` and `run_alert_list` and the
-   transaction log's free space, and size the window from them. The rebuild rewrites those
-   tables once and logs the work.
+1. Take one database backup before the first pending revision and confirm that it restores.
+   Keep the matching image, manifests and validator-compatible registry for recovery.
+2. Record row counts for `alert_findings`, `llm_verdicts`, `run_alert_list`, `runs`,
+   `daily_metrics`, `daily_rule_counts`, `review_publications`, `finding_decisions`,
+   `weekly_review_log`, `run_jobs` and `run_backfills`, plus transaction-log free space.
+   Size the window and log capacity for every pending revision, including index rebuilds:
+   015 and 016 each rewrite `alert_findings` and `llm_verdicts`; 017 changes all eight
+   team-bearing tables listed below. Rehearse against a restored copy of comparable size.
 3. Schedule a maintenance window outside the weekly job's schedule. Tell portal readers that
    pages may wait during the window.
 
@@ -79,6 +83,26 @@ too. When one image brings 015 and 016, one backup and one window cover both, bu
 must allow for `alert_findings` and `llm_verdicts` being rewritten twice. If 016 fails or the
 pod is killed during it, 015 stays committed, 016 rolls back, and the next start repeats only
 016's lock window.
+
+017_case_sensitive_teams (2026-10-18) changes `team_id` to `Latin1_General_100_BIN2`
+in `runs`, `daily_metrics`, `daily_rule_counts`, `review_publications`, `finding_decisions`,
+`weekly_review_log`, `run_jobs` and `run_backfills`. In one transaction it drops dependent
+automatic column statistics and seven team indexes, changes the eight columns, recreates
+those indexes and refreshes dependent portal views. Readers and writers can wait for its
+schema locks. Apply the same backup, sizing, maintenance-window and no-deadline rules to
+017. One backup and window can cover 015–017, but budget for all pending revisions. If 017
+fails, its changes roll back together; 015 and 016 remain committed and initialization
+retries 017. A failed migration must fail readiness; never stamp past it.
+
+An admin image without revision 017 cannot start its migration init container against a
+017 database (`Can't locate revision identified by '017_case_sensitive_teams'`). Downgrade
+is deliberately refused because case-distinct teams may now coexist. Recovery uses either
+a forward-compatible image that still knows 017 and preserves binary comparisons and the
+URL codec, or a verified pre-migration database backup restored with its matching old image,
+manifests and registry. Restoring a backup discards writes made after that backup; stop
+writers and obtain explicit recovery authorization before doing so. An image-and-registry
+rollback alone is insufficient. Deploy admin and the shared 0.1.8 portal before admitting
+expanded team IDs; do not roll back the portal while encoded links remain in use.
 
 Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
 new pod. A migration failure keeps the application containers unstarted and OpenShift retries
@@ -245,8 +269,10 @@ subjects:
 Runs write no files, so the application needs no writable output volume; CSV downloads render
 from SQL. Apply these manifests with the image that contains this change, removing any existing
 ADMIN_OUT_DIR setting, output mounts and the weekly `--out`. Earlier images write files after
-every run, so a rollback redeploys the previous manifests with the previous image (ADMIN_OUT_DIR,
-the output emptyDir mounts and the weekly `--out /app/out/weekly`). CSVs left on an old emptyDir
+every run, so a rollback to those images also needs the previous manifests (ADMIN_OUT_DIR,
+the output emptyDir mounts and the weekly `--out /app/out/weekly`). This is subject to the
+database restore requirements for revisions 015–017 above; changing manifests alone cannot
+roll back a migrated database. CSVs left on an old emptyDir
 are discarded with its pod; no cleanup is needed. Keep
 the image/registry access policies and resource limits appropriate to the existing deployment.
 

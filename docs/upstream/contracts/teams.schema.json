@@ -31,20 +31,20 @@
       "properties": {
         "team_id": {
           "type": "string",
-          "pattern": "^[a-z0-9][a-z0-9-]*$",
-          "description": "Stable identifier. Never reused for a different team."
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "Stable, nonempty identifier with no character-pattern restriction. Case-sensitive and unique across teams; never reused. No surrounding whitespace, control characters or surrogates; at most 128 UTF-16 code units."
         },
         "display_name": { "type": "string", "minLength": 1 },
         "v1_operators": {
           "type": "array",
-          "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 },
-          "description": "Exact, case-sensitive v1 operator values. May be empty after migration. Case variants used by one team are listed explicitly."
+          "description": "Exact, case-sensitive v1 operator values. Repeats within the list and across teams are allowed. May be empty after migration. Case variants used by one team are listed explicitly."
         },
         "v2_operator": {
           "type": ["string", "null"],
           "minLength": 1,
-          "description": "Exact v2 operator, derived from the team's API key. Null before migration."
+          "description": "Exact v2 operator, derived from the team's API key. May be shared across teams or with v1 operators. Null before migration."
         },
         "panels": {
           "type": "array",

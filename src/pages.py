@@ -11,6 +11,7 @@ from urllib.parse import quote, urlencode
 from uuid import uuid4
 
 from alerts_bi_operations.review.decisions import DECISION_STATES, findings_on
+from alerts_bi_shared.team_urls import encode_team_id
 from alerts_bi_shared.ui.assets import STYLESHEET as SHARED_CSS
 from alerts_bi_shared.ui.explain import (
     format_instant,
@@ -98,7 +99,7 @@ document.addEventListener('click', event => {
 });
 document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('close', () => opener?.focus()));
 document.querySelectorAll('[data-team-selector]').forEach(select => {
- const choose = () => { select.form.action = '/teams/' + encodeURIComponent(select.value) + '/trigger'; };
+ const choose = () => { select.form.action = select.selectedOptions[0].dataset.triggerUrl; };
  choose(); select.addEventListener('change', choose);
 });
 function windowLabel(input) {
@@ -279,7 +280,7 @@ def team_url(team_id: str, run_id: str | None = None, tab: str = "overview", **q
     params = {"tab": tab, **query}
     if run_id:
         params["run_id"] = run_id
-    return "/teams/" + quote(team_id, safe="") + "?" + urlencode(params)
+    return "/teams/" + encode_team_id(team_id) + "?" + urlencode(params)
 
 
 def summary_link(team_id: str, run_id: str | None = None) -> str:
@@ -396,7 +397,8 @@ def trigger_form(
     team_field = f"<div><label>Team</label><p>{h(name or team_id)}</p></div>"
     if teams:
         options = "".join(
-            f'<option value="{h(key)}">{h(label)}</option>' for key, label, _ in teams
+            f'<option value="{h(key)}" data-trigger-url="/teams/{encode_team_id(key)}/trigger">{h(label)}</option>'
+            for key, label, _ in teams
         )
         team_field = f'<div><label for="trigger-team">Team</label><select id="trigger-team" name="team" data-team-selector>{options}</select></div>'
     content = (
@@ -409,7 +411,7 @@ def trigger_form(
     return dialog(
         "new-run",
         "New run",
-        f"/teams/{quote(team_id, safe='')}/trigger",
+        f"/teams/{encode_team_id(team_id)}/trigger",
         token,
         content,
         "Start run",
@@ -600,7 +602,7 @@ def backfill_form(
         "withdraw one to run it again. A week with an unpublished run can be picked to run it again.</div>"
         '<p role="status" aria-live="polite" class="abi-small"></p></div></div>'
     )
-    action = "/teams/" + quote(team_id, safe="") + "/backfill"
+    action = "/teams/" + encode_team_id(team_id) + "/backfill"
     return (
         f'<dialog class="abi-dialog abi-wide" id="backfill-weeks" aria-labelledby="backfill-weeks-title">'
         f'<form method="post" action="{h(action)}" data-backfill-form>{_hidden(token)}'

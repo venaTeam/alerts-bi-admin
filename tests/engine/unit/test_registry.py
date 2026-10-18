@@ -76,7 +76,7 @@ def test_allows_a_null_v2_operator_when_v1_operators_exist() -> None:
     validate_registry(base())
 
 
-def test_rejects_the_same_operator_assigned_to_two_teams() -> None:
+def test_accepts_the_same_operator_assigned_to_two_teams() -> None:
     doc = base()
     doc["teams"].append(
         {
@@ -86,11 +86,11 @@ def test_rejects_the_same_operator_assigned_to_two_teams() -> None:
             "v2_operator": None,
         }
     )
-    with pytest.raises(RegistryError, match="claimed by both"):
-        validate_registry(doc)
+    teams = validate_registry(doc)
+    assert [team.v1_operators for team in teams] == [("op-a",), ("op-a",)]
 
 
-def test_operator_uniqueness_is_case_sensitive() -> None:
+def test_operator_case_is_preserved() -> None:
     doc = base()
     doc["teams"].append(
         {
@@ -100,7 +100,8 @@ def test_operator_uniqueness_is_case_sensitive() -> None:
             "v2_operator": None,
         }
     )
-    validate_registry(doc)
+    teams = validate_registry(doc)
+    assert [team.v1_operators for team in teams] == [("op-a",), ("OP-A",)]
 
 
 def test_one_team_may_carry_the_same_value_as_v1_and_v2_operator() -> None:
@@ -109,7 +110,7 @@ def test_one_team_may_carry_the_same_value_as_v1_and_v2_operator() -> None:
     validate_registry(doc)
 
 
-def test_rejects_a_v2_operator_colliding_with_another_team_v1_operator() -> None:
+def test_accepts_a_v2_operator_shared_with_another_team_v1_operator() -> None:
     doc = base()
     doc["teams"].append(
         {
@@ -119,7 +120,31 @@ def test_rejects_a_v2_operator_colliding_with_another_team_v1_operator() -> None
             "v2_operator": "op-a",
         }
     )
-    with pytest.raises(RegistryError, match="claimed by both"):
+    teams = validate_registry(doc)
+    assert teams[1].v2_operator == teams[0].v1_operators[0]
+
+
+def test_accepts_a_v2_operator_shared_by_two_teams() -> None:
+    doc = base()
+    doc["teams"][0]["v2_operator"] = "shared"
+    doc["teams"].append(
+        {"team_id": "team-b", "display_name": "B", "v1_operators": [], "v2_operator": "shared"}
+    )
+    assert [team.v2_operator for team in validate_registry(doc)] == ["shared", "shared"]
+
+
+@pytest.mark.parametrize("team_id", ["Team_A", "Team A", "צוות", "team/a", "team.a@1", "-team"])
+def test_accepts_non_slug_team_ids_without_normalizing_them(team_id: str) -> None:
+    doc = base()
+    doc["teams"][0]["team_id"] = team_id
+    assert validate_registry(doc)[0].team_id == team_id
+
+
+@pytest.mark.parametrize("team_id", ["", None, 123])
+def test_team_id_must_still_be_a_nonempty_string(team_id: Any) -> None:
+    doc = base()
+    doc["teams"][0]["team_id"] = team_id
+    with pytest.raises(RegistryError):
         validate_registry(doc)
 
 
@@ -137,11 +162,12 @@ def test_rejects_duplicate_team_ids() -> None:
         validate_registry(doc)
 
 
-def test_rejects_duplicate_operator_values_inside_one_v1_list() -> None:
+def test_accepts_duplicate_operator_values_inside_one_v1_list() -> None:
     doc = base()
     doc["teams"][0]["v1_operators"] = ["op-a", "op-a"]
-    with pytest.raises(RegistryError):
-        validate_registry(doc)
+    team = validate_registry(doc)[0]
+    assert team.v1_operators == ("op-a", "op-a")
+    assert json.loads(snapshot_team_entry(team))["v1_operators"] == ["op-a", "op-a"]
 
 
 def test_rejects_a_constant_variable_with_no_value() -> None:
@@ -261,3 +287,42 @@ def test_invalid_json_fails_with_a_clear_message(tmp_path: Any) -> None:
     bad.write_text("{not json", encoding="utf-8")
     with pytest.raises(RegistryError, match="is not valid JSON"):
         load_registry(bad)
+
+
+@pytest.mark.parametrize(
+    "team_id", [" ", "ops ", " ops", "ops\t", "ops\nname", "\x00ops", "\ud800"]
+)
+def test_rejects_whitespace_aliases_and_control_characters(team_id: str) -> None:
+    doc = base()
+    doc["teams"][0]["team_id"] = team_id
+    with pytest.raises(RegistryError):
+        validate_registry(doc)
+
+
+@pytest.mark.parametrize("team_id", ["a" * 129, "😀" * 65])
+def test_rejects_team_ids_larger_than_sql_storage(team_id: str) -> None:
+    doc = base()
+    doc["teams"][0]["team_id"] = team_id
+    with pytest.raises(RegistryError):
+        validate_registry(doc)
+
+
+@pytest.mark.parametrize("team_id", ["a" * 128, "😀" * 64])
+def test_accepts_team_ids_at_sql_storage_limit(team_id: str) -> None:
+    doc = base()
+    doc["teams"][0]["team_id"] = team_id
+    assert validate_registry(doc)[0].team_id == team_id
+
+
+def test_accepts_case_distinct_team_ids() -> None:
+    doc = base()
+    doc["teams"].append({**doc["teams"][0], "team_id": "Team-A"})
+    assert [team.team_id for team in validate_registry(doc)] == ["team-a", "Team-A"]
+
+
+@pytest.mark.parametrize("field", ["v1_operators", "v2_operator"])
+def test_rejects_empty_operator_values(field: str) -> None:
+    doc = base()
+    doc["teams"][0][field] = ["op-a", ""] if field == "v1_operators" else ""
+    with pytest.raises(RegistryError):
+        validate_registry(doc)
