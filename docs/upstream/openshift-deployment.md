@@ -60,6 +60,13 @@ Before the rollout:
 3. Schedule a maintenance window outside the weekly job's schedule. Tell portal readers that
    pages may wait during the window.
 
+Nothing cuts the rebuild short. The migration connection sets no SQL query timeout:
+`SQL_REQUEST_TIMEOUT_MS` applies to application queries, not to `db setup`. The admin
+Deployment sets no `activeDeadlineSeconds`. Keep it that way, and add no init-container deadline
+shorter than the sized window. If the pod is killed anyway, 015 rolls back and the next start
+repeats the whole lock window. When the sizing suggests a long rebuild, stop the UI and worker
+and run deploy/migrate.yaml by hand instead.
+
 Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
 new pod. A migration failure keeps the application containers unstarted and OpenShift retries
 initialization. Inspect `oc logs <pod> -c migrate` and the pod's init-container status; fix
