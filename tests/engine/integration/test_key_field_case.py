@@ -40,6 +40,15 @@ BINARY = "Latin1_General_100_BIN2"
 # Every stored key_field column, and every reader view that exposes one.
 KEY_FIELD_TABLES = ("alert_findings", "llm_verdicts", "finding_decisions", "run_alert_list")
 KEY_FIELD_VIEWS = ("portal_alerts", "portal_decisions", "portal_alert_list")
+# Every key and index that contains key_field, which 016 drops and recreates, with whether each
+# is the primary key.
+REBUILT_KEYS = {
+    ("alert_findings", "pk_alert_findings"): True,
+    ("llm_verdicts", "pk_llm_verdicts"): True,
+    ("finding_decisions", "ix_finding_decisions_identity"): False,
+    ("run_alert_list", "ix_run_alert_list_order"): False,
+    ("run_alert_list", "ix_run_alert_list_events"): False,
+}
 
 
 def _model() -> FakeLlmClient:
@@ -165,11 +174,21 @@ def test_case_only_key_field_variants_persist_as_separate_identities(
 def test_each_case_variant_reuses_only_its_own_stored_verdict(
     monkeypatch: pytest.MonkeyPatch, registry: str, db: Database
 ) -> None:
-    # The previous test stored one verdict per spelling; a rerun needs no model call.
+    # The previous test stored one verdict per spelling. The fake model gives every alert the
+    # same verdict, so mark each stored row: a rerun that borrowed the other spelling's verdict
+    # would carry the wrong marker.
+    for key in KEYS:
+        db.execute(
+            "UPDATE llm_verdicts SET justification=:marker WHERE application=:app AND key_field=:key",
+            {"marker": f"Stored verdict for {key}", "app": APPLICATION, "key": key},
+        )
+    db.commit()
+
     llm = _model()
     payload = _execute(monkeypatch, registry, db, llm)
     assert llm.calls == []
-    assert {finding["key_field"] for finding in payload.findings} == KEYS
+    justifications = {f["key_field"]: f["llm_justification"] for f in payload.findings}
+    assert justifications == {key: f"Stored verdict for {key}" for key in KEYS}
     persist_run(db, payload)
 
 
@@ -227,3 +246,26 @@ def test_every_stored_key_field_column_compares_exactly(db: Database) -> None:
     assert {
         owner: collation for owner, collation in collations.items() if collation != BINARY
     } == {}
+
+    keyed = db.query(
+        "SELECT OBJECT_NAME(i.object_id) AS owner, i.name AS index_name, i.is_primary_key "
+        "FROM sys.indexes AS i "
+        "JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id "
+        "JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id "
+        "WHERE c.name = N'key_field'"
+    )
+    found = {(str(r["owner"]), str(r["index_name"])): bool(r["is_primary_key"]) for r in keyed}
+    # Exactly these: an index on key_field that 016 did not rebuild would have blocked it.
+    assert found == REBUILT_KEYS
+
+
+def test_the_reader_role_reads_every_refreshed_view(db: Database) -> None:
+    db.execute("IF USER_ID(N'key_case_reader') IS NULL CREATE USER key_case_reader WITHOUT LOGIN")
+    db.execute("ALTER ROLE alerts_bi_reader ADD MEMBER key_case_reader")
+    db.commit()
+    db.execute("EXECUTE AS USER = N'key_case_reader'")
+    try:
+        for view in KEY_FIELD_VIEWS:
+            db.query(f"SELECT TOP 1 key_field FROM {view}")
+    finally:
+        db.execute("REVERT")

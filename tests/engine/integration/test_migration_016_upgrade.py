@@ -1,4 +1,4 @@
-"""Migration 016 upgrades a populated 015 database without losing or merging rows."""
+"""Migration 016 on a populated 015 database: rows survive, and a failure leaves 015 intact."""
 
 from __future__ import annotations
 
@@ -53,9 +53,7 @@ def _counts(db: Database) -> dict[str, int]:
     }
 
 
-def test_016_upgrades_a_populated_database_and_readiness_requires_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def _reset_to_previous_head(monkeypatch: pytest.MonkeyPatch) -> None:
     def to_previous_head(sql: object, database: str) -> tuple[list[str], list[str]]:
         command.upgrade(migrations.alembic_config(CONFIG.sql, database), PREVIOUS_HEAD)
         return [], []
@@ -67,6 +65,11 @@ def test_016_upgrades_a_populated_database_and_readiness_requires_it(
         except Exception as exc:  # pragma: no cover - environment dependent
             pytest.skip(f"SQL Server is not reachable: {exc}")
 
+
+def test_016_upgrades_a_populated_database_and_readiness_requires_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_to_previous_head(monkeypatch)
     run = sample_run()
     findings = [
         sample_finding(
@@ -139,3 +142,54 @@ def test_016_upgrades_a_populated_database_and_readiness_requires_it(
             "checkout-api:cart:Node-1",
             "checkout-api:cart:node-1",
         ]
+
+
+def test_a_failed_016_rolls_back_completely_and_a_retry_applies_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_to_previous_head(monkeypatch)
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(), findings=[sample_finding()], verdicts=[sample_verdict()]
+            ),
+        )
+        # A schema-bound reference blocks the column change after the keys were dropped.
+        db.execute(
+            "CREATE VIEW dbo.blocks_016 WITH SCHEMABINDING AS "
+            "SELECT key_field FROM dbo.alert_findings"
+        )
+        db.commit()
+        before = _counts(db)
+
+    with pytest.raises(Exception, match="blocks_016"):
+        migrations.migrate(CONFIG.sql, DB)
+
+    with connect(CONFIG.sql, DB) as db:
+        assert migrations.current_revision(db) == PREVIOUS_HEAD
+        ledger = db.query_one(
+            "SELECT COUNT(*) AS n FROM schema_migrations "
+            "WHERE version = N'016_case_sensitive_key_fields'"
+        )
+        assert ledger == {"n": 0}
+        assert _counts(db) == before
+        restored = db.query(
+            "SELECT name FROM sys.indexes WHERE name IN (N'pk_alert_findings', "
+            "N'pk_llm_verdicts', N'ix_finding_decisions_identity', N'ix_run_alert_list_order', "
+            "N'ix_run_alert_list_events')"
+        )
+        assert len(restored) == 5
+        collation = db.query_one(
+            "SELECT collation_name FROM sys.columns "
+            "WHERE object_id = OBJECT_ID(N'alert_findings') AND name = N'key_field'"
+        )
+        assert collation is not None and collation["collation_name"] != "Latin1_General_100_BIN2"
+        db.execute("DROP VIEW dbo.blocks_016")
+        db.commit()
+
+    applied, _already = migrations.migrate(CONFIG.sql, DB)
+    assert applied == ["016_case_sensitive_key_fields"]
+    with connect(CONFIG.sql, DB) as db:
+        assert migrations.current_revision(db) == "016_case_sensitive_key_fields"
+        assert _counts(db) == before
