@@ -1,5 +1,15 @@
 # Alerts BI — Implementation Blueprint
 
+## Operator console redesign — accepted 2026-10-19
+
+The admin console shows one week of a team at a time: a week picker replaces the run history
+table, and Run, Review and Publish steps replace the Overview/Findings/Decisions/Activity tabs.
+Run details, activity, the detailed analysis and the CSV downloads stay under a collapsed
+section. One New runs dialog replaces New run and Backfill weeks: one selected week becomes a
+manual run job, two to twelve weeks a backfill, each through its unchanged admission path.
+Execution, queues, publication and outputs are unchanged. See design section "Operator console
+redesign".
+
 ## Run output files removed — accepted 2026-10-17
 
 Remove `render_run_report` from manual HTTP/worker execution, orphan recovery and the weekly
@@ -70,7 +80,7 @@ Admin owns execution, migrations, weekly jobs, registry and library builds under
 
 ## Unified operator service amendment — 2026-10-08
 
-The accepted consolidation in `alerts_bi_design.md` supersedes the separate trigger/admin web topology described below. `alerts-bi-admin serve` now provides authenticated Teams → team run history → selected run Overview/Findings/Decisions/Activity, alongside global Schedule and Decisions pages. The approved compact overview, split findings panel and action dialogs retain trigger/publish/withdraw/decide; detailed charts, SQL, filters and exports expand under run details. It reuses the existing SQL/reporting and review operations; portal, weekly scheduling, exact 168-hour windows, migration ownership and output payloads remain unchanged. JSON triggers require proxy identity and `X-CSRF-Token` from `/csrf`. Browser writes require same-site form CSRF. The admin repository owns UI source and vendors a pinned execution-runtime wheel; no sibling checkout or separate trigger listener is required. Deploy one admin console behind the existing operator login proxy; see `unified-console-deployment.md`. The old trigger factory remains a compatibility harness only.
+The accepted consolidation in `alerts_bi_design.md` supersedes the separate trigger/admin web topology described below. `alerts-bi-admin serve` now provides authenticated Teams → team run history → selected run Overview/Findings/Decisions/Activity, alongside global Schedule and Decisions pages. The approved compact overview, split findings panel and action dialogs retain trigger/publish/withdraw/decide; detailed charts, SQL, filters and exports expand under run details. It reuses the existing SQL/reporting and review operations; portal, weekly scheduling, exact 168-hour windows, migration ownership and output payloads remain unchanged. JSON triggers require proxy identity and `X-CSRF-Token` from `/csrf`. Browser writes require same-site form CSRF. The admin repository owns UI source and vendors a pinned execution-runtime wheel; no sibling checkout or separate trigger listener is required. Deploy one admin console behind the existing operator login proxy; see `unified-console-deployment.md`. The old trigger factory remains a compatibility harness only. **Amended 2026-10-19:** the console redesign replaces the run history and tabs with a week picker and Run, Review and Publish steps, and merges New run and Backfill weeks into New runs; see design section "Operator console redesign".
 
 Repository separation: use the [current source map](source-map.md) for package paths and application ownership. The behavior described below is unchanged.
 

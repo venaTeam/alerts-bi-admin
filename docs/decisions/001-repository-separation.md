@@ -2,6 +2,10 @@
 
 Accepted 2026-10-06 through the product owner's implementation request.
 
+Tooling amended at the product owner's request: admin and portal moved to Poetry with a
+committed `poetry.lock` on 2026-10-12, and design followed on 2026-10-18 as a non-package
+Poetry project. `uv.lock` is no longer used by any repository.
+
 Use design, runs, portal and admin repositories in `venaTeam`. Preserve all approved
 product behavior. Runs retains source history; new repos record the extraction source
 in `PROVENANCE.json`. The original checkout remains available for recovery.
@@ -9,7 +13,7 @@ in `PROVENANCE.json`. The original checkout remains available for recovery.
 Runs owns the single migration chain and two separately installable libraries. Portal
 depends only on shared; admin depends on shared and operations. To make independent
 clones build immediately without inventing a private package service, consumers commit
-the small immutable library wheels in `vendor/`; `uv.lock` pins their SHA-256. Rebuild a
+the small immutable library wheels in `vendor/`; `poetry.lock` pins their SHA-256. Rebuild a
 changed library with a new distribution version and update consumers deliberately.
 Library release versions are independent of the analysis `APP_VERSION` used in run IDs.
 

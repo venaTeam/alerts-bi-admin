@@ -30,7 +30,8 @@ backfill is in progress.
   Same-origin polling every three seconds updates state; it pauses while the page is hidden.
   Completion of the job selected through `job_id` opens its completed run. Other selections
   retain their URL/filter state when refreshed. Returning later reads current state from SQL.
-  Failed jobs offer the existing New run action to retry. Connectivity failure is presented
+  Failed jobs offer the existing New run action to retry (since 2026-10-19 the New runs
+  dialog with one week; see design section "Operator console redesign"). Connectivity failure is presented
   separately from analysis failure and polling retries automatically. No progress percentage is invented.
 - `POST /runs` retains synchronous execution, returning a JSON summary and three CSV links.
   Standalone HTML responses and the `scorecard` field are removed, including for `Accept: text/html`.

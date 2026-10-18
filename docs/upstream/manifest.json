@@ -1,13 +1,13 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "2ea8c29eea8c71039164acb2f24881e425774a64",
+  "revision": "fc8012299da3916722fb6a3d46f7991359c1dad4",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
-    "docs/upstream/alerts_bi_design.md": "ee4bdcdcaa5edec33c0b3583554aaadadd84d5787f4689a1029fb718356bfe02",
-    "docs/upstream/alerts_bi_flow.md": "c20e24fc585af52c777a0cea8880cce392c0a8fe05cdeb27ebcd4bb6a11bef20",
-    "docs/upstream/alerts_bi_implementation_plan.md": "3cea8d3ead7eb76476310d5a16019b14490c2ec5bbc25a751b05cb72285be093",
-    "docs/upstream/async-runs.md": "c19832b58eb141253b2bcba10417f7a248d4618b930f6d193da0ee27d5d88332",
-    "docs/upstream/backfill.md": "f169c238f7c78b116ecf8b23abca76e1258d493142de7942c9f41b34bf1221f6",
+    "docs/upstream/alerts_bi_design.md": "4498ce305423043dc593857db073a53a6869bca6b91904ffe658542d3dbff051",
+    "docs/upstream/alerts_bi_flow.md": "f45ed1cfac46d266ad188ed2210ec4fe73a6e11d6e78497ee305b121f89a0573",
+    "docs/upstream/alerts_bi_implementation_plan.md": "05d5fe5e71aff5fecbc18d01d9aed1165204e9cf6ca72bb5acff765bcf829571",
+    "docs/upstream/async-runs.md": "23936597ad70c4893a1824ef81830656338f5a5aabd188daf129b25a60d6cdaf",
+    "docs/upstream/backfill.md": "483ed7a552038c41f6d3a293778107a1d91bc554a5d4dce628ebf596359b9521",
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",
     "docs/upstream/manual-worker-runbook.md": "7ce0162babb06c0508c6b21d28bdfa8aaa2c7c16fb7f1ad88ec3055d4e313e24",
@@ -22,18 +22,19 @@
     "docs/upstream/team_alert_status.md": "8a11d1d1cbb398549803458b4faaffba96374d2b88e61e88a8f2c05d045371b2",
     "docs/upstream/unified-console-deployment.md": "97cac97133b03aa7efd434516cede5480fc4f3636b5c3e0c805eb5cd08bd0ac7",
     "docs/upstream/what_is_an_incorrect_alert_EN.md": "c6bd1aa5170657f66e271eb4898e59d3a72a5de628a084449e75929185ff95ec",
-    "docs/upstream/contracts/console-http.json": "d7b29d073286ed41d8e05c0a2fb45e2bb01fefcc9797e440204b29b735751cbe",
-    "docs/upstream/contracts/console-openapi.json": "151dcf8c78bed88eaf025b164a5f6ed4429b426e50469e2cbf27193d030d7a08",
+    "docs/upstream/contracts/console-http.json": "b9bcfa21812f1c046da35d6b201b118e3551ab445f13742cb68b8e54149b498b",
+    "docs/upstream/contracts/console-openapi.json": "7372749e87ff00ddd0e0670f2d4ef4b2929f9216beb84336bbf0df3ac2a21b2e",
     "docs/upstream/contracts/migrations.json": "6586734801c6782b34de6e6e2d115faad48d0f7572fa372d590b03793ac49a15",
     "docs/upstream/contracts/outputs.json": "1f652c38199a27d7a564e137a331655ed3134f69c08b8d415e947773cb799cd2",
     "docs/upstream/contracts/README.md": "016a5a9b6d875fece33f1b81e7e00ca4877851bfa7d8525484f7624773a21b18",
     "docs/upstream/contracts/sql-views.json": "eb70f19304a7701c5b18c685331832f4b9e19757fd7265f07a1189fb444fa8ec",
     "docs/upstream/contracts/teams.schema.json": "bbb6e9e7689a811181d0f4a641ec03704ce05a75e9db32d7c2b6f3ca2cbc165d",
     "docs/upstream/contracts/trigger-openapi.json": "a3ee79591fd82a2a8f9f9badc8fd6188fca5b3f6ff1ad4c7e54213b344c3936c",
-    "docs/decisions/001-repository-separation.md": "208d2d2a8683d91d41c30de0a0b2c019de21340ef324058fc54b4c480f745744",
+    "docs/decisions/001-repository-separation.md": "c2329019fe20a5eec06d3020ee36ab80f2bc7a2fddfd1f9ef44866ef08f27f4a",
     "docs/decisions/002-flat-application-source.md": "6c96813e818816e0f1967c3137a962849e19c6b05a5e13aa63714dd65d8b8b99",
     "docs/decisions/003-runs-retirement.md": "c5c467ffda8f7150c7df157caa0ceabaa4dae656f60899fd3674cae3ef60ff19",
     "docs/decisions/004-admin-run-lifecycle.md": "bd87594ee44166948457ac0cfb8b279c1f249c4adbf57bf5ef1dff58d3fd79c4",
-    "docs/decisions/005-operator-backfill.md": "e3902ffb8f994916cf90e13f243538c477eba481ab26300278c665702dce1d50"
+    "docs/decisions/005-operator-backfill.md": "e3902ffb8f994916cf90e13f243538c477eba481ab26300278c665702dce1d50",
+    "docs/decisions/006-console-redesign.md": "7da58c1c69238b99b624d052932d1b68ce0855a084f62421b6c43f9b06402030"
   }
 }

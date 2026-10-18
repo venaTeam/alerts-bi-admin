@@ -5,9 +5,11 @@ weekly jobs, team registry, mock tooling, and shared/operations library sources.
 the former runs service and source repository. The standalone portal remains a read-only
 consumer of published SQL views and `alerts-bi-shared`.
 
-Teams opens run history and Overview, Findings, Decisions and Activity tabs. Schedule and
-Decisions have workspace-wide pages. Trigger, inspect, publish, withdraw, delete runs and record human
-decisions in the same application. The existing UI is preserved.
+Teams shows one card per team. A team's page shows one week at a time in Run, Review and
+Publish steps, with a week picker and one New runs dialog for one or several weeks; run details,
+the detailed analysis and CSV downloads sit collapsed below. Schedule and Decisions have
+workspace-wide pages. Trigger, inspect, publish, withdraw, delete runs and record human decisions
+in the same application (design section "Operator console redesign", 2026-10-19).
 
 ## Install and start
 
@@ -163,9 +165,10 @@ GET the returned status_url. Existing synchronous POST /runs returns JSON only a
 the manual SQL gate. Workers retain the shared weekly/manual CLI/report/deletion execution lock for their complete
 lifecycle. Pending/running jobs prevent permanent deletion. See docs/upstream/async-runs.md for the full contract.
 
-Backfill weeks in the team workspace queues one run per selected Monday week for that team,
-oldest first, with the New run model mode (live by default). Only completed weeks inside the
-84-day Elasticsearch retention can be picked, and published weeks are locked. Migration 014
+Picking two or more weeks in the New runs dialog queues one run per selected Monday week for
+that team (a backfill), oldest first, with the chosen model mode (live by default); one week runs
+as a single manual run. Only completed weeks inside the 84-day Elasticsearch retention are
+listed, and published weeks are locked. Migration 014
 adds the backfill table and the `queued`/`cancelled` job states; queued weeks hold no slot,
 so other writers are only refused while a week actually runs. The same worker claims queued
 manual runs before the next backfill week. A weekly invocation that finds a backfill week

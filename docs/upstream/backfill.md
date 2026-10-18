@@ -8,6 +8,18 @@ deterministic-only, model-free sweep), the excluded-scope entry for model classi
 backfilled history, the matching flow and blueprint steps, and the async contract's refusal to
 queue work while a backfill is in progress. The weekly scheduler still never backfills on its own.
 
+## Console redesign — 2026-10-19
+
+The user merged New run and Backfill weeks into one New runs dialog (design section "Operator
+console redesign"). Selecting two to twelve weeks there submits a backfill under the admission
+rules below; selecting one week submits a manual run. The dialog lists only weeks that can be
+picked, newest first, instead of month calendars, so decision 8 and the calendar description in
+"Selection and admission" no longer apply. Picking a published week, or a week already queued or
+running, is not offered rather than shown as locked. The progress panel is titled "Running N
+weeks", and the retained-gap banner is replaced by a note shown only when a week without a run,
+later than the team's first run, leaves retention within seven days. Admission, the queue, execution, the routes
+and migration 014 are unchanged.
+
 ## Product decisions (user, 2026-10-14)
 
 1. **The model is on.** Backfill offers the same live/fake/off model mode as New run, with live
