@@ -252,7 +252,7 @@ def test_every_stored_key_field_column_compares_exactly(db: Database) -> None:
         "FROM sys.indexes AS i "
         "JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id "
         "JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id "
-        "WHERE c.name = N'key_field'"
+        "WHERE c.name = N'key_field' AND OBJECT_SCHEMA_NAME(i.object_id) = N'dbo'"
     )
     found = {(str(r["owner"]), str(r["index_name"])): bool(r["is_primary_key"]) for r in keyed}
     # Exactly these: an index on key_field that 016 did not rebuild would have blocked it.

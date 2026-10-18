@@ -163,30 +163,35 @@ def test_a_failed_016_rolls_back_completely_and_a_retry_applies_it(
         db.commit()
         before = _counts(db)
 
-    with pytest.raises(Exception, match="blocks_016"):
-        migrations.migrate(CONFIG.sql, DB)
+    try:
+        with pytest.raises(Exception, match="blocks_016"):
+            migrations.migrate(CONFIG.sql, DB)
 
-    with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == PREVIOUS_HEAD
-        ledger = db.query_one(
-            "SELECT COUNT(*) AS n FROM schema_migrations "
-            "WHERE version = N'016_case_sensitive_key_fields'"
-        )
-        assert ledger == {"n": 0}
-        assert _counts(db) == before
-        restored = db.query(
-            "SELECT name FROM sys.indexes WHERE name IN (N'pk_alert_findings', "
-            "N'pk_llm_verdicts', N'ix_finding_decisions_identity', N'ix_run_alert_list_order', "
-            "N'ix_run_alert_list_events')"
-        )
-        assert len(restored) == 5
-        collation = db.query_one(
-            "SELECT collation_name FROM sys.columns "
-            "WHERE object_id = OBJECT_ID(N'alert_findings') AND name = N'key_field'"
-        )
-        assert collation is not None and collation["collation_name"] != "Latin1_General_100_BIN2"
-        db.execute("DROP VIEW dbo.blocks_016")
-        db.commit()
+        with connect(CONFIG.sql, DB) as db:
+            assert migrations.current_revision(db) == PREVIOUS_HEAD
+            ledger = db.query_one(
+                "SELECT COUNT(*) AS n FROM schema_migrations "
+                "WHERE version = N'016_case_sensitive_key_fields'"
+            )
+            assert ledger == {"n": 0}
+            assert _counts(db) == before
+            restored = db.query(
+                "SELECT name FROM sys.indexes WHERE name IN (N'pk_alert_findings', "
+                "N'pk_llm_verdicts', N'ix_finding_decisions_identity', "
+                "N'ix_run_alert_list_order', N'ix_run_alert_list_events')"
+            )
+            assert len(restored) == 5
+            collation = db.query_one(
+                "SELECT collation_name FROM sys.columns "
+                "WHERE object_id = OBJECT_ID(N'alert_findings') AND name = N'key_field'"
+            )
+            assert collation is not None
+            assert collation["collation_name"] != "Latin1_General_100_BIN2"
+    finally:
+        # A failed assertion must not leave the blocker behind for later tests.
+        with connect(CONFIG.sql, DB) as db:
+            db.execute("DROP VIEW IF EXISTS dbo.blocks_016")
+            db.commit()
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
     assert applied == ["016_case_sensitive_key_fields"]
