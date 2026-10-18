@@ -53,3 +53,9 @@ The 2026-10-18 exact-application amendment (docs/alerts_bi_design.md) appends mi
 column with binary collation and refreshes the portal views that expose it. View columns and
 types in sql-views.json, CSV outputs, console routes and shared/operations interfaces are
 unchanged. Comparisons on `application` through the views are now exact.
+
+The 2026-10-18 exact-key_field amendment appends migration 016_case_sensitive_key_fields
+without modifying 001–015. It stores every `key_field` column with binary collation and
+refreshes portal_alerts, portal_alert_list and portal_decisions. View columns and types in
+sql-views.json, CSV outputs, console routes and shared/operations interfaces are unchanged.
+Comparisons on `key_field` through the views are now exact.

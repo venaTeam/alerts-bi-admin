@@ -41,8 +41,8 @@ Accepted 2026-10-13: the admin Deployment now runs `db setup` in a regular `migr
 init container before the UI, manual worker and proxy start. It uses the same admin image
 digest, SQL settings and credentials, selecting ADMIN_DATABASE when nonempty and otherwise
 SQL_DATABASE (the CLI default is alerts_bi_dev). It applies only missing revisions after
-checking the immutable ledger; current head is 015_case_sensitive_applications. No data
-reset occurs.
+checking the immutable ledger; current head is 016_case_sensitive_key_fields. No data reset
+occurs.
 
 015_case_sensitive_applications (2026-10-18) rebuilds the primary keys and indexes on every
 stored `application` column in one transaction. A failure rolls back completely. Its duration
@@ -59,6 +59,17 @@ Before the rollout:
    tables once and logs the work.
 3. Schedule a maintenance window outside the weekly job's schedule. Tell portal readers that
    pages may wait during the window.
+
+016_case_sensitive_key_fields (2026-10-18) does the same for every stored `key_field`
+column, in its own transaction: it rebuilds pk_alert_findings, pk_llm_verdicts and the
+decision and alert-list indexes that contain `key_field`, then refreshes portal_alerts,
+portal_alert_list and portal_decisions. Portal reads of those views and every query on
+`alert_findings`, `llm_verdicts`, `finding_decisions` and `run_alert_list` wait until it
+commits. It is roll-forward only in the same way: an image without 016 stops with `Can't
+locate revision identified by '016_case_sensitive_key_fields'`, and the revision refuses to
+downgrade. The checklist above applies. When one image brings 015 and 016, one backup and
+one window cover both, but the window must allow for `alert_findings` and `llm_verdicts`
+being rewritten twice. If 016 fails, 015 stays committed and the next start retries 016.
 
 Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
 new pod. A migration failure keeps the application containers unstarted and OpenShift retries

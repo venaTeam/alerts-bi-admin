@@ -1,5 +1,35 @@
 # Alerts BI — Design Document
 
+## Exact key_field identity in SQL — accepted 2026-10-18
+
+The exact-application amendment below left `key_field` on the database's case-insensitive
+default collation. Within one exact application, keys that differ only in case, such as
+`disk:Node-1` and `disk:node-1`, were therefore two identities in the engine and one value in
+SQL. The second insert into `alert_findings` violated `pk_alert_findings`, so the whole run
+failed to persist, and `llm_verdicts` kept a verdict for only one of the spellings. This has
+not been observed in data.
+
+Keys that differ only in case are separate alert identities. Migration
+`016_case_sensitive_key_fields` stores `key_field` with `Latin1_General_100_BIN2` in
+`alert_findings`, `llm_verdicts`, `finding_decisions` and `run_alert_list`. It rebuilds
+`pk_alert_findings`, `pk_llm_verdicts`, `ix_finding_decisions_identity`,
+`ix_run_alert_list_order` and `ix_run_alert_list_events` with their existing definitions and
+refreshes `portal_alerts`, `portal_alert_list` and `portal_decisions`. Both halves of the
+identity now compare exactly in keys, verdict reuse, decisions and the portal's identity
+lookups. Existing rows cannot contain case-only duplicates, so the rebuilt keys cannot
+conflict. Its downgrade is refused. The view column types in `contracts/sql-views.json` are
+unchanged.
+
+The consequences match the exact-application amendment below. Decisions and stored verdicts
+attach to the exact key spelling. If a source changes a key's casing between weeks, earlier
+decisions no longer apply to the new spelling and the alert is classified again. Where
+`key_field` breaks ordering ties, in the admin and portal work lists and the work-list CSV
+rows, uppercase letters now sort before lowercase ones.
+
+Not covered: SQL Server's string equality still ignores trailing spaces under a binary
+collation, so `node-1` and `node-1 ` remain one value in either column. It has not been
+observed. Changing it needs a separate approved change.
+
 ## Exact application identity in SQL — accepted 2026-10-18
 
 An alert's identity is the exact `application` + `key_field` pair (section 3.7). The engine
@@ -29,10 +59,12 @@ key (section 3.7). Second, ordering by `application` is now by code point: every
 letter sorts before every lowercase one, so `Other` precedes `moby`. This affects the order of
 the portal's application options and the work-list CSV rows for mixed-case names.
 
-Not covered: `key_field` keeps the default collation. Two keys that differ only in case within
-the same exact application still collide, as before. SQL Server's string equality also ignores
-trailing spaces, even under a binary collation, so `moby` and `moby ` remain one value. Neither
-has been observed. Changing either needs a separate approved change.
+Not covered: `key_field` kept the default collation, so two keys that differ only in case
+within the same exact application still collided. The exact key_field identity decision above
+(migration `016_case_sensitive_key_fields`, also 2026-10-18) closes that gap. SQL Server's
+string equality also ignores trailing spaces, even under a binary collation, so `moby` and
+`moby ` remain one value. It has not been observed. Changing it needs a separate approved
+change.
 `llm_batch_attempts.group_value` is audit text, not part of any key, and is unchanged.
 
 ## SQL connection encryption — accepted 2026-10-17
