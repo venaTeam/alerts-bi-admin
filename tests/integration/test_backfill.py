@@ -329,25 +329,18 @@ def test_console_backfill_flow_from_dialog_to_dismissal(
     first, second, third = latest - 3 * WEEK, latest - 2 * WEEK, latest - WEEK
     page = client.get(f"/teams/{TEAM}")
     assert page.status_code == 200
-    assert 'id="backfill-weeks"' in page.text and f'value="{third:%Y-%m-%d}"' in page.text
-    assert "inside Elasticsearch retention have no run" in page.text
+    assert 'id="new-runs"' in page.text and f'value="{third:%Y-%m-%d}"' in page.text
     weeks = [f"{day:%Y-%m-%d}" for day in (third, first, second)]
-    accepted = post(
-        client,
-        f"/teams/{TEAM}/backfill",
-        {"week": weeks, "llm": "fake", "submission_key": "form-1"},
-    )
+    # Several weeks picked in the New runs dialog are accepted as one backfill.
+    form = {"week": weeks, "llm": "fake", "submission_key": "form-1", "weeks_form": "1"}
+    accepted = post(client, f"/teams/{TEAM}/trigger", form)
     assert accepted.status_code == 303, accepted.text
-    assert "Backfill+accepted.+3+runs+queued" in accepted.headers["location"]
-    again = post(
-        client,
-        f"/teams/{TEAM}/backfill",
-        {"week": weeks, "llm": "fake", "submission_key": "form-1"},
-    )
+    assert "3+runs+accepted" in accepted.headers["location"]
+    again = post(client, f"/teams/{TEAM}/trigger", form)
     assert "done=" in again.headers["location"]
     page = client.get(f"/teams/{TEAM}").text
-    assert "Backfill · 3 weeks" in page and "data-backfill-url" in page
-    assert "A backfill is already in progress for this team" in page
+    assert "Running 3 weeks" in page and "data-backfill-url" in page
+    assert "data-backfill-active" in page and "Several weeks are already running" in page
     with connect(CONFIG.sql, DB) as db:
         stored = db.query_one("SELECT backfill_id FROM run_backfills")
     assert stored is not None
@@ -375,7 +368,7 @@ def test_console_backfill_flow_from_dialog_to_dismissal(
     assert weeks_now[2]["result_url"].endswith("#selected-run")
     page = client.get(f"/teams/{TEAM}").text
     assert "Finished with 1 failed" in page and "Retry failed week" in page
-    assert "Backfill</small>" in page or "· Backfill" in page
+    assert "Multi-week run" in page
     retried = post(client, f"/backfills/{backfill_id}/retry")
     assert "Retry+queued+for+1+failed+week" in retried.headers["location"]
     weeks_now = client.get(f"/backfills/{backfill_id}").json()["weeks"]
@@ -385,9 +378,9 @@ def test_console_backfill_flow_from_dialog_to_dismissal(
     cancelled = post(client, f"/backfills/{backfill_id}/cancel")
     assert "1+queued+week+cancelled" in cancelled.headers["location"]
     dismissed = post(client, f"/backfills/{backfill_id}/dismiss")
-    assert "Backfill+dismissed" in dismissed.headers["location"]
+    assert "done=Dismissed" in dismissed.headers["location"]
     page = client.get(f"/teams/{TEAM}").text
-    assert "data-backfill-url" not in page and "Backfill · 3 weeks" not in page
+    assert "data-backfill-url" not in page and "3 weeks" not in page
     assert client.post(f"/backfills/{backfill_id}/cancel", data={}).status_code == 403
     assert client.get("/backfills/" + "0" * 32).status_code == 404
 
@@ -512,12 +505,12 @@ def test_retried_backfill_stays_visible_after_dismissal_or_a_newer_backfill(
     run_failing_week()
     # One tab dismisses the failed backfill; another still holds its Retry form.
     dismissed = post(client, f"/backfills/{older['backfill_id']}/dismiss")
-    assert "Backfill+dismissed" in dismissed.headers["location"]
-    assert "Backfill · 1 week" not in client.get(f"/teams/{TEAM}").text
+    assert "done=Dismissed" in dismissed.headers["location"]
+    assert 'id="backfill"' not in client.get(f"/teams/{TEAM}").text
     retried = post(client, f"/backfills/{older['backfill_id']}/retry")
     assert "Retry+queued" in retried.headers["location"]
     page = client.get(f"/teams/{TEAM}").text
-    assert panel in page and "A backfill is already in progress for this team" in page
+    assert panel in page and "data-backfill-active" in page
     with connect(CONFIG.sql, DB) as db:
         assert backfill.get_backfill(db, older["backfill_id"])["dismissed_at"] is None
     # A newer backfill finishes after the older one fails again; retrying the older one
@@ -613,7 +606,7 @@ def test_queued_manual_status_is_public_and_shown_in_the_workspace(
     assert response.status_code == 202, response.text
     assert response.json()["status"] == "queued"
     page = client.get(f"/teams/{TEAM}").text
-    assert "Queued. It starts before the next backfill week." in page
+    assert "Queued. It starts before the next week of a multi-week run." in page
 
 
 def test_interrupted_week_fails_and_asks_to_retry_the_week(api: ApiSettings) -> None:

@@ -38,11 +38,14 @@ def test_malformed_or_noncanonical_tokens_are_rejected(segment: str) -> None:
         decode_team_id(segment)
 
 
-def test_global_trigger_selector_carries_server_encoded_actions() -> None:
-    from src.pages import trigger_form
+def test_new_runs_dialog_carries_the_server_encoded_action() -> None:
+    from datetime import UTC, datetime
 
-    markup = trigger_form(
-        "team/a", "csrf", teams=[("team/a", "Slash team", False), ("a%2Fb", "Percent team", False)]
+    from src.pages import new_runs_dialog
+
+    markup = new_runs_dialog("team/a", "csrf", "Slash team", {}, datetime(2026, 10, 14, tzinfo=UTC))
+    assert 'action="/teams/~7465616d2f61/trigger"' in markup
+    markup = new_runs_dialog(
+        "a%2Fb", "csrf", "Percent team", {}, datetime(2026, 10, 14, tzinfo=UTC)
     )
-    assert 'value="team/a" data-trigger-url="/teams/~7465616d2f61/trigger"' in markup
-    assert 'value="a%2Fb" data-trigger-url="/teams/~6125324662/trigger"' in markup
+    assert 'action="/teams/~6125324662/trigger"' in markup

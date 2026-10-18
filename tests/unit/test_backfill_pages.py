@@ -1,4 +1,4 @@
-"""Backfill week selection and rendering without SQL (docs/backfill.md)."""
+"""Week selection and multi-week rendering without SQL (docs/backfill.md, 2026-10-19 redesign)."""
 
 from __future__ import annotations
 
@@ -53,54 +53,75 @@ def calendar() -> dict[datetime, str]:
     return {datetime.fromisoformat(day): state for day, state in naive.items()}
 
 
-def checkbox(html: str, day: str) -> str:
-    match = re.search(
-        rf'<label class="abi-cal-mon ([^"]*)"[^>]*><input ([^>]*value="{day}"[^>]*)>', html
-    )
-    assert match, day
-    return match.group(1) + " | " + match.group(2)
-
-
-def test_backfill_dialog_uses_sunday_first_calendars_with_selectable_mondays() -> None:
-    html = pages.backfill_form("checkout-api", "token", "Checkout API", calendar(), NOW)
-    assert 'id="backfill-weeks"' in html and 'action="/teams/checkout-api/backfill"' in html
-    assert re.findall(r'class="abi-cal-name">([^<]+)<', html) == [
-        "August 2026",
-        "September 2026",
-        "October 2026",
+def options(html: str) -> list[tuple[str, bool, str]]:
+    return [
+        (value, checked == " checked", note)
+        for value, checked, note in re.findall(
+            r'<input type="checkbox" name="week" value="([\d-]+)"( checked)?>'
+            r'<span class="abi-week-name">[^<]*</span><span class="abi-week-note[^"]*">([^<]*)<',
+            html,
+        )
     ]
-    grid = html.split('class="abi-cal-grid">', 1)[1]
-    headers = re.findall(r'class="abi-cal-dow( mon)?" aria-hidden="true">(\w+)<', grid)[:7]
-    assert [name for _, name in headers] == ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"]
-    assert headers[1][0] == " mon"
-    # August 1 2026 is a Saturday, so the first Sunday-first row starts on July 26.
-    assert re.search(
-        r'abi-cal-dow" aria-hidden="true">Sa</span><span class="abi-cal-day out"[^>]*>26<', html
-    )
-    oldest = checkbox(html, "2026-08-03")
-    assert (
-        "is-missing is-expiring" in oldest and "data-missing" in oldest and "disabled" not in oldest
-    )
-    assert "Leaves retention on 19 Oct" in oldest
-    replaced = checkbox(html, "2026-09-07")
-    assert replaced.startswith("is-completed") and "data-missing" not in replaced
-    assert "disabled" not in replaced and "Runs this week again" in replaced
-    for day in ("2026-10-12", "2026-08-24", "2026-10-19", "2026-10-26"):
-        assert "disabled" in checkbox(html, day), day
-    assert checkbox(html, "2026-10-19").startswith("is-future")
-    assert "Select all 7 without a run" in html
-    assert "leaves Elasticsearch retention on 19 Oct, in 4 days" in html
+
+
+def test_new_runs_lists_only_runnable_weeks_newest_first_with_the_newest_checked() -> None:
+    html = pages.new_runs_dialog("checkout-api", "token", "Checkout API", calendar(), NOW)
+    assert 'id="new-runs"' in html and 'action="/teams/checkout-api/trigger"' in html
+    assert 'name="weeks_form" value="1"' in html and 'name="submission_key"' in html
+    listed = options(html)
+    # Published (10-12, 10-05), active (08-24), expired and incomplete weeks are not offered.
+    assert [value for value, _, _ in listed] == [
+        "2026-09-28",
+        "2026-09-21",
+        "2026-09-14",
+        "2026-09-07",
+        "2026-08-31",
+        "2026-08-17",
+        "2026-08-10",
+        "2026-08-03",
+    ]
+    assert [value for value, checked, _ in listed if checked] == ["2026-09-28"]
+    notes = {value: note for value, _, note in listed}
+    assert notes["2026-09-07"] == "Unpublished run · runs again"
+    assert notes["2026-09-28"] == "No run"
+    assert notes["2026-08-03"] == "No run · leaves retention 19 Oct"
+    assert 'class="abi-week-note warn">No run · leaves retention 19 Oct' in html
     assert '<option value="live" selected>' in html
-    assert "27 Jul to 12 Oct 2026 · 11 weeks" in html
+    assert ">Start 1 run</button>" in html and "1 of 8 selected" in html
+    assert "data-backfill-active" not in html
 
 
-def test_gap_banner_counts_retained_weeks_without_a_run() -> None:
-    banner = pages.gap_banner(calendar(), NOW)
-    assert "7 weeks inside Elasticsearch retention have no run." in banner
-    assert "The oldest, 27 Jul" in banner and "3 Aug 2026, leaves retention on 19 Oct" in banner
-    assert 'data-dialog="backfill-weeks"' in banner
+def test_new_runs_preselects_a_failed_week_and_warns_while_weeks_run() -> None:
+    html = pages.new_runs_dialog(
+        "checkout-api",
+        "token",
+        "Checkout API",
+        calendar(),
+        NOW,
+        preselect=at("2026-09-07"),
+        backfill_active=True,
+    )
+    assert [value for value, checked, _ in options(html) if checked] == ["2026-09-07"]
+    assert "data-backfill-active" in html and "Several weeks are already running" in html
+
+
+def test_new_runs_without_runnable_weeks_disables_starting() -> None:
+    everything = {end.replace(tzinfo=None): "published" for end in pages.week_states({}, NOW)}
+    html = pages.new_runs_dialog("checkout-api", "token", "Checkout API", everything, NOW)
+    assert not options(html) and "is published, queued or running" in html
+    assert '<button type="submit" class="abi-btn primary" disabled>Start runs</button>' in html
+    assert pages.runnable_weeks(everything, NOW) == []
+
+
+def test_retention_note_appears_only_for_a_gap_about_to_expire() -> None:
+    note = pages.retention_note(calendar(), NOW, at("2026-07-27"))
+    assert "27 Jul \u2013 3 Aug 2026" in note and "leaves Elasticsearch retention on 19 Oct" in note
+    assert 'data-dialog="new-runs" data-week="2026-08-03"' in note
     everything = {end.replace(tzinfo=None): "completed" for end in pages.week_states({}, NOW)}
-    assert pages.gap_banner(everything, NOW) == ""
+    assert pages.retention_note(everything, NOW, at("2026-07-27")) == ""
+    # Weeks before a team's first run are not a gap, and a team without runs has none.
+    assert pages.retention_note(calendar(), NOW, at("2026-08-03")) == ""
+    assert pages.retention_note({}, NOW, None) == ""
 
 
 def week(job: str, day: str, status: str, **extra: object) -> dict[str, object]:
@@ -126,29 +147,29 @@ BACKFILL = {
 }
 
 
-def test_running_backfill_panel_polls_and_offers_cancel_and_remove() -> None:
+def test_running_weeks_panel_polls_and_offers_cancel_and_remove() -> None:
     weeks = [
         week("a", "2026-08-03", "completed"),
         week("b", "2026-08-10", "running"),
         week("c", "2026-08-17", "queued"),
     ]
     html = pages.backfill_panel("checkout-api", BACKFILL, weeks, "token")
-    assert "Backfill · 3 weeks" in html and "1 of 3 completed · 1 running · 1 queued" in html
+    assert "Running 3 weeks" in html and "1 of 3 completed · 1 running · 1 queued" in html
     assert f'data-backfill-url="/backfills/{"f" * 32}"' in html
     assert 'data-backfill-state="a:completed,b:running,c:queued"' in html
     assert f'action="/backfills/{"f" * 32}/cancel"' in html and "Cancel 1 queued week" in html
     assert 'action="/run-jobs/c/cancel"' in html and "Dismiss" not in html
-    assert '<progress class="abi-bf-bar" max="3" value="1"' in html
+    assert '<progress class="abi-bar" max="3" value="1"' in html
     assert "Model live" in html and "Open run" in html
 
 
-def test_finished_backfill_panel_offers_retry_and_dismiss_without_polling() -> None:
+def test_finished_weeks_panel_offers_retry_and_dismiss_without_polling() -> None:
     weeks = [
         week("a", "2026-08-03", "completed"),
         week("b", "2026-08-10", "failed", error_summary="Analysis failed.", attempts=2),
     ]
     html = pages.backfill_panel("checkout-api", BACKFILL, weeks, "token")
-    assert "data-backfill-url" not in html
+    assert "data-backfill-url" not in html and "Ran 2 weeks" in html
     assert "Finished with 1 failed" in html and "Retry failed week" in html
     assert 'action="/run-jobs/b/retry"' in html and "attempt 2" in html
     assert f'action="/backfills/{"f" * 32}/dismiss"' in html
