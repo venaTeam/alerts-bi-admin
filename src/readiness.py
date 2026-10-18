@@ -82,6 +82,7 @@ def check_schema(db: Database) -> None:
         "013_analysis_checkpoints",
         "014_backfills",
         "015_case_sensitive_applications",
+        "016_case_sensitive_key_fields",
     ):
         if (
             db.query_one(
