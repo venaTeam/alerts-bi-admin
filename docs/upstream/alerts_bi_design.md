@@ -357,7 +357,7 @@ Six problems shape the design.
 
 ### 3.1 Team attribution is hard in v1
 
-In **v2** it is trivial: `operator` is derived from the API key and is 1:1 with a team.
+In **v2**, `operator` is derived from the API key. Registry entries may intentionally share that value (amended 2026-10-18).
 
 In **v1**, `operator` is an open free-text field and teams use multiple custom values, so having a value does not identify a team. There is no reliable ownership column.
 
@@ -365,20 +365,20 @@ In **v1**, `operator` is an open free-text field and teams use multiple custom v
 
 This supersedes two earlier positions, both now withdrawn: that the panel's SQL query *is* the ownership definition, and that it is a *seed* from which ownership is expanded. Both were attempts to recover an operator list from a query, and the reasoning that killed the first one applies to the second — **a panel query cannot define ownership, because it is a view.** A team whose panel reads `WHERE operator = 'batch-team' AND application = 'test'` also sends alerts under that operator with a different `application`; those alerts are theirs, are in the pipeline, and nobody on that team ever sees them. A query that both narrows *and* excludes cannot yield the full set no matter how carefully it is parsed. Asking for the list directly is strictly better.
 
-Two facts make the operator list sufficient on its own:
+The supplied operator mapping determines each selected team's alert set:
 
-* **`operator` values are team-exclusive.** Two teams picking the same free-text string is possible in principle but vanishingly unlikely in practice, so an operator value belongs to one team.
-* **`application` values are not.** An application is owned by a specific team, but two teams may share an application *name* — they will differ in `operator`. The pair (`operator`, `application`) is team-unique while `application` alone is not, so `application` may never claim alerts. In the post-MVP company-wide attribution audit, application is used only as a **suggested** owner for unclaimed alerts whose operator is useless, offered for human confirmation and never auto-assigned.
+* **Operator values may be shared.** As requested on 2026-10-18, the registry accepts repeated values within one v1 list and across teams, including v1/v2 overlaps. Each selected team independently queries its configured operators; the same alert may therefore appear in separate teams' runs. Repeated filter values do not multiply rows within a run.
+* **Applications never establish ownership.** Neither `application` nor (`operator`, `application`) is assumed to identify a unique registry team. In the post-MVP attribution audit, application may only suggest an owner for human confirmation.
 
 What this buys beyond correctness: **the LLM leaves the ownership path entirely.** Section 5.2's central risk — a misclassified predicate silently changing which alerts belong to a team, with no error raised — can no longer occur, because no classification feeds ownership. The confidence routing, the delta check and the SQL-hash freeze all existed to contain that risk.
 
 The registry stays **versioned**, for the same reason as before: an operator list edited later must be distinguishable from a team whose behaviour changed, and history must be re-runnable.
 
-**The registry is a validated JSON document at `config/teams.json`** (decided 2026-08-29), with a checked-in JSON Schema. Its root contains `registry_version` and `teams`. Each team contains a stable unique `team_id`, mutable `display_name`, `v1_operators`, nullable `v2_operator`, and optional `panels`. A panel contains a stable panel id, target schema, SQL text, and supplied variable definitions. `v1_operators` may be empty after migration and `v2_operator` may be `null` before migration, but at least one source operator must exist. Exact operator values are case-sensitive and may not be assigned to more than one team; case variants used by one v1 team are listed explicitly. Registry validation completes before any ES query.
+**The registry is a validated JSON document at `config/teams.json`** (decided 2026-08-29), with a checked-in JSON Schema. Its root contains `registry_version` and `teams`. Each team contains a stable unique `team_id`, mutable `display_name`, `v1_operators`, nullable `v2_operator`, and optional `panels`. A panel contains a stable panel id, target schema, SQL text, and supplied variable definitions. `v1_operators` may be empty after migration and `v2_operator` may be `null` before migration, but at least one source operator must exist. Exact operator values remain case-sensitive; case variants used by one v1 team are listed explicitly. **Amended 2026-10-18 (user decision):** duplicate operators are allowed within and across entries. `team_id` remains a nonempty, unique string, but has no regex or slug-format restriction; supplied IDs are preserved without normalization. This supersedes the previous operator-exclusivity and lowercase-slug validation rules. Registry validation completes before any ES query.
 
 Every run stores the declared `registry_version`, SHA-256 of the complete registry document, and the selected team entry as an immutable JSON snapshot. The repository carries a mock registry built from the existing mock teams; production values replace or extend the data without changing the application contract.
 
-This is a v1-only problem. v2's `operator` is derived from the API key and is 1:1 with a team, so ownership there is exact — one more thing the migration structurally fixes.
+V2's `operator` is derived from the API key, so matching does not depend on free-text attribution. As amended 2026-10-18, multiple registry teams may intentionally map to that same operator; each selected team's alert set follows its supplied mapping.
 
 ### 3.2 ...but their queries also hide their garbage
 

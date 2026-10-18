@@ -84,7 +84,7 @@ At startup, the tool:
 
 A run never scans every team. Cross-team comparison is outside the MVP.
 
-The registry is validated before any query. V1 operator lists may be empty after migration and the v2 operator may be absent before migration, but the selected entry must contain at least one source operator and no exact operator may belong to two teams. The run stores the registry version, complete-file hash, and an immutable snapshot of the selected entry.
+The registry is validated before any query. V1 operator lists may be empty after migration and the v2 operator may be absent before migration, but the selected entry must contain at least one source operator and team IDs must be nonempty and unique. As amended 2026-10-18, operator values may repeat within and across entries, and team IDs have no regex restriction. Matching remains exact and case-sensitive; each selected team independently queries its own operators. The run stores the registry version, complete-file hash, and an immutable snapshot of the selected entry.
 
 ## 2. Read the selected team's alerts
 
