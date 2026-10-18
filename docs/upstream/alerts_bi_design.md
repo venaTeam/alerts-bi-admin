@@ -22,6 +22,13 @@ cannot conflict. The migration rebuilds the affected keys and indexes once. Its 
 refused, because rows written afterwards may collide under the old collation. The view column
 types in `contracts/sql-views.json` are unchanged.
 
+Two visible consequences follow. First, decisions and stored verdicts attach to the exact
+spelling. If a source changes an application's casing between weeks, earlier decisions no
+longer apply to the new spelling and its alerts are classified again, as with an enriched v2
+key (section 3.7). Second, ordering by `application` is now by code point: every uppercase
+letter sorts before every lowercase one, so `Other` precedes `moby`. This affects the order of
+the portal's application options and the work-list CSV rows for mixed-case names.
+
 Not covered: `key_field` keeps the default collation. Two keys that differ only in case within
 the same exact application still collide, as before. SQL Server's string equality also ignores
 trailing spaces, even under a binary collation, so `moby` and `moby ` remain one value. Neither

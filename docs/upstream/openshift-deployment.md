@@ -45,11 +45,20 @@ checking the immutable ledger; current head is 015_case_sensitive_applications. 
 reset occurs.
 
 015_case_sensitive_applications (2026-10-18) rebuilds the primary keys and indexes on every
-stored `application` column. Its duration grows with the stored findings, verdicts and read
-models, and it holds schema locks while it runs. Deploy it outside the weekly job's schedule.
-Once 015 is applied, an earlier admin image's `migrate` init container stops with `Can't
-locate revision identified by '015_case_sensitive_applications'`. Roll forward instead of
-redeploying that image.
+stored `application` column in one transaction. A failure rolls back completely. Its duration
+grows with the stored findings, verdicts and read models, and its schema locks make portal
+reads of the eight refreshed views, and every query on the seven tables, wait until it
+commits. Once it is applied, an earlier admin image's `migrate` init container stops with
+`Can't locate revision identified by '015_case_sensitive_applications'`, and the revision
+refuses to downgrade. Restoring the database is then the only way back to an earlier image.
+Before the rollout:
+
+1. Take a database backup and confirm that it restores.
+2. Record the row counts of `alert_findings`, `llm_verdicts` and `run_alert_list` and the
+   transaction log's free space, and size the window from them. The rebuild rewrites those
+   tables once and logs the work.
+3. Schedule a maintenance window outside the weekly job's schedule. Tell portal readers that
+   pages may wait during the window.
 
 Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
 new pod. A migration failure keeps the application containers unstarted and OpenShift retries
