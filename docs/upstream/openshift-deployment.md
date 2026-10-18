@@ -41,7 +41,31 @@ Accepted 2026-10-13: the admin Deployment now runs `db setup` in a regular `migr
 init container before the UI, manual worker and proxy start. It uses the same admin image
 digest, SQL settings and credentials, selecting ADMIN_DATABASE when nonempty and otherwise
 SQL_DATABASE (the CLI default is alerts_bi_dev). It applies only missing revisions after
-checking the immutable ledger; current head is 011_run_job_keys. No data reset occurs.
+checking the immutable ledger; current head is 015_case_sensitive_applications. No data
+reset occurs.
+
+015_case_sensitive_applications (2026-10-18) rebuilds the primary keys and indexes on every
+stored `application` column in one transaction. A failure rolls back completely. Its duration
+grows with the stored findings, verdicts and read models, and its schema locks make portal
+reads of the eight refreshed views, and every query on the seven tables, wait until it
+commits. Once it is applied, an earlier admin image's `migrate` init container stops with
+`Can't locate revision identified by '015_case_sensitive_applications'`, and the revision
+refuses to downgrade. Restoring the database is then the only way back to an earlier image.
+Before the rollout:
+
+1. Take a database backup and confirm that it restores.
+2. Record the row counts of `alert_findings`, `llm_verdicts` and `run_alert_list` and the
+   transaction log's free space, and size the window from them. The rebuild rewrites those
+   tables once and logs the work.
+3. Schedule a maintenance window outside the weekly job's schedule. Tell portal readers that
+   pages may wait during the window.
+
+Nothing cuts the rebuild short. The migration connection sets no SQL query timeout:
+`SQL_REQUEST_TIMEOUT_MS` applies to application queries, not to `db setup`. The admin
+Deployment sets no `activeDeadlineSeconds`. Keep it that way, and add no init-container deadline
+shorter than the sized window. If the pod is killed anyway, 015 rolls back and the next start
+repeats the whole lock window. When the sizing suggests a long rebuild, stop the UI and worker
+and run deploy/migrate.yaml by hand instead.
 
 Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
 new pod. A migration failure keeps the application containers unstarted and OpenShift retries

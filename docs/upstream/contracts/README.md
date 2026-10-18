@@ -47,3 +47,9 @@ modifying 001–013: the run_backfills table, run_jobs.backfill_id, and the queu
 job states. console-http.json records the backfill routes, claim order and weekly wait, and
 console-openapi.json is regenerated with BackfillOut and the extended job states. Portal views,
 CSV outputs and shared/operations interfaces are unchanged.
+
+The 2026-10-18 exact-application amendment (docs/alerts_bi_design.md) appends migration
+015_case_sensitive_applications without modifying 001–014. It stores every `application`
+column with binary collation and refreshes the portal views that expose it. View columns and
+types in sql-views.json, CSV outputs, console routes and shared/operations interfaces are
+unchanged. Comparisons on `application` through the views are now exact.

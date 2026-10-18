@@ -1,30 +1,39 @@
 # Alerts BI — Design Document
 
-## Run output files removed — accepted 2026-10-17
+## Exact application identity in SQL — accepted 2026-10-18
 
-The product owner approved removing CSV file writing from runs. Manual HTTP and worker runs,
-worker interruption recovery and the weekly scheduler persist to SQL and write no files. The
-three CSV downloads were already rendered from committed SQL on every request; their routes,
-filenames and columns are unchanged. The deployed output directory was an `emptyDir` volume
-wiped on every restart, so nothing read those files.
+An alert's identity is the exact `application` + `key_field` pair (section 3.7). The engine
+already compared these values exactly. Every stored `application` column, however, used the
+database's case-insensitive default collation. Applications such as `Moby` and `moby` in one
+team's window were therefore two identities in memory and one value in SQL. The second insert
+into `run_summaries`, `run_application_daily` or, for a shared `key_field`, `alert_findings`
+violated the primary key, so the whole run failed to persist. Rerunning failed the same way
+until the data changed. Across separate weeks, the portal's application options merged the
+spellings, and its filter matched both.
 
-Removed with the files: the post-commit export warning (a committed result is a clean
-completion), deletion-time generated report cleanup and its distinct failure message, the
-`remove-run-html` command, the `ADMIN_OUT_DIR` and `API_OUT_DIR` settings, and the output
-volume mounts in the deployment manifests. `POST /runs` no longer returns the `out_dir` field
-or the `X-Alerts-BI-Out-Dir` header; its other fields and its `files` download links are
-unchanged. Removing the field breaks any API consumer that reads `out_dir`.
+Applications that differ only in case are separate applications. Migration
+`015_case_sensitive_applications` stores `application` with `Latin1_General_100_BIN2` in
+`alert_findings`, `llm_verdicts`, `finding_decisions`, `run_alert_list`, `run_summaries`,
+`run_application_daily` and `run_v1_rules`, and refreshes the portal views that expose it.
+Keys, verdict reuse, decisions, application filters and the portal's application options
+compare exactly, matching the engine and the existing case-sensitive operator and suppression
+rules (section 7.6). Existing rows cannot contain case-only duplicates, so the rebuilt keys
+cannot conflict. The migration rebuilds the affected keys and indexes once. Its downgrade is
+refused, because rows written afterwards may collide under the old collation. The view column
+types in `contracts/sql-views.json` are unchanged.
 
-File export remains an explicit operator action: `alerts-bi-admin report` (`--out`, default
-`out/<run id prefix>` in the working directory), `run --out`, `weekly --out` and acceptance
-verification `--out`. Without `--out`, CLI `run` and `weekly` write no files. Commands that
-export still hold the shared execution lock through their file writes. Deleting a run removes
-nothing from disk: CSVs an operator exported, including `alert_worklist.csv`, stay where they
-were written until removed by hand. Files on an earlier image's emptyDir output volume are
-discarded when its pod is replaced. This supersedes the
-file-writing, export-warning, recovery-regeneration and generated-file cleanup statements in
-section 7.12, [async-runs.md](async-runs.md) and the 2026-10-13 amendments below. No migration
-is added; SQL views, CSV columns and the shared/operations libraries are unchanged.
+Two visible consequences follow. First, decisions and stored verdicts attach to the exact
+spelling. If a source changes an application's casing between weeks, earlier decisions no
+longer apply to the new spelling and its alerts are classified again, as with an enriched v2
+key (section 3.7). Second, ordering by `application` is now by code point: every uppercase
+letter sorts before every lowercase one, so `Other` precedes `moby`. This affects the order of
+the portal's application options and the work-list CSV rows for mixed-case names.
+
+Not covered: `key_field` keeps the default collation. Two keys that differ only in case within
+the same exact application still collide, as before. SQL Server's string equality also ignores
+trailing spaces, even under a binary collation, so `moby` and `moby ` remain one value. Neither
+has been observed. Changing either needs a separate approved change.
+`llm_batch_attempts.group_value` is audit text, not part of any key, and is unchanged.
 
 ## SQL connection encryption — accepted 2026-10-17
 
@@ -86,6 +95,32 @@ The product owner raises option 1 with the database-owning team; nobody from thi
 has contacted that team. Until a reader login exists, the 2026-09-27 rule stands. Switching
 the portal to it changes only the portal's `SQL_USER` and `SQL_PASSWORD` values. Record that
 switch in this section, with its date.
+
+## Run output files removed — accepted 2026-10-17
+
+The product owner approved removing CSV file writing from runs. Manual HTTP and worker runs,
+worker interruption recovery and the weekly scheduler persist to SQL and write no files. The
+three CSV downloads were already rendered from committed SQL on every request; their routes,
+filenames and columns are unchanged. The deployed output directory was an `emptyDir` volume
+wiped on every restart, so nothing read those files.
+
+Removed with the files: the post-commit export warning (a committed result is a clean
+completion), deletion-time generated report cleanup and its distinct failure message, the
+`remove-run-html` command, the `ADMIN_OUT_DIR` and `API_OUT_DIR` settings, and the output
+volume mounts in the deployment manifests. `POST /runs` no longer returns the `out_dir` field
+or the `X-Alerts-BI-Out-Dir` header; its other fields and its `files` download links are
+unchanged. Removing the field breaks any API consumer that reads `out_dir`.
+
+File export remains an explicit operator action: `alerts-bi-admin report` (`--out`, default
+`out/<run id prefix>` in the working directory), `run --out`, `weekly --out` and acceptance
+verification `--out`. Without `--out`, CLI `run` and `weekly` write no files. Commands that
+export still hold the shared execution lock through their file writes. Deleting a run removes
+nothing from disk: CSVs an operator exported, including `alert_worklist.csv`, stay where they
+were written until removed by hand. Files on an earlier image's emptyDir output volume are
+discarded when its pod is replaced. This supersedes the
+file-writing, export-warning, recovery-regeneration and generated-file cleanup statements in
+section 7.12, [async-runs.md](async-runs.md) and the 2026-10-13 amendments below. No migration
+is added; SQL views, CSV columns and the shared/operations libraries are unchanged.
 
 ## Multi-week backfill — accepted 2026-10-14
 
