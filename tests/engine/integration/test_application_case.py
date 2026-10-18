@@ -63,6 +63,18 @@ APPLICATION_VIEWS = (
     "portal_run_summaries",
     "portal_v1_rules",
 )
+# Keys and indexes 015 drops and recreates, with whether each is the primary key.
+REBUILT_KEYS = {
+    ("alert_findings", "pk_alert_findings"): True,
+    ("llm_verdicts", "pk_llm_verdicts"): True,
+    ("run_summaries", "pk_run_summaries"): True,
+    ("run_application_daily", "pk_run_application_daily"): True,
+    ("run_v1_rules", "pk_run_v1_rules"): True,
+    ("finding_decisions", "ix_finding_decisions_identity"): False,
+    ("run_alert_list", "ix_run_alert_list_order"): False,
+    ("run_alert_list", "ix_run_alert_list_application"): False,
+    ("run_alert_list", "ix_run_alert_list_events"): False,
+}
 
 
 @pytest.fixture(scope="module")
@@ -212,14 +224,27 @@ def test_each_case_variant_reuses_only_its_own_stored_verdict(
     for application in APPLICATIONS:
         stored = verdicts[verdict_key(application, KEY)]
         assert stored["application"] == application
+        # The fake model gives every alert the same verdict; mark each stored row so a rerun
+        # that borrowed the other spelling's verdict would carry the wrong marker.
+        db.execute(
+            "UPDATE llm_verdicts SET justification=:marker "
+            "WHERE application=:app AND key_field=:key AND prompt_version=:prompt "
+            "AND model_version=:model",
+            {
+                "marker": f"Stored verdict for {application}",
+                "app": application,
+                "key": KEY,
+                "prompt": stored["prompt_version"],
+                "model": stored["model_version"],
+            },
+        )
+    db.commit()
 
     rerun_llm = FakeLlmClient()
     rerun = _execute(monkeypatch, registry, db, rerun_llm)
     assert rerun_llm.calls == []
-    by_application = {finding["application"]: finding for finding in rerun.findings}
-    for application in APPLICATIONS:
-        stored = verdicts[verdict_key(application, KEY)]
-        assert by_application[application]["llm_principle_id"] == stored["principle_id"]
+    justifications = {f["application"]: f["llm_justification"] for f in rerun.findings}
+    assert justifications == {a: f"Stored verdict for {a}" for a in APPLICATIONS}
     persist_run(db, rerun)
 
 
@@ -234,3 +259,25 @@ def test_every_stored_application_column_compares_exactly(db: Database) -> None:
     assert {
         owner: collation for owner, collation in collations.items() if collation != BINARY
     } == {}
+
+    keyed = db.query(
+        "SELECT OBJECT_NAME(i.object_id) AS owner, i.name AS index_name, i.is_primary_key "
+        "FROM sys.indexes AS i "
+        "JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id "
+        "JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id "
+        "WHERE c.name = N'application' AND ic.is_included_column = 0"
+    )
+    found = {(str(r["owner"]), str(r["index_name"])): bool(r["is_primary_key"]) for r in keyed}
+    assert {key: found.get(key) for key in REBUILT_KEYS} == REBUILT_KEYS
+
+
+def test_the_reader_role_reads_every_refreshed_view(db: Database) -> None:
+    db.execute("IF USER_ID(N'case_reader') IS NULL CREATE USER case_reader WITHOUT LOGIN")
+    db.execute("ALTER ROLE alerts_bi_reader ADD MEMBER case_reader")
+    db.commit()
+    db.execute("EXECUTE AS USER = N'case_reader'")
+    try:
+        for view in APPLICATION_VIEWS:
+            db.query(f"SELECT TOP 1 application FROM {view}")
+    finally:
+        db.execute("REVERT")
