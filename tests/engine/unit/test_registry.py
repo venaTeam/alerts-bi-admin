@@ -321,7 +321,7 @@ def test_accepts_case_distinct_team_ids() -> None:
 
 
 @pytest.mark.parametrize("field", ["v1_operators", "v2_operator"])
-def test_repeated_operators_do_not_allow_empty_operator_values(field: str) -> None:
+def test_rejects_empty_operator_values(field: str) -> None:
     doc = base()
     doc["teams"][0][field] = ["op-a", ""] if field == "v1_operators" else ""
     with pytest.raises(RegistryError):

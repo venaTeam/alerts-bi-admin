@@ -67,7 +67,10 @@ manual runs, weekly jobs and weekly status all honor that environment variable.
 Runs and weekly jobs write no files: the three CSV downloads render from SQL on request.
 `report` exports a stored run's CSVs to `--out` (default `out/<run id prefix>`), and
 `run --out` and `weekly --out` also export. Deploy the updated manifests (no ADMIN_OUT_DIR,
-output mounts or weekly `--out`) with this image; roll back with the previous manifests and image. An explicit `--registry` takes precedence over
+output mounts or weekly `--out`) with this image. Restoring older manifests and images is
+subject to the database recovery requirements for migrations 015–017 in
+`docs/upstream/openshift-deployment.md`; image-only rollback is insufficient once an
+unknown revision has been applied. An explicit `--registry` takes precedence over
 `ADMIN_REGISTRY_PATH`.
 
 Delete run is an authenticated, CSRF-protected POST with explicit permanent-deletion
@@ -175,7 +178,7 @@ scorecards are removed entirely, including on-demand routes and download links. 
 team workspace remains available. POST /runs returns JSON only, without a scorecard field.
 Since 2026-10-17 it also omits the `out_dir` field and the `X-Alerts-BI-Out-Dir` header, a
 breaking change for callers that read them; use the `files` download links instead.
-Operations 0.2.6 uses shared 0.1.8 with stored summaries and pooled web reads. Shared 0.1.7 applies `SQL_ENCRYPT=true` as required TLS through pymssql 2.4.3 or later; the server certificate is not validated, so TLS stops passive reading but not an active interceptor. It rejects unknown `SQL_ENCRYPT` values, refuses `SQL_TRUST_SERVER_CERTIFICATE=false` (the driver cannot validate certificates), and logs `sql.unencrypted` once per process for each SQL server when encryption is off. Web apps refuse an unenforceable setting at startup; commands and jobs refuse it before their first SQL connection. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect.
+Operations 0.2.6 uses shared 0.1.8 with stored summaries and pooled web reads. TLS enforcement introduced in shared 0.1.7 and retained in 0.1.8 applies `SQL_ENCRYPT=true` as required TLS through pymssql 2.4.3 or later; the server certificate is not validated, so TLS stops passive reading but not an active interceptor. It rejects unknown `SQL_ENCRYPT` values, refuses `SQL_TRUST_SERVER_CERTIFICATE=false` (the driver cannot validate certificates), and logs `sql.unencrypted` once per process for each SQL server when encryption is off. Web apps refuse an unenforceable setting at startup; commands and jobs refuse it before their first SQL connection. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect.
 
 The original mock generator, scripts and hand-reviewed oracle now live here. The Compose
 project defaults to `alertsbi` to reuse the existing named volumes. For an existing installation
