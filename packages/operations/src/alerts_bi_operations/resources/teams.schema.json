@@ -32,7 +32,8 @@
         "team_id": {
           "type": "string",
           "minLength": 1,
-          "description": "Stable, nonempty identifier with no character-pattern restriction. Unique across teams and never reused for a different team."
+          "maxLength": 128,
+          "description": "Stable, nonempty identifier with no character-pattern restriction. Case-sensitive and unique across teams; never reused. No surrounding whitespace, control characters or surrogates; at most 128 UTF-16 code units."
         },
         "display_name": { "type": "string", "minLength": 1 },
         "v1_operators": {

@@ -287,3 +287,34 @@ def test_invalid_json_fails_with_a_clear_message(tmp_path: Any) -> None:
     bad.write_text("{not json", encoding="utf-8")
     with pytest.raises(RegistryError, match="is not valid JSON"):
         load_registry(bad)
+
+
+@pytest.mark.parametrize(
+    "team_id", [" ", "ops ", " ops", "ops\t", "ops\nname", "\x00ops", "\ud800"]
+)
+def test_rejects_whitespace_aliases_and_control_characters(team_id: str) -> None:
+    doc = base()
+    doc["teams"][0]["team_id"] = team_id
+    with pytest.raises(RegistryError):
+        validate_registry(doc)
+
+
+@pytest.mark.parametrize("team_id", ["a" * 129, "😀" * 65])
+def test_rejects_team_ids_larger_than_sql_storage(team_id: str) -> None:
+    doc = base()
+    doc["teams"][0]["team_id"] = team_id
+    with pytest.raises(RegistryError):
+        validate_registry(doc)
+
+
+@pytest.mark.parametrize("team_id", ["a" * 128, "😀" * 64])
+def test_accepts_team_ids_at_sql_storage_limit(team_id: str) -> None:
+    doc = base()
+    doc["teams"][0]["team_id"] = team_id
+    assert validate_registry(doc)[0].team_id == team_id
+
+
+def test_accepts_case_distinct_team_ids() -> None:
+    doc = base()
+    doc["teams"].append({**doc["teams"][0], "team_id": "Team-A"})
+    assert [team.team_id for team in validate_registry(doc)] == ["team-a", "Team-A"]

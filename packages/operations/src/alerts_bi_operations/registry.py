@@ -8,6 +8,7 @@ error is invisible in the output.
 from __future__ import annotations
 
 import json
+import unicodedata
 from dataclasses import dataclass
 from importlib.resources import files
 from importlib.resources.abc import Traversable
@@ -158,6 +159,13 @@ def validate_registry(
     for raw_team in document["teams"]:
         team = TeamEntry.from_dict(raw_team)
         entries.append(team)
+
+        if team.team_id != team.team_id.strip():
+            problems.append(f'team_id "{team.team_id}" must not have surrounding whitespace')
+        if any(unicodedata.category(char) in ("Cc", "Cs") for char in team.team_id):
+            problems.append("team_id must not contain control characters or Unicode surrogates")
+        elif len(team.team_id.encode("utf-16-le")) // 2 > 128:
+            problems.append("team_id exceeds SQL storage limit of 128 UTF-16 code units")
 
         if team.team_id in seen_team_ids:
             problems.append(f'duplicate team_id "{team.team_id}"')

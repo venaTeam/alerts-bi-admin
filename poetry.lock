@@ -22,7 +22,7 @@ tz = ["tzdata"]
 
 [[package]]
 name = "alerts-bi-operations"
-version = "0.2.5"
+version = "0.2.6"
 description = "Alerts BI registry validation, operator actions and SQL-only reports"
 optional = false
 python-versions = ">=3.12"
@@ -31,7 +31,7 @@ files = []
 develop = true
 
 [package.dependencies]
-alerts-bi-shared = "0.1.7"
+alerts-bi-shared = "0.1.8"
 jsonschema = ">=4.23,<5"
 
 [package.source]
@@ -40,7 +40,7 @@ url = "packages/operations"
 
 [[package]]
 name = "alerts-bi-shared"
-version = "0.1.7"
+version = "0.1.8"
 description = "Alerts BI common values, SQL connection, summaries and pure presentation"
 optional = false
 python-versions = ">=3.12"
@@ -1674,4 +1674,4 @@ standard = ["httptools (>=0.8.0)", "python-dotenv (>=0.13)", "pyyaml (>=5.1)", "
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "48e48a79f442653dc8bacc59be6e3217702aee8ebf37c2ed3f205f84ac124a5a"
+content-hash = "ee637a78cf21fcec648ffc155fa0ad0f85215cdd69ae14058c6f6b0d163813ee"

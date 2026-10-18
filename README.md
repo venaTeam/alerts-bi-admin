@@ -175,7 +175,7 @@ scorecards are removed entirely, including on-demand routes and download links. 
 team workspace remains available. POST /runs returns JSON only, without a scorecard field.
 Since 2026-10-17 it also omits the `out_dir` field and the `X-Alerts-BI-Out-Dir` header, a
 breaking change for callers that read them; use the `files` download links instead.
-Operations 0.2.5 uses shared 0.1.7 with stored summaries and pooled web reads. Shared 0.1.7 applies `SQL_ENCRYPT=true` as required TLS through pymssql 2.4.3 or later; the server certificate is not validated, so TLS stops passive reading but not an active interceptor. It rejects unknown `SQL_ENCRYPT` values, refuses `SQL_TRUST_SERVER_CERTIFICATE=false` (the driver cannot validate certificates), and logs `sql.unencrypted` once per process for each SQL server when encryption is off. Web apps refuse an unenforceable setting at startup; commands and jobs refuse it before their first SQL connection. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect.
+Operations 0.2.6 uses shared 0.1.8 with stored summaries and pooled web reads. Shared 0.1.7 applies `SQL_ENCRYPT=true` as required TLS through pymssql 2.4.3 or later; the server certificate is not validated, so TLS stops passive reading but not an active interceptor. It rejects unknown `SQL_ENCRYPT` values, refuses `SQL_TRUST_SERVER_CERTIFICATE=false` (the driver cannot validate certificates), and logs `sql.unencrypted` once per process for each SQL server when encryption is off. Web apps refuse an unenforceable setting at startup; commands and jobs refuse it before their first SQL connection. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect.
 
 The original mock generator, scripts and hand-reviewed oracle now live here. The Compose
 project defaults to `alertsbi` to reuse the existing named volumes. For an existing installation
@@ -247,3 +247,20 @@ the migrate init container, admin and run-worker entries of deploy/admin.yaml, t
 that manifest. The configured SQL credentials must allow schema migrations. No separate
 deploy/migrate.yaml Job is needed for normal rollout; it remains an optional maintenance
 tool with UI/worker writers stopped. Do not run it alongside deployment initialization.
+
+## Team registry compatibility (2026-10-18)
+
+Duplicate v1 operators and operators shared across teams are allowed. Team IDs have no
+slug regex and are preserved exactly, but must be nonempty, fit 128 UTF-16 code units,
+and contain no surrounding whitespace, control characters or Unicode surrogates.
+Run `alerts-bi-admin registry check --registry <file>` before installing an edited registry.
+
+Apply migration `017_case_sensitive_teams` through `db setup` before admitting case-distinct
+IDs. It preserves all data, rebuilds existing team indexes with binary comparison, and
+refreshes portal views. Admin readiness refuses an older schema. Deploy admin operations
+0.2.6 and the portal with shared 0.1.8 together before admitting slash-containing IDs:
+non-slug team URLs now use an opaque single segment, while legacy slug links remain valid.
+
+Rollback must restore a registry accepted by the old validator along with the application
+image. Migration 017 cannot be downgraded after case-distinct IDs may have been stored;
+retain its binary columns. Do not use the older portal with newly encoded team links.

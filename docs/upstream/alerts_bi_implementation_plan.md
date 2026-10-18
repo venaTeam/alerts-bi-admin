@@ -132,7 +132,7 @@ Create `config/teams.json` and a checked-in JSON Schema. The versioned registry 
 - Optional Grafana panel-query definitions.
 - Registry version and effective date.
 
-Allow an empty v1 operator list for migrated teams and a nullable v2 operator for pre-migration teams, but require at least one source operator. Validate nonempty unique team IDs and missing required fields before a run starts. As amended 2026-10-18, accept repeated operators within v1 lists and across teams (including v1/v2 overlaps), and remove the team ID regex. Preserve supplied IDs and operator values exactly; operator matching remains case-sensitive. Store the declared version, complete-file SHA-256, and selected team entry as an immutable run snapshot. Include a mock registry populated from the existing generator's teams.
+Allow an empty v1 operator list for migrated teams and a nullable v2 operator for pre-migration teams, but require at least one source operator. Validate nonempty unique team IDs and missing required fields before a run starts. As amended 2026-10-18, accept repeated operators within v1 lists and across teams (including v1/v2 overlaps), and remove the team ID regex. Require IDs to fit 128 UTF-16 code units, with no surrounding whitespace, control characters or surrogates. Migration 017 preserves case-sensitive SQL team identity; shared 0.1.8 encodes non-slug IDs as single URL segments in admin and portal. Preserve supplied IDs and operator values exactly; operator matching remains case-sensitive. Store the declared version, complete-file SHA-256, and selected team entry as an immutable run snapshot. Include a mock registry populated from the existing generator's teams.
 
 ### 2.3 Elasticsearch reader
 

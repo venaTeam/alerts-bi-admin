@@ -35,6 +35,7 @@ from alerts_bi_shared.insights.estimate import v1_rule_key_of
 from alerts_bi_shared.insights.reader import read_history, read_summary
 from alerts_bi_shared.insights.stored import schema_totals as stored_schema_totals
 from alerts_bi_shared.insights.summary import summarize
+from alerts_bi_shared.team_urls import encode_team_id
 from alerts_bi_shared.ui.charts import ChartPoint, line_chart
 from alerts_bi_shared.ui.explain import (
     EN_DASH,
@@ -571,7 +572,7 @@ def load_admin_summary(
 def summary_url(team_id: str, run_id: str, **query: Any) -> str:
     params = {"run_id": run_id}
     params.update({key: str(value) for key, value in query.items() if value not in (None, "")})
-    return f"/teams/{quote(team_id, safe='')}/summary?{urlencode(params)}"
+    return f"/teams/{encode_team_id(team_id)}/summary?{urlencode(params)}"
 
 
 def shared_sections(summary: AdminSummary) -> str:
@@ -806,7 +807,7 @@ def _picker(summary: AdminSummary) -> str:
         for run in runs
     )
     return (
-        f'<form class="picker" method="get" action="/teams/{h(quote(team_id, safe=""))}/summary">'
+        f'<form class="picker" method="get" action="/teams/{h(encode_team_id(team_id))}/summary">'
         f'<label class="sub" for="run_id">Run</label>'
         f'<select id="run_id" name="run_id">{options}</select>'
         '<button class="button" type="submit">Open</button></form>'
@@ -850,7 +851,7 @@ def _worklist_html(summary: AdminSummary) -> str:
         key=_rule_order,
     )
     form = (
-        f'<form class="inline filters" method="get" action="/teams/{h(quote(team_id, safe=""))}/summary">'
+        f'<form class="inline filters" method="get" action="/teams/{h(encode_team_id(team_id))}/summary">'
         f'<input type="hidden" name="run_id" value="{h(run_id)}">'
         + _select(
             "state",
@@ -930,7 +931,7 @@ def summary_page(user: str, summary: AdminSummary, *, shared: str) -> str:
     operators = ", ".join(entry.v1_operators) or "none"
     body = (
         f'<nav class="crumbs"><a href="/">All teams</a><span>/</span>'
-        f'<a href="/teams/{h(quote(team_id, safe=""))}">{h(inputs.display_name)}</a>'
+        f'<a href="/teams/{h(encode_team_id(team_id))}">{h(inputs.display_name)}</a>'
         "<span>/</span><span>Summary</span></nav>"
         '<section class="head">'
         f'<div><div class="eyebrow">Team summary</div><h1>{h(inputs.display_name)}</h1></div>'
