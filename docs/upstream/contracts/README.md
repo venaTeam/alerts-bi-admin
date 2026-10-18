@@ -32,8 +32,10 @@ is the explicit whole-run exception. Portal views and shared interfaces
 are unchanged; the later HTML-removal amendment changes operations to 0.2.0. `trigger-openapi.json` now records the approved Monday/default description.
 
 Review fixes add 011_run_job_keys for collation-independent exact submission identity.
-Migration 009 remains deletion; 010 remains jobs. Recovery regenerates all three CSVs
-from committed SQL before reporting clean completion. See docs/async-runs.md for rollout.
+Migration 009 remains deletion; 010 remains jobs. Since 2026-10-17 recovery completes a
+committed result without writing CSV files; downloads render from SQL. The `POST /runs`
+response is not part of trigger-openapi.json, so removing its `out_dir` field changes no
+contract JSON. See docs/async-runs.md for rollout.
 
 console-openapi.json is generated from the actual authenticated console and includes the
 run-jobs request body, required Idempotency-Key/CSRF headers and typed status responses.

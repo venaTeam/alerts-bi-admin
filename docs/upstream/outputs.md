@@ -12,9 +12,12 @@ Admin owns execution, migrations, weekly jobs, registry and library builds under
 
 The accepted consolidation in `alerts_bi_design.md` supersedes the separate trigger/admin web topology described below. `alerts-bi-admin serve` now provides authenticated Teams → team run history → selected run Overview/Findings/Decisions/Activity, alongside global Schedule and Decisions pages. The approved compact overview, split findings panel and action dialogs retain trigger/publish/withdraw/decide; detailed charts, SQL, filters and exports expand under run details. It reuses the existing SQL/reporting and review operations; portal, weekly scheduling, exact 168-hour windows, migration ownership and output payloads remain unchanged. JSON triggers require proxy identity and `X-CSRF-Token` from `/csrf`. Browser writes require same-site form CSRF. The admin repository owns UI source and vendors a pinned execution-runtime wheel; no sibling checkout or separate trigger listener is required. Deploy one admin console behind the existing operator login proxy; see `unified-console-deployment.md`. The old trigger factory remains a compatibility harness only.
 
-**Last updated:** 2026-10-13
+**Last updated:** 2026-10-17
 
-Admin writes three CSV files: `daily_metrics.csv`, `rule_counts.csv`, `alert_worklist.csv`.
+Admin exports three CSV files: `daily_metrics.csv`, `rule_counts.csv`, `alert_worklist.csv`.
+**Amended 2026-10-17:** runs write no files. Each download renders from committed SQL on
+request; only explicit CLI exports (`report`, `run --out`, `weekly --out`, acceptance `--out`)
+write these files to disk.
 Standalone HTML scorecards are removed entirely (accepted 2026-10-13;
 [async run contract](async-runs.md)). Completed results appear in the authenticated admin
 workspace. This document defines the three CSV exports and their HTTP contract.
@@ -210,7 +213,8 @@ Admin's `POST /runs/{run_id}/delete` requires same-site actor-bound form CSRF an
 `confirm_delete=1`. It permanently removes that run and its publications/decisions/results;
 all its GET report and download routes then return 404. The redirect selects the team
 without the deleted run id. SQL views and CSV columns are unchanged. See design section
-7.12 for generated file cleanup, retained shared caches and scheduler recreation.
+7.12 for retained shared caches and scheduler recreation; runs write no files to clean up.
+CSVs an operator exported with the CLI stay on that operator's disk after deletion.
 
 The response is always a JSON summary, including for `Accept: text/html`:
 
@@ -221,7 +225,6 @@ The response is always a JSON summary, including for `Accept: text/html`:
   "v1": {"rows": 875, "distinct": 5},
   "v2": {"rows": 10, "distinct": 6},
   "llm_assessed": true, "llm_eligible": 9,
-  "out_dir": "out/d99db480d498edbd",
   "files": {
     "daily_metrics.csv": "/runs/<run_id>/daily_metrics.csv",
     "rule_counts.csv": "/runs/<run_id>/rule_counts.csv",
@@ -230,8 +233,9 @@ The response is always a JSON summary, including for `Accept: text/html`:
 }
 ```
 
-Every response carries `X-Alerts-BI-Run-Id`, and a run also carries `X-Alerts-BI-Team` and
-`X-Alerts-BI-Out-Dir`.
+Every response carries `X-Alerts-BI-Run-Id`, and a run also carries `X-Alerts-BI-Team`.
+**Amended 2026-10-17:** the `out_dir` field and `X-Alerts-BI-Out-Dir` header are removed;
+runs write no files. Consumers must use the `files` links.
 
 | Route | Returns |
 |---|---|

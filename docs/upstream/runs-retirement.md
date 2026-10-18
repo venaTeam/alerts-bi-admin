@@ -42,8 +42,9 @@ Serialize suites that reset `alerts_bi_test`. Do not reset development or produc
 
 The older `alerts-bi` executable is not installed by admin. Update automation explicitly.
 HTTP payloads and exports remain compatible, with identity and CSRF requirements already
-introduced by the unified console. Configure `SQL_*`, `ES_*`, `LLM_*`, `ADMIN_*`, mounted
-registry and writable output. Keep one UI worker/replica and one weekly scheduler.
+introduced by the unified console. Configure `SQL_*`, `ES_*`, `LLM_*`, `ADMIN_*` and the mounted
+registry; since 2026-10-17 runs write no files, so no writable output is needed. Keep one UI
+worker/replica and one weekly scheduler.
 
 ## Authorized deployment procedure (execute separately)
 
@@ -58,7 +59,8 @@ registry and writable output. Keep one UI worker/replica and one weekly schedule
    downgrade, copy or recreate the database. Stop rollout if ledger checks differ.
 5. Replace the existing authenticated admin application container with the new image. Keep
    the proxy, service account, authorization, TLS and loopback upstream. Supply the engine's
-   ES/LLM settings, registry mount and writable output. No `--dev-user` in deployment.
+   ES/LLM settings and registry mount (no writable output since 2026-10-17). No `--dev-user`
+   in deployment.
 6. Verify unauthenticated denial, authenticated health, team/run navigation, exports and
    an approved test run plus publication/decision/withdrawal flow. Validate the portal using
    the same SQL database and compatible shared artifact.

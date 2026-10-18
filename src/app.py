@@ -56,7 +56,7 @@ from .engine.api.service import (
     schedule_lock,
 )
 from .readiness import check_schema
-from .runs import DeletionRefused, delete_run, remove_run_files
+from .runs import DeletionRefused, delete_run
 
 __all__ = ["SECURITY_HEADERS", "build_admin"]
 
@@ -863,17 +863,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                         except DeletionRefused as exc:
                             return back(team_path(str(run["team_id"]), run_id), str(exc), True)
                     log.info("admin.deleted", run_id=run_id, team_id=team_id, operator=user)
-                    try:
-                        remove_run_files(settings.out_root, run_id)
-                    except OSError as exc:
-                        log.error(
-                            "admin.delete_files_failed", run_id=run_id, error=redact_error(exc)
-                        )
-                        return back(
-                            pages.team_url(team_id),
-                            "Run deleted from the database and portal. Generated report cleanup failed; ask the service operator to remove its files.",
-                            True,
-                        )
                     return back(pages.team_url(team_id), "Run permanently deleted.")
             except WeeklyBusy:
                 raise HTTPException(

@@ -64,15 +64,18 @@ proxy identity. Operator commands support `--database`, while the listener addit
 supports `ADMIN_DATABASE`. Registry is admin-owned `config/teams.json`; mount production values
 using `ADMIN_REGISTRY_PATH` or an explicit `--registry`. The listener, registry check,
 manual runs, weekly jobs and weekly status all honor that environment variable.
-`ADMIN_OUT_DIR` configures HTTP output and the root for CLI reports: manual runs and
-`report` write `<root>/<run id prefix>`, weekly jobs write `<root>/weekly`.
-Explicit `--registry` and `--out` flags take precedence over environment settings.
+Runs and weekly jobs write no files: the three CSV downloads render from SQL on request.
+`report` exports a stored run's CSVs to `--out` (default `out/<run id prefix>`), and
+`run --out` and `weekly --out` also export. Deploy the updated manifests (no ADMIN_OUT_DIR,
+output mounts or weekly `--out`) with this image; roll back with the previous manifests and image. An explicit `--registry` takes precedence over
+`ADMIN_REGISTRY_PATH`.
 
 Delete run is an authenticated, CSRF-protected POST with explicit permanent-deletion
 confirmation. It removes the run's SQL results, publications, decisions, schedule rows and
-model audit transactionally, then removes the four generated reports from configured
-manual/weekly output folders. It retains shared caches and prompt artifacts, and reports
-file-cleanup failure separately. Custom CLI output paths require manual cleanup. Active
+model audit transactionally. It retains shared caches and prompt artifacts. Runs write no
+report files. CLI exports are not tracked: CSVs written by `report` (default
+`out/<run id prefix>`) or any `--out`, including `alert_worklist.csv`, stay on that disk after
+deletion until removed by hand. Active
 manual/model/weekly work blocks deletion. Manual HTTP and CLI runs take the same SQL
 execution lock as scheduling and deletion, covering scanning, persistence and report
 writing even with assessment off. Roll out the updated manual CLI alongside the app;
@@ -134,9 +137,9 @@ this checkout and committed lockfile. Source provenance is in `docs/engine-sourc
 Manual browser runs now return immediately after saving a SQL-backed submission. Apply
 `alerts-bi-admin db migrate` before starting the updated app, then run
 `alerts-bi-admin run-worker` in a separate terminal/process with matching ADMIN_DATABASE,
-ADMIN_REGISTRY_PATH, ADMIN_OUT_DIR, SQL, Elasticsearch and model settings. The worker does not
-require ADMIN_SECRET. The shipped deploy/admin.yaml includes a dedicated worker with the
-same image, registry, SQL/ES/model configuration and output mount. Its migration init container
+ADMIN_REGISTRY_PATH, SQL, Elasticsearch and model settings. The worker does not
+require ADMIN_SECRET or a writable output directory. The shipped deploy/admin.yaml includes a
+dedicated worker with the same image, registry and SQL/ES/model configuration. Its migration init container
 automatically runs db setup before UI/worker startup, targeting ADMIN_DATABASE or SQL_DATABASE.
 Recreate stops the previous pod before initialization; migration failure blocks startup. The
 health endpoint requires the job-key digest, stored read models and private checkpoint
@@ -166,12 +169,13 @@ manual runs before the next backfill week. A weekly invocation that finds a back
 running waits up to three hours, keeping the worker off further weeks until it has run.
 Cancel removes only queued weeks; a failed week can be retried. See docs/upstream/backfill.md.
 
-Run/report/weekly/acceptance output directories contain three CSV exports. Standalone HTML
+Explicit `report`, `run --out`, `weekly --out` and acceptance output directories contain
+three CSV exports. Standalone HTML
 scorecards are removed entirely, including on-demand routes and download links. The normal
 team workspace remains available. POST /runs returns JSON only, without a scorecard field.
-Operations 0.2.4 uses shared 0.1.7 with stored summaries and pooled web reads. Shared 0.1.7 applies `SQL_ENCRYPT=true` as required TLS through pymssql 2.4.3 or later; the server certificate is not validated, so TLS stops passive reading but not an active interceptor. It rejects unknown `SQL_ENCRYPT` values, refuses `SQL_TRUST_SERVER_CERTIFICATE=false` (the driver cannot validate certificates), and logs `sql.unencrypted` once per process for each SQL server when encryption is off. Web apps refuse an unenforceable setting at startup; commands and jobs refuse it before their first SQL connection. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect. To clean older generated HTML, use
-`alerts-bi-admin remove-run-html --out <explicit-output-root>`; this preserves CSVs and other
-HTML files and only removes scorecard.html accompanied by all three CSV exports.
+Since 2026-10-17 it also omits the `out_dir` field and the `X-Alerts-BI-Out-Dir` header, a
+breaking change for callers that read them; use the `files` download links instead.
+Operations 0.2.4 uses shared 0.1.7 with stored summaries and pooled web reads. Shared 0.1.7 applies `SQL_ENCRYPT=true` as required TLS through pymssql 2.4.3 or later; the server certificate is not validated, so TLS stops passive reading but not an active interceptor. It rejects unknown `SQL_ENCRYPT` values, refuses `SQL_TRUST_SERVER_CERTIFICATE=false` (the driver cannot validate certificates), and logs `sql.unencrypted` once per process for each SQL server when encryption is off. Web apps refuse an unenforceable setting at startup; commands and jobs refuse it before their first SQL connection. CSV columns remain unchanged; the standalone HTML removal introduced in operations 0.2.0 remains in effect.
 
 The original mock generator, scripts and hand-reviewed oracle now live here. The Compose
 project defaults to `alertsbi` to reuse the existing named volumes. For an existing installation
@@ -222,7 +226,8 @@ Repeat reads with `--read-committed-snapshot` to measure committed versioned rea
 ingestion. This option changes only local `alerts_bi_test`; production enablement requires
 the separately authorized, drained-connection procedure documented in the design.
 
-The admin image provides writable `/app/out` for its non-root user. Deployment examples and
+Runs write no files, so the admin image needs no writable output directory; explicit CLI
+exports write to their own `--out`. Deployment examples and
 the ordered scheduler/migration transfer, rollback and eventual archival checklist are in
 `docs/upstream/openshift-deployment.md` and `docs/upstream/runs-retirement.md`. PRs do not deploy
 or stop services. Canonical requirements stay in alerts-bi-design; snapshots here are pinned.

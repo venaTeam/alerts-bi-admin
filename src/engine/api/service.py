@@ -9,9 +9,7 @@ surface actually touches the pipeline, and it is deliberately thin - it calls th
 from __future__ import annotations
 
 import threading
-from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 
 from alerts_bi_operations.registry import RegistryError, load_registry
 from alerts_bi_operations.report.render import build_run_outputs
@@ -26,7 +24,6 @@ from ..llm.client import LlmClient
 from ..llm.fake import FakeLlmClient
 from ..llm.openai_client import OpenAiLlmClient
 from ..run.orchestrator import RunSummary, execute_run, select_llm_client
-from ..run.outputs import render_run_report
 from ..weekly.plan import latest_week_end as latest_week_end
 from ..weekly.runner import WeeklyBusy as WeeklyBusy
 from ..weekly.runner import schedule_lock as schedule_lock
@@ -34,7 +31,6 @@ from .schemas import CheckOut, LlmMode, RunRequest, TeamOut
 
 __all__ = [
     "RunGate",
-    "RunResult",
     "WeeklyBusy",
     "check_health",
     "latest_week_end",
@@ -66,12 +62,6 @@ class RunGate:
 
     def release(self) -> None:
         self._lock.release()
-
-
-@dataclass(frozen=True, slots=True)
-class RunResult:
-    summary: RunSummary
-    out_dir: Path
 
 
 def list_teams(settings: ApiSettings) -> list[TeamOut]:
@@ -129,7 +119,7 @@ def close_client(client: LlmClient | None) -> None:
 
 def execute_request(
     settings: ApiSettings, db: Database, body: RunRequest, *, expected_run_id: str | None = None
-) -> RunResult:
+) -> RunSummary:
     """Shared synchronous pipeline on the caller's SQL session."""
     run_at = body.run_at or latest_week_end(datetime.now(UTC))
     if run_at.tzinfo is None:
@@ -151,15 +141,14 @@ def execute_request(
         )
         persist_run(db, payload)
         log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
-        out_dir = settings.out_root / summary.run_id[:16]
-        render_run_report(db, summary.run_id, out_dir)
-        return RunResult(summary, out_dir)
+        # No files: the CSV downloads render from the committed SQL on each request.
+        return summary
     finally:
         es_client.close()
         close_client(client)
 
 
-def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunResult:
+def start_run(settings: ApiSettings, gate: RunGate, body: RunRequest) -> RunSummary:
     """Compatibility API: retain completed-result responses under the shared manual lock."""
 
     if not gate.acquire():

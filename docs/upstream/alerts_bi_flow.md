@@ -1,5 +1,14 @@
 # Alerts BI — Runtime Flow
 
+## Run output files removed — accepted 2026-10-17
+
+Manual, worker, recovered and weekly runs persist to SQL and write no files. CSV downloads
+render from committed SQL on each request, unchanged. `POST /runs` drops `out_dir` and the
+`X-Alerts-BI-Out-Dir` header. Deletion no longer cleans report files, and the export warning,
+`remove-run-html`, `ADMIN_OUT_DIR`/`API_OUT_DIR` and output mounts are removed. Files are
+written only by explicit `report`, `run --out`, `weekly --out` and acceptance `--out`. See
+design section "Run output files removed".
+
 ## Multi-week backfill — accepted 2026-10-14
 
 [The backfill contract](backfill.md) replaces the deterministic, model-free backfill step
@@ -24,14 +33,15 @@ the CSV filename validator refuses `scorecard.html`. This supersedes all older s
 HTML/four-output requirements below. Operations 0.2.0 removes `report.html` and changes the
 public renderer to three CSV outputs; shared 0.1.3, CSV columns and portal views are unchanged.
 Existing immutable operations versions remain historical artifacts. Legacy HTML cleanup
-remains available for old output directories. See [output meanings](outputs.md).
+was removed on 2026-10-17 with run output files. See [output meanings](outputs.md).
 
 ## Async manual execution amendment — 2026-10-13
 
 Browser triggers persist a durable job and return immediately. A dedicated admin run-worker
 executes the same pipeline independently of the HTTP request; the team workspace polls job status
 and displays the completed result. See [async-runs.md](async-runs.md) for failure/recovery semantics.
-Admin execution/report commands write three CSVs; completed results appear in the team workspace.
+Admin exports three CSVs (amended 2026-10-17: downloads render from SQL; only explicit CLI
+exports write files); completed results appear in the team workspace.
 The pipeline steps below retain their analysis, persistence and publication meanings.
 ## Run lifecycle amendment — 2026-10-13
 
@@ -40,7 +50,7 @@ latest completed Monday. The start is the previous Monday at 00:00 UTC, inclusiv
 end is exclusive. Historical arbitrary-window analysis remains renderable. Admin removes
 the publication gap override and rejects forged overrides. Permanent run deletion removes
 SQL run-owned rows transactionally (including decisions in a scoped deletion allowance, with
-migration 009 and a checked parent foreign key), then cleans configured report files. Shared caches remain. Active work is
+migration 009 and a checked parent foreign key). Since 2026-10-17 runs write no report files to clean. Shared caches remain. Active work is
 refused; scheduler enrollment remains. See design section 7.12 and decision 004 for scope,
 failure handling and the explicit exception to retained audit history.
 

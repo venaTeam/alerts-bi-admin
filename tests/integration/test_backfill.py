@@ -54,14 +54,12 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> AdminSettings:
     except Exception as exc:
         pytest.skip(f"Local SQL Server unavailable: {exc}")
     reset_test_database(CONFIG.sql, DB)
-    return AdminSettings(
-        AdminConfig(CONFIG.sql), DB, "b" * 40, out_root=tmp_path_factory.mktemp("backfill")
-    )
+    return AdminSettings(AdminConfig(CONFIG.sql), DB, "b" * 40)
 
 
 @pytest.fixture
 def api(settings: AdminSettings) -> ApiSettings:
-    return ApiSettings(CONFIG, database=DB, out_root=settings.out_root)
+    return ApiSettings(CONFIG, database=DB)
 
 
 @pytest.fixture
@@ -538,7 +536,7 @@ def test_retry_still_queues_after_an_earlier_attempts_run_is_deleted(
 ) -> None:
     registry = tmp_path / "teams.json"
     registry.write_bytes(Path("config/teams.json").read_bytes())
-    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry), out_root=settings.out_root)
+    api = ApiSettings(CONFIG, database=DB, registry_path=str(registry))
 
     def fail(*args: Any, **kwargs: Any) -> Any:
         raise RuntimeError("Test failure")
@@ -616,3 +614,15 @@ def test_queued_manual_status_is_public_and_shown_in_the_workspace(
     assert response.json()["status"] == "queued"
     page = client.get(f"/teams/{TEAM}").text
     assert "Queued. It starts before the next backfill week." in page
+
+
+def test_interrupted_week_fails_and_asks_to_retry_the_week(api: ApiSettings) -> None:
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "op", "lost", now=NOW)
+    with connect(CONFIG.sql, DB) as db:
+        # A worker claimed the week, then died before committing any analysis.
+        claimed = jobs.claim_queued(db, datetime.now(UTC).replace(tzinfo=None))
+    assert claimed is not None and claimed["backfill_id"] == row["backfill_id"]
+    assert jobs.work_once(api) is False
+    (week,) = queued_weeks(api, row["backfill_id"])
+    assert week["status"] == "failed" and week["active_slot"] is None
+    assert week["error_summary"] == "Worker interrupted. Retry this week."
