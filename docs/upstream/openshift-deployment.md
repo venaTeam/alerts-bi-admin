@@ -60,6 +60,13 @@ Before the rollout:
 3. Schedule a maintenance window outside the weekly job's schedule. Tell portal readers that
    pages may wait during the window.
 
+Nothing cuts the rebuild short. The migration connection sets no SQL query timeout:
+`SQL_REQUEST_TIMEOUT_MS` applies to application queries, not to `db setup`. The admin
+Deployment sets no `activeDeadlineSeconds`. Keep it that way, and add no init-container deadline
+shorter than the sized window. If the pod is killed anyway, 015 rolls back and the next start
+repeats the whole lock window. When the sizing suggests a long rebuild, stop the UI and worker
+and run deploy/migrate.yaml by hand instead.
+
 016_case_sensitive_key_fields (2026-10-18) does the same for every stored `key_field`
 column, in its own transaction: it rebuilds pk_alert_findings, pk_llm_verdicts and the
 decision and alert-list indexes that contain `key_field`, then refreshes portal_alerts,
@@ -67,9 +74,11 @@ portal_alert_list and portal_decisions. Portal reads of those views and every qu
 `alert_findings`, `llm_verdicts`, `finding_decisions` and `run_alert_list` wait until it
 commits. It is roll-forward only in the same way: an image without 016 stops with `Can't
 locate revision identified by '016_case_sensitive_key_fields'`, and the revision refuses to
-downgrade. The checklist above applies. When one image brings 015 and 016, one backup and
-one window cover both, but the window must allow for `alert_findings` and `llm_verdicts`
-being rewritten twice. If 016 fails, 015 stays committed and the next start retries 016.
+downgrade. The checklist above and the rule that nothing cuts the rebuild short apply to it
+too. When one image brings 015 and 016, one backup and one window cover both, but the window
+must allow for `alert_findings` and `llm_verdicts` being rewritten twice. If 016 fails or the
+pod is killed during it, 015 stays committed, 016 rolls back, and the next start repeats only
+016's lock window.
 
 Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
 new pod. A migration failure keeps the application containers unstarted and OpenShift retries

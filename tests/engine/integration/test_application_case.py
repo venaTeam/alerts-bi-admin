@@ -265,10 +265,12 @@ def test_every_stored_application_column_compares_exactly(db: Database) -> None:
         "FROM sys.indexes AS i "
         "JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id "
         "JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id "
-        "WHERE c.name = N'application' AND ic.is_included_column = 0"
+        "WHERE c.name = N'application' AND ic.is_included_column = 0 "
+        "AND OBJECT_SCHEMA_NAME(i.object_id) = N'dbo'"
     )
     found = {(str(r["owner"]), str(r["index_name"])): bool(r["is_primary_key"]) for r in keyed}
-    assert {key: found.get(key) for key in REBUILT_KEYS} == REBUILT_KEYS
+    # Exactly these: none missing, and no unplanned key or index on application.
+    assert found == REBUILT_KEYS
 
 
 def test_the_reader_role_reads_every_refreshed_view(db: Database) -> None:
