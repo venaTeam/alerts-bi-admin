@@ -26,6 +26,67 @@ file-writing, export-warning, recovery-regeneration and generated-file cleanup s
 section 7.12, [async-runs.md](async-runs.md) and the 2026-10-13 amendments below. No migration
 is added; SQL views, CSV columns and the shared/operations libraries are unchanged.
 
+## SQL connection encryption — accepted 2026-10-17
+
+`SQL_ENCRYPT` and `SQL_TRUST_SERVER_CERTIFICATE` were read but never applied, so
+`SQL_ENCRYPT=true` claimed a protection the connections did not have. Shared 0.1.7 applies
+it. With `SQL_ENCRYPT=true`, every SQL connection from admin, its migrations, workers and
+jobs, and the portal requests required TLS, so FreeTDS does not fall back to plaintext. This
+needs pymssql 2.4.3 or later, the first release that applies the encryption request per
+connection. On 2026-10-17, pymssql 2.3.13 and 2.4.2 connected to SQL Server 2022
+unencrypted when asked to require encryption, while 2.4.3 and 2.4.4 connected encrypted.
+Admin and portal lock pymssql 2.4.4. `SQL_ENCRYPT` accepts only the usual true/false
+spellings, so a typo fails instead of meaning plaintext.
+
+The driver cannot validate the server certificate from application settings. Encryption
+therefore trusts any certificate. That stops passive reading of SQL traffic but not an
+active interceptor, so the database network protections remain required. Shared refuses
+two settings it cannot enforce, both before any SQL connection opens:
+`SQL_TRUST_SERVER_CERTIFICATE=false` with `SQL_ENCRYPT=true`, and `SQL_ENCRYPT=true` with a
+driver older than 2.4.3. The admin and portal web apps fail at startup, when they build their
+SQL pools. The migration init container, workers, commands and CronJobs fail at their first
+SQL connection.
+
+The default stays `SQL_ENCRYPT=false`: existing deployments connect as before, and each
+process logs `sql.unencrypted` once for each SQL server. Enable encryption per deployment
+after confirming that the SQL Server accepts TLS. Validating the server certificate, for
+example through a managed FreeTDS CA configuration, is an open follow-up that requires a
+separate approved change. Operations 0.2.4 pins shared 0.1.7. Shared 0.1.6 and operations
+0.2.3 were superseded during review and never reached main.
+
+## Portal SQL login residual risk — recorded 2026-10-17
+
+Since the 2026-09-27 revision of section 7.10, the portal has connected with admin's
+read/write SQL login. Its code is GET-only and queries only the eleven `portal_*` views, but
+the database does not enforce that. A leaked portal credential, or code execution in the
+portal pod, could read every base table, including the four LLM audit tables, and change or
+delete data. This risk remains open. The current controls are the portal's network
+isolation and its query/import boundaries.
+
+Closing it needs no code or migration change. Migrations 002–012 grant SELECT on all eleven
+views to the `alerts_bi_reader` role and deny that role the audit tables. The portal reads
+only `SQL_*`, so its Deployment can take `SQL_USER` and `SQL_PASSWORD` from a portal-only
+Secret, holding a login that belongs only to that role, with the same host, port and
+database. Admin, migrations, workers and jobs keep the owning login. This was verified
+locally on 2026-10-17. A login created by `alerts-bi-admin db grant-reader` served every
+portal page for a published team with SQL encryption on. The same login was denied
+base-table reads and writes.
+
+Options:
+
+1. Recommended: the database-owning team creates the login, or a contained database user if
+   the database allows it, and adds it to `alerts_bi_reader` only. The portal then switches
+   its Secret. The available application users cannot create logins, which is why the
+   2026-09-27 revision dropped the separate portal login.
+2. The database-owning team grants a deployment identity the right to create logins, and
+   `alerts-bi-admin db grant-reader` creates it. This needs server-level permissions.
+3. Keep the shared login and accept the risk.
+
+The product owner raises option 1 with the database-owning team; nobody from this project
+has contacted that team. Until a reader login exists, the 2026-09-27 rule stands. Switching
+the portal to it changes only the portal's `SQL_USER` and `SQL_PASSWORD` values. Record that
+switch in this section, with its date.
+
 ## Multi-week backfill — accepted 2026-10-14
 
 The product owner approved an operator-selected backfill in the admin console. An operator

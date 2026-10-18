@@ -19,7 +19,7 @@ now live under admin's `src/engine`; the installed namespace is `alerts_bi_admin
 
 Supported executables are `alerts-bi-admin` and `alerts-bi-portal`. Admin is independently
 buildable using its committed Poetry lock; portal pins an immutable shared wheel produced by
-admin. Shared 0.1.5 adds pooled web SQL and bounded summary readers; operations 0.2.2 pins it. The earlier operations 0.2.0 removes `report.html` and restricts
+admin. Shared 0.1.5 adds pooled web SQL and bounded summary readers; operations 0.2.2 pins it. Shared 0.1.7 applies `SQL_ENCRYPT=true` as required TLS through pymssql 2.4.3 or later; operations 0.2.4 pins it. The earlier operations 0.2.0 removes `report.html` and restricts
 the public report renderer to the three CSV exports. No supported
 consumer imports or installs a runs package. The old repository remains historical.
 

@@ -261,11 +261,35 @@ operational avoidance of overlapping manual and scheduled execution for the same
 Keep the independently built portal Deployment/Service/Route and its allowlist. Its command is
 `alerts-bi-portal`; its shared wheel is produced by admin and has no engine or operations imports.
 It queries only portal_* views using the existing SQL settings. The SQL credential may have
-broader rights, so retain reader network isolation and query/import boundaries.
+broader rights, so retain reader network isolation and query/import boundaries. A login in
+the `alerts_bi_reader` role, created by the database-owning team, can replace the portal's
+SQL_USER and SQL_PASSWORD through a portal-only Secret without code changes; see the
+2026-10-17 design note on the portal SQL login.
 
-SQL_ENCRYPT and SQL_TRUST_SERVER_CERTIFICATE remain configuration-only flags that the current
-pymssql adapter does not enforce. This migration does not change that limitation. Preserve the
-approved database network protections; do not infer encryption from those settings.
+SQL_ENCRYPT=true requires TLS on every admin, migration, job and portal SQL connection (shared
+0.1.7 with the locked pymssql 2.4.4; see the 2026-10-17 design amendment). It is false by
+default, and only true/false spellings are accepted. Before enabling it, confirm the SQL Server
+accepts encrypted connections. A server that does not will stop the migration init container,
+admin, portal, workers and CronJobs from connecting. The server certificate is not validated,
+so TLS does not stop an active interceptor. Keep SQL_TRUST_SERVER_CERTIFICATE=true: false is
+refused before any SQL connection. Web apps fail at startup, and the init container, workers
+and CronJobs fail at their first connection. Before enabling encryption, confirm the live
+configuration does not set SQL_TRUST_SERVER_CERTIFICATE=false. With encryption off, each
+process logs `sql.unencrypted` once for each SQL server. Preserve the approved database
+network protections either way.
+
+Enable encryption in this order:
+
+1. Before rolling out shared 0.1.7 images, check the live Secret and ConfigMap. SQL_ENCRYPT
+   must be a true/false spelling, because any other value now stops startup.
+   SQL_TRUST_SERVER_CERTIFICATE must not be false while SQL_ENCRYPT is true.
+2. Roll out the new images with SQL_ENCRYPT=false and observe a normal cycle.
+3. Confirm the SQL Server completes a TLS handshake from the cluster network.
+4. Set SQL_ENCRYPT=true. The migration init container is the first encrypted connection and is
+   a no-op when the schema is current. Then confirm admin and portal pages load, and run one
+   worker job and one CronJob manually (`oc create job --from=cronjob/alerts-bi-weekly <job-name>`).
+5. Rollback: images built before shared 0.1.7 ignore SQL_ENCRYPT and connect in plaintext.
+   Set SQL_ENCRYPT=false when rolling back, so the configuration does not claim encryption.
 
 Validate login denial, authenticated health, run navigation, a permitted test execution,
 publication, decision attribution, withdrawal, exports and portal visibility, then observe a
