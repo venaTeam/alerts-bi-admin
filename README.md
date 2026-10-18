@@ -261,6 +261,10 @@ refreshes portal views. Admin readiness refuses an older schema. Deploy admin op
 0.2.6 and the portal with shared 0.1.8 together before admitting slash-containing IDs:
 non-slug team URLs now use an opaque single segment, while legacy slug links remain valid.
 
-Rollback must restore a registry accepted by the old validator along with the application
-image. Migration 017 cannot be downgraded after case-distinct IDs may have been stored;
-retain its binary columns. Do not use the older portal with newly encoded team links.
+An image without migration 017 cannot start its migration init container against a 017
+database; restoring only the old image and registry is insufficient. Recovery requires a
+forward-compatible image that knows 017, or an explicitly authorized restore of the verified
+pre-migration database backup together with its matching image, manifests and registry.
+A database restore loses subsequent writes. Migration 017 refuses downgrade; do not manually
+revert its binary columns or use an older portal with newly encoded team links. Follow the
+backup, sizing and maintenance checklist in `docs/upstream/openshift-deployment.md`.

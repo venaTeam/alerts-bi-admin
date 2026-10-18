@@ -318,3 +318,11 @@ def test_accepts_case_distinct_team_ids() -> None:
     doc = base()
     doc["teams"].append({**doc["teams"][0], "team_id": "Team-A"})
     assert [team.team_id for team in validate_registry(doc)] == ["team-a", "Team-A"]
+
+
+@pytest.mark.parametrize("field", ["v1_operators", "v2_operator"])
+def test_repeated_operators_do_not_allow_empty_operator_values(field: str) -> None:
+    doc = base()
+    doc["teams"][0][field] = ["op-a", ""] if field == "v1_operators" else ""
+    with pytest.raises(RegistryError):
+        validate_registry(doc)
