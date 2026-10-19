@@ -1,0 +1,303 @@
+# OpenShift Template for the alerts-bi-admin operator console and its weekly scheduler.
+#
+# Do not edit values here. Fill a copy of values.env.example and render with:
+#   oc process -f admin.yaml --param-file <values.env> --ignore-unknown-parameters | oc apply -n <NAMESPACE> -f -
+# The complete procedure, including the ConfigMaps and Secrets this Template reads but does
+# not create, is in README.md next to this file.
+#
+# One pod holds three containers plus a migration init container, all from ADMIN_IMAGE:
+#   migrate (init)  applies missing SQL migrations before anything else starts
+#   admin           the console, bound to 127.0.0.1:8200; trusts only the proxy's identity header
+#   run-worker      executes manual and backfill run submissions
+#   oauth-proxy     OpenShift login on :8443; the only port the Service exposes
+# The CronJob runs `alerts-bi-admin weekly` from the same ADMIN_IMAGE.
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: alerts-bi-admin
+  annotations:
+    description: Alerts BI operator console (UI, run worker, login proxy) and the single weekly scheduler.
+objects:
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: alerts-bi-admin
+      labels: {app: alerts-bi-admin, app.kubernetes.io/part-of: alerts-bi}
+      annotations:
+        # Lets the login proxy use this service account as its OAuth client, redirecting to the Route.
+        serviceaccounts.openshift.io/oauth-redirectreference.admin: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"alerts-bi-admin"}}'
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: alerts-bi-admin
+      labels: {app: alerts-bi-admin, app.kubernetes.io/part-of: alerts-bi}
+    spec:
+      # Exactly one replica, replaced with Recreate: the old UI and worker stop before the new
+      # pod's migration init container runs. Never scale up or switch to RollingUpdate.
+      replicas: 1
+      strategy: {type: Recreate}
+      selector: {matchLabels: {app: alerts-bi-admin}}
+      template:
+        metadata:
+          labels: {app: alerts-bi-admin, app.kubernetes.io/part-of: alerts-bi}
+        spec:
+          serviceAccountName: alerts-bi-admin
+          imagePullSecrets: [{name: "${IMAGE_PULL_SECRET}"}]
+          securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+          initContainers:
+            - name: migrate
+              image: "${ADMIN_IMAGE}"
+              # Idempotent. Creates SQL_DATABASE if absent, then applies only missing revisions.
+              # No deadline on purpose: a long migration must never be cut short.
+              command: ["/bin/sh", "-ec"]
+              args:
+                - 'exec alerts-bi-admin db setup --database "${ADMIN_DATABASE:-${SQL_DATABASE:-alerts_bi_dev}}"'
+              envFrom:
+                - configMapRef: {name: alerts-bi-config}
+                - secretRef: {name: alerts-bi-secrets}
+              resources:
+                requests: {cpu: "${UI_CPU_REQUEST}", memory: "${UI_MEMORY_REQUEST}"}
+                limits: {memory: "${UI_MEMORY_LIMIT}"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+          containers:
+            - name: admin
+              image: "${ADMIN_IMAGE}"
+              command: ["alerts-bi-admin", "serve", "--registry", "/etc/alerts-bi/teams.json"]
+              env:
+                - {name: ADMIN_HOST, value: "127.0.0.1"}
+                - {name: ADMIN_PORT, value: "8200"}
+                - {name: ADMIN_REGISTRY_PATH, value: /etc/alerts-bi/teams.json}
+                - name: ADMIN_SECRET
+                  valueFrom: {secretKeyRef: {name: alerts-bi-admin-secrets, key: ADMIN_SECRET}}
+              envFrom:
+                - configMapRef: {name: alerts-bi-config}
+                - secretRef: {name: alerts-bi-secrets}
+              volumeMounts:
+                - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
+                - {name: ca-bundle, mountPath: /etc/alerts-bi-ca, readOnly: true}
+              # Only the listener is probed. /healthz also needs Elasticsearch, and an ES outage
+              # must not take the publish/withdraw/decide pages offline. README.md checks /healthz.
+              readinessProbe:
+                exec:
+                  command: ["python", "-c", "import socket; socket.create_connection(('127.0.0.1', 8200), 5).close()"]
+                initialDelaySeconds: 5
+                periodSeconds: 10
+                timeoutSeconds: 10
+              resources:
+                requests: {cpu: "${UI_CPU_REQUEST}", memory: "${UI_MEMORY_REQUEST}"}
+                limits: {memory: "${UI_MEMORY_LIMIT}"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+            - name: run-worker
+              image: "${ADMIN_IMAGE}"
+              command: ["alerts-bi-admin", "run-worker", "--registry", "/etc/alerts-bi/teams.json"]
+              env:
+                - {name: ADMIN_REGISTRY_PATH, value: /etc/alerts-bi/teams.json}
+              envFrom:
+                - configMapRef: {name: alerts-bi-config}
+                - secretRef: {name: alerts-bi-secrets}
+              volumeMounts:
+                - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
+                - {name: ca-bundle, mountPath: /etc/alerts-bi-ca, readOnly: true}
+              resources:
+                requests: {cpu: "${ANALYSIS_CPU_REQUEST}", memory: "${ANALYSIS_MEMORY_REQUEST}"}
+                limits: {memory: "${ANALYSIS_MEMORY_LIMIT}"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+            - name: oauth-proxy
+              image: "${OAUTH_PROXY_IMAGE}"
+              args:
+                - --provider=openshift
+                - --https-address=:8443
+                - --http-address=
+                - --upstream=http://127.0.0.1:8200
+                - --openshift-service-account=alerts-bi-admin
+                - --tls-cert=/etc/tls/private/tls.crt
+                - --tls-key=/etc/tls/private/tls.key
+                - --cookie-secret-file=/etc/proxy/secrets/COOKIE_SECRET
+                # Admits only users who may `get` this Service: the OPERATOR_GROUP RoleBinding below.
+                - '--openshift-sar={"namespace":"${NAMESPACE}","resource":"services","resourceName":"alerts-bi-admin","verb":"get"}'
+              ports: [{containerPort: 8443, name: https}]
+              readinessProbe:
+                httpGet: {path: /oauth/healthz, port: 8443, scheme: HTTPS}
+                periodSeconds: 10
+              livenessProbe:
+                httpGet: {path: /oauth/healthz, port: 8443, scheme: HTTPS}
+                initialDelaySeconds: 30
+                periodSeconds: 20
+              resources:
+                requests: {cpu: 10m, memory: 32Mi}
+                limits: {memory: 128Mi}
+              volumeMounts:
+                - {name: proxy-tls, mountPath: /etc/tls/private, readOnly: true}
+                - {name: proxy-cookie, mountPath: /etc/proxy/secrets, readOnly: true}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+          volumes:
+            - {name: registry, configMap: {name: alerts-bi-registry}}
+            # Optional private CA bundle for ES_CA_CERT / SSL_CERT_FILE; absent means an empty directory.
+            - {name: ca-bundle, configMap: {name: alerts-bi-ca-bundle, optional: true}}
+            # Created automatically by the service CA from the Service annotation below.
+            - {name: proxy-tls, secret: {secretName: alerts-bi-admin-tls}}
+            - name: proxy-cookie
+              secret:
+                secretName: alerts-bi-admin-secrets
+                items: [{key: COOKIE_SECRET, path: COOKIE_SECRET}]
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: alerts-bi-admin
+      labels: {app: alerts-bi-admin, app.kubernetes.io/part-of: alerts-bi}
+      annotations:
+        service.beta.openshift.io/serving-cert-secret-name: alerts-bi-admin-tls
+    spec:
+      selector: {app: alerts-bi-admin}
+      # Only the proxy port. Nothing may reach the application port 8200 from outside the pod.
+      ports: [{name: https, port: 443, targetPort: 8443}]
+
+  - apiVersion: route.openshift.io/v1
+    kind: Route
+    metadata:
+      name: alerts-bi-admin
+      labels: {app: alerts-bi-admin, app.kubernetes.io/part-of: alerts-bi}
+      annotations:
+        haproxy.router.openshift.io/timeout: "${ADMIN_ROUTE_TIMEOUT}"
+        # Both keys: newer routers read ip_allowlist, older ones only ip_whitelist.
+        haproxy.router.openshift.io/ip_allowlist: "${ADMIN_ROUTE_ALLOWLIST}"
+        haproxy.router.openshift.io/ip_whitelist: "${ADMIN_ROUTE_ALLOWLIST}"
+    spec:
+      # Empty ADMIN_ROUTE_HOST lets OpenShift generate the host name.
+      host: "${ADMIN_ROUTE_HOST}"
+      to: {kind: Service, name: alerts-bi-admin}
+      port: {targetPort: https}
+      tls: {termination: reencrypt, insecureEdgeTerminationPolicy: Redirect}
+
+  # The login proxy admits only members of OPERATOR_GROUP: they may `get` this one Service.
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: alerts-bi-admin-access
+      labels: {app: alerts-bi-admin, app.kubernetes.io/part-of: alerts-bi}
+    rules:
+      - apiGroups: [""]
+        resources: [services]
+        resourceNames: [alerts-bi-admin]
+        verbs: [get]
+  - apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: alerts-bi-admin-access
+      labels: {app: alerts-bi-admin, app.kubernetes.io/part-of: alerts-bi}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: alerts-bi-admin-access}
+    subjects:
+      - {apiGroup: rbac.authorization.k8s.io, kind: Group, name: "${OPERATOR_GROUP}"}
+
+  # The only weekly scheduler. Keep WEEKLY_SUSPEND=true until README.md "Enable the weekly
+  # scheduler" says otherwise; never run a second scheduler for the same database.
+  - apiVersion: batch/v1
+    kind: CronJob
+    metadata:
+      name: alerts-bi-weekly
+      labels: {app: alerts-bi-weekly, app.kubernetes.io/part-of: alerts-bi}
+    spec:
+      suspend: "${{WEEKLY_SUSPEND}}"
+      schedule: "${WEEKLY_SCHEDULE}"
+      timeZone: Etc/UTC
+      concurrencyPolicy: Forbid
+      startingDeadlineSeconds: 3600
+      successfulJobsHistoryLimit: 3
+      failedJobsHistoryLimit: 10
+      jobTemplate:
+        metadata:
+          labels: {app: alerts-bi-weekly, app.kubernetes.io/part-of: alerts-bi}
+        spec:
+          # A failed or held week fails the Job; it is never retried automatically.
+          backoffLimit: 0
+          activeDeadlineSeconds: 43200
+          template:
+            metadata:
+              labels: {app: alerts-bi-weekly, app.kubernetes.io/part-of: alerts-bi}
+            spec:
+              restartPolicy: Never
+              serviceAccountName: alerts-bi-admin
+              automountServiceAccountToken: false
+              imagePullSecrets: [{name: "${IMAGE_PULL_SECRET}"}]
+              securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+              containers:
+                - name: weekly
+                  image: "${ADMIN_IMAGE}"
+                  command: ["alerts-bi-admin", "weekly", "--registry", "/etc/alerts-bi/teams.json"]
+                  env:
+                    - {name: ADMIN_REGISTRY_PATH, value: /etc/alerts-bi/teams.json}
+                  envFrom:
+                    - configMapRef: {name: alerts-bi-config}
+                    - secretRef: {name: alerts-bi-secrets}
+                  volumeMounts:
+                    - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
+                    - {name: ca-bundle, mountPath: /etc/alerts-bi-ca, readOnly: true}
+                  resources:
+                    requests: {cpu: "${ANALYSIS_CPU_REQUEST}", memory: "${ANALYSIS_MEMORY_REQUEST}"}
+                    limits: {memory: "${ANALYSIS_MEMORY_LIMIT}"}
+                  securityContext:
+                    allowPrivilegeEscalation: false
+                    capabilities: {drop: [ALL]}
+              volumes:
+                - {name: registry, configMap: {name: alerts-bi-registry}}
+                - {name: ca-bundle, configMap: {name: alerts-bi-ca-bundle, optional: true}}
+
+parameters:
+  - name: NAMESPACE
+    description: OpenShift project the objects are applied to. Must equal the -n value; the login proxy's access check uses it.
+    required: true
+  - name: ADMIN_IMAGE
+    description: alerts-bi-admin image by digest, <registry>/<repository>@sha256:<64 hex>. One digest for the init container, UI, worker and CronJob.
+    required: true
+  - name: OAUTH_PROXY_IMAGE
+    description: OpenShift oauth-proxy image by digest. Keep the image the existing deployment uses; otherwise the cluster's openshift/oauth-proxy image stream.
+    required: true
+  - name: OPERATOR_GROUP
+    description: OpenShift Group whose members may sign in to the console.
+    required: true
+  - name: ADMIN_ROUTE_HOST
+    description: Console host name. Empty lets OpenShift generate one; keep the existing host when upgrading.
+    value: ""
+  - name: ADMIN_ROUTE_ALLOWLIST
+    description: Space-separated client CIDRs the router admits to the console; at most 61 entries.
+    value: 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+  - name: ADMIN_ROUTE_TIMEOUT
+    description: Router timeout for console requests; the synchronous POST /runs needs it long.
+    value: 30m
+  - name: WEEKLY_SCHEDULE
+    description: Cron schedule of the weekly job, in UTC. It runs daily and only does weeks that are due.
+    value: 30 2 * * *
+  - name: WEEKLY_SUSPEND
+    description: true keeps the weekly CronJob suspended. Set false only in the README step that enables it.
+    value: "true"
+  - name: IMAGE_PULL_SECRET
+    description: Pull secret for ADMIN_IMAGE and OAUTH_PROXY_IMAGE. If no such Secret exists, pods pull without credentials.
+    value: alerts-bi-pull
+  - name: UI_CPU_REQUEST
+    description: CPU request of the admin and migrate containers.
+    value: 100m
+  - name: UI_MEMORY_REQUEST
+    description: Memory request of the admin and migrate containers.
+    value: 256Mi
+  - name: UI_MEMORY_LIMIT
+    description: Memory limit of the admin and migrate containers.
+    value: 1Gi
+  - name: ANALYSIS_CPU_REQUEST
+    description: CPU request of the run-worker container, the weekly job and one-off admin jobs.
+    value: 250m
+  - name: ANALYSIS_MEMORY_REQUEST
+    description: Memory request of the run-worker container, the weekly job and one-off admin jobs.
+    value: 512Mi
+  - name: ANALYSIS_MEMORY_LIMIT
+    description: Memory limit of the run-worker container, the weekly job and one-off admin jobs (233 MiB peak measured for 1.2M events / 20,000 identities).
+    value: 2Gi

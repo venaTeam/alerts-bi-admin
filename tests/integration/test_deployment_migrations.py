@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def init_command(tmp_path: Path, extra_env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-    manifest = (ROOT / "deploy/admin.yaml").read_text()
+    manifest = (ROOT / "deploy/openshift/admin.yaml").read_text()
     match = re.search(r"- '(exec alerts-bi-admin db setup[^\n]+)'", manifest)
     assert match is not None, "The shipped init command must be exercised"
     shell = "/bin/sh" if os.name != "nt" else "C:/Program Files/Git/usr/bin/sh.exe"

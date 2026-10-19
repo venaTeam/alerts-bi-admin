@@ -72,3 +72,8 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+
+# ---- filled OpenShift deployment values (keep them outside the repository) ----
+deploy/openshift/*.env
+deploy/openshift/*.rendered.yaml
+deploy/openshift/*.crt
