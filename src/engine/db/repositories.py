@@ -60,6 +60,27 @@ def verdict_key(application: str, key_field: str) -> str:
     return f"{len(application)}:{application}|{len(key_field)}:{key_field}"
 
 
+def identity_hash_sql(application: str, key_field: str) -> str:
+    """SQL for the stored ``identity_hash`` of two NVARCHAR expressions (migration 018).
+
+    This is the computed column's definition, so a lookup that compares against it seeks the
+    primary key of ``alert_findings`` or ``llm_verdicts`` instead of scanning.
+    """
+    return (
+        "CAST(HASHBYTES('SHA2_256',\n"
+        f"    CAST(CAST(DATALENGTH(RTRIM({application})) AS INT) AS BINARY(4))\n"
+        f"    + CAST(RTRIM({application}) AS VARBINARY(MAX))\n"
+        f"    + CAST(RTRIM({key_field}) AS VARBINARY(MAX))) AS BINARY(32))"
+    )
+
+
+#: The hash of the ``:application`` and ``:key_field`` parameters. NVARCHAR(MAX) never
+#: truncates, so a value longer than its column can only hash to a different identity.
+_PARAMETER_IDENTITY_HASH: Final = identity_hash_sql(
+    "CAST(:application AS NVARCHAR(MAX))", "CAST(:key_field AS NVARCHAR(MAX))"
+)
+
+
 _DAILY_METRIC_COLUMNS = (
     "run_id",
     "team_id",
@@ -348,7 +369,7 @@ def insert_verdict_if_absent(db: Database, verdict: dict[str, Any]) -> None:
         f"""
         IF NOT EXISTS (
           SELECT 1 FROM llm_verdicts
-          WHERE application = :application AND key_field = :key_field
+          WHERE identity_hash = {_PARAMETER_IDENTITY_HASH}
             AND prompt_version = :prompt_version AND model_version = :model_version
         )
         INSERT INTO llm_verdicts ({names}) VALUES ({placeholders})
@@ -395,17 +416,22 @@ def find_verdicts(
             "prompt_version": prompt_version,
             "model_version": model_version,
         }
-        predicates = []
+        wanted = []
         for index, (application, key_field) in enumerate(chunk):
             params[f"app_{index}"] = application
             params[f"key_{index}"] = key_field
-            predicates.append(f"(application = :app_{index} AND key_field = :key_{index})")
+            wanted.append(f"(:app_{index}, :key_{index})")
 
+        # Each wanted pair seeks pk_llm_verdicts by its hash, which matches exactly the pairs
+        # the key's own comparison matches.
+        identity_hash = identity_hash_sql(
+            "CAST(k.application AS NVARCHAR(MAX))", "CAST(k.key_field AS NVARCHAR(MAX))"
+        )
         rows = db.query(
             f"""
-            SELECT * FROM llm_verdicts
-            WHERE prompt_version = :prompt_version AND model_version = :model_version
-              AND ({" OR ".join(predicates)})
+            SELECT v.* FROM (VALUES {", ".join(wanted)}) AS k(application, key_field)
+            JOIN llm_verdicts AS v ON v.identity_hash = {identity_hash}
+            WHERE v.prompt_version = :prompt_version AND v.model_version = :model_version
             """,
             params,
         )

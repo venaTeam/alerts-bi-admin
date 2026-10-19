@@ -274,3 +274,13 @@ pre-migration database backup together with its matching image, manifests and re
 A database restore loses subsequent writes. Migration 017 refuses downgrade; do not manually
 revert its binary columns or use an older portal with newly encoded team links. Follow the
 backup, sizing and maintenance checklist in `docs/upstream/openshift-deployment.md`.
+
+## Long alert identities (2026-10-19)
+
+Apply migration `018_alert_identity_hash` through `db setup`. Before it, a run fails with SQL
+error 1946 (`pk_alert_findings` exceeds 900 bytes) when an identity's `application` and
+`key_field` together exceed 384 characters, and persists nothing. The migration keys
+`alert_findings` and `llm_verdicts` by a computed SHA-256 `identity_hash`; identity comparison
+is unchanged, and admin readiness refuses an older schema. It refuses downgrade, and an image
+without 018 cannot start its migration init container against a migrated database. Follow the
+backup, sizing and maintenance checklist in `docs/upstream/openshift-deployment.md`.
