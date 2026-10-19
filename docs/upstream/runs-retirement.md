@@ -61,16 +61,16 @@ installation") carries out these steps with exact commands, followed by the port
 4. Run `alerts-bi-admin db status` against the existing database from the new image. Every
    revision must be `applied` or `pending`; stop rollout if ledger checks differ. At approval
    the expected head was 008 with nothing pending; later releases add revisions (head
-   018_alert_identity_hash on 2026-10-19), and any pending revision first passes the migration
+   019_erase_operator_names on 2026-10-19), and any pending revision first passes the migration
    gate in [the OpenShift requirements](openshift-deployment.md). The admin Deployment's init
    container then applies them once. Do not reset, stamp, downgrade, copy or recreate the
    database. Stop the runs-era trigger before that step: every run writer must use the updated
    image.
-5. Replace the existing authenticated admin application container with the new image. Keep
-   the proxy, service account, authorization, TLS and loopback upstream. Supply the engine's
-   ES/LLM settings and registry mount (no writable output since 2026-10-17). No `--dev-user`
-   in deployment.
-6. Verify unauthenticated denial, authenticated health, team/run navigation, exports and
+5. Replace the existing admin application with the new image. Amended 2026-10-19 (design
+   "Admin console without login"): remove the login proxy, its authorization objects and TLS
+   secret, and expose the console through an edge-TLS Route. Supply the engine's ES/LLM settings
+   and registry mount (no writable output since 2026-10-17).
+6. Verify that the console opens without a login, health, team/run navigation, exports and
    an approved test run plus publication/decision/withdrawal flow. Validate the portal using
    the same SQL database and compatible shared artifact.
 7. Switch the existing weekly CronJob to the same admin digest and `alerts-bi-admin weekly`.

@@ -108,28 +108,53 @@ def lock_team_queue(db: Database, team_id: str, timeout_ms: int = 10000) -> bool
     return row is not None and int(row["result"]) >= 0
 
 
+#: Who requested a submission is not recorded (design "Admin console without login",
+#: 2026-10-19). The NOT NULL column holds this empty value, so submission keys are unique
+#: across every client, not per person.
+NO_REQUESTER = ""
+
+
 def refuse_active_job(db: Database) -> None:
     if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1"):
         raise ExecutionBusy("A run is already pending or running. Try again after it finishes.")
 
 
-def _existing_submission(
-    db: Database, operator: str, key_hash: bytes, request_hash: str
+def matching_submission(
+    rows: list[dict[str, Any]], request_hash: str, conflict: str
 ) -> dict[str, Any] | None:
-    existing = db.query_one(
-        "SELECT * FROM run_jobs WHERE requested_by=:operator AND idempotency_key_hash=:key_hash",
-        {"operator": operator, "key_hash": key_hash},
+    """The one stored submission that a retry with this key and request returns, if any.
+
+    Migration 019 kept a key that several people had used as one ``#<id>`` row each, so a key
+    can match several rows: a retry gets the one with its own options, and refuses when that
+    is still more than one.
+    """
+    if not rows:
+        return None
+    same = [row for row in rows if row["request_hash"] == request_hash]
+    if not same:
+        raise HTTPException(409, conflict)
+    if len(same) > 1:
+        raise HTTPException(
+            409,
+            "Several earlier submissions used this key. Reload the page, or use a new "
+            "Idempotency-Key, and submit again.",
+        )
+    return same[0]
+
+
+def _existing_submission(db: Database, key_hash: bytes, request_hash: str) -> dict[str, Any] | None:
+    rows = db.query(
+        "SELECT * FROM run_jobs WHERE idempotency_key_hash=:key_hash", {"key_hash": key_hash}
     )
-    if existing and existing["request_hash"] != request_hash:
-        raise HTTPException(409, "This submission key was already used with different options.")
-    return existing
+    return matching_submission(
+        rows, request_hash, "This submission key was already used with different options."
+    )
 
 
 def _admit(
     settings: ApiSettings,
     db: Database,
     body: RunRequest,
-    operator: str,
     idempotency_key: str,
     key_hash: bytes,
     request_hash: str,
@@ -169,12 +194,12 @@ def _admit(
     db.execute(
         "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,request_hash,team_id,"
         "run_at,llm_mode,registry_sha256,run_id,status,active_slot,submitted_at) "
-        "VALUES (:id,:key,:key_hash,:operator,:hash,:team,:at,:mode,:registry,:run,:status,:slot,:now)",
+        "VALUES (:id,:key,:key_hash,:requester,:hash,:team,:at,:mode,:registry,:run,:status,:slot,:now)",
         {
             "id": job_id,
             "key": idempotency_key,
             "key_hash": key_hash,
-            "operator": operator,
+            "requester": NO_REQUESTER,
             "hash": request_hash,
             "team": body.team,
             "at": run_at.replace(tzinfo=None),
@@ -192,31 +217,26 @@ def _admit(
         job_id=job_id,
         team_id=body.team,
         run_id=run_id,
-        operator=operator,
         status=status,
     )
     return get_job(db, job_id)
 
 
-def submit_job(
-    settings: ApiSettings, body: RunRequest, operator: str, idempotency_key: str
-) -> dict[str, Any]:
+def submit_job(settings: ApiSettings, body: RunRequest, idempotency_key: str) -> dict[str, Any]:
     if not 1 <= len(idempotency_key) <= 64 or not idempotency_key.isascii():
         raise HTTPException(400, "Supply an ASCII Idempotency-Key of 1 to 64 characters.")
-    if not operator or len(operator) > 256:
-        raise HTTPException(400, "The operator identity is invalid.")
     request_hash = sha256_text(body.model_dump_json())
     # Binary identity preserves case and trailing spaces regardless of SQL collation.
     key_hash = bytes.fromhex(sha256_text(idempotency_key))
     with connect(settings.config.sql, settings.target_database) as db:
-        existing = _existing_submission(db, operator, key_hash, request_hash)
+        existing = _existing_submission(db, key_hash, request_hash)
         if existing:
             return existing
         try:
             with execution_lock(db, settings):
                 # Recheck after acquiring the lock: a simultaneous identical submission may
                 # have committed since the first lookup.
-                existing = _existing_submission(db, operator, key_hash, request_hash)
+                existing = _existing_submission(db, key_hash, request_hash)
                 if existing:
                     return existing
                 status = "pending"
@@ -226,9 +246,7 @@ def submit_job(
                     if not backfill_in_progress(db):
                         raise
                     status = "queued"
-                return _admit(
-                    settings, db, body, operator, idempotency_key, key_hash, request_hash, status
-                )
+                return _admit(settings, db, body, idempotency_key, key_hash, request_hash, status)
         except ExecutionBusy:
             db.rollback()
             if not backfill_in_progress(db):
@@ -236,13 +254,11 @@ def submit_job(
         # A backfill week holds the execution lock. Queue this run ahead of the remaining
         # weeks; a queued row holds no slot, so admission needs no execution lock.
         try:
-            return _admit(
-                settings, db, body, operator, idempotency_key, key_hash, request_hash, "queued"
-            )
+            return _admit(settings, db, body, idempotency_key, key_hash, request_hash, "queued")
         except Exception:
             db.rollback()
             # A simultaneous identical submission wins the unique key; return its row.
-            existing = _existing_submission(db, operator, key_hash, request_hash)
+            existing = _existing_submission(db, key_hash, request_hash)
             if existing:
                 return existing
             raise

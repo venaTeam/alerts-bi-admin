@@ -12,4 +12,6 @@ both this wheel and the matching `alerts-bi-shared` release.
 
 Version 0.2.0 removes the standalone HTML scorecard renderer and export. The three CSV
 formats and columns remain unchanged. Version 0.2.6 uses alerts-bi-shared 0.1.8; the portal consumes
-that shared library independently and has no operations dependency.
+that shared library independently and has no operations dependency. Version 0.2.7 records no
+operator names: publications, withdrawals and decisions no longer take or store a person, and
+`publish_run` refuses a `published_by` other than "" or the scheduler's `weekly-schedule`.

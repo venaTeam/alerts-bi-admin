@@ -52,7 +52,7 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
         migrations.reset_test_database(CONFIG.sql, DB)
     with connect(CONFIG.sql, DB) as db:
         persist_run(db, PersistencePayload(run=sample_run(run_id="1" * 64, team_id="team-a")))
-        publish_run(db, "1" * 64, published_by="test", allow_gap=True)
+        publish_run(db, "1" * 64, allow_gap=True)
         with pytest.raises(ValueError, match=TEAM_REVISION):
             check_schema(db)
         # Exercise migration rollback after indexes are dropped.
@@ -69,7 +69,11 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
         with connect(CONFIG.sql, DB) as db:
             db.execute("DROP VIEW IF EXISTS dbo.blocks_017")
             db.commit()
-    assert migrations.migrate(CONFIG.sql, DB)[0] == [TEAM_REVISION, "018_alert_identity_hash"]
+    assert migrations.migrate(CONFIG.sql, DB)[0] == [
+        TEAM_REVISION,
+        "018_alert_identity_hash",
+        "019_erase_operator_names",
+    ]
     with connect(CONFIG.sql, DB) as db:
         check_schema(db)
         columns = db.query(
@@ -83,10 +87,10 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
                 {"view": view},
             ) == {"collation_name": "Latin1_General_100_BIN2"}
         persist_run(db, PersistencePayload(run=sample_run(run_id="2" * 64, team_id="Team-A")))
-        second = publish_run(db, "2" * 64, published_by="test", allow_gap=True)
+        second = publish_run(db, "2" * 64, allow_gap=True)
         assert second.replaced_run_id is None
         persist_run(db, PersistencePayload(run=sample_run(run_id="3" * 64, team_id="Team-A")))
-        replacement = publish_run(db, "3" * 64, published_by="test", replace=True, allow_gap=True)
+        replacement = publish_run(db, "3" * 64, replace=True, allow_gap=True)
         assert replacement.replaced_run_id == "2" * 64
         assert [r["run_id"] for r in team_runs(db, "team-a")] == ["1" * 64]
         assert {r["run_id"] for r in team_runs(db, "Team-A")} == {"2" * 64, "3" * 64}
@@ -121,9 +125,7 @@ def test_slash_ids_reach_workspace_summary_trigger_and_backfill(tmp_path: Path) 
         encoding="utf-8",
     )
     settings = AdminSettings(AdminConfig(CONFIG.sql), DB, "s" * 40, registry_path=str(registry))
-    with TestClient(
-        build_admin(settings), headers={"X-Forwarded-User": "route-test"}, follow_redirects=False
-    ) as client:
+    with TestClient(build_admin(settings), follow_redirects=False) as client:
         assert client.get("/").status_code == 200
         for team in teams:
             path = "/teams/" + encode_team_id(team)

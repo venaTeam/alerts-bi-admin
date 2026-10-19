@@ -30,7 +30,7 @@ from fastapi import HTTPException
 from ..config import ApiSettings
 from ..run.orchestrator import compute_run_id
 from ..weekly.plan import RETENTION_DAYS, is_week_boundary, latest_week_end
-from .jobs import ACTIVE_STATES, get_job, lock_team_queue
+from .jobs import ACTIVE_STATES, NO_REQUESTER, get_job, lock_team_queue, matching_submission
 from .schemas import LlmMode, RunRequest
 from .service import close_client, select_client
 
@@ -94,11 +94,9 @@ def parse_weeks(values: Sequence[str]) -> list[datetime]:
     return sorted(weeks)
 
 
-def _validate_operator(operator: str, idempotency_key: str) -> None:
+def _validate_key(idempotency_key: str) -> None:
     if not 1 <= len(idempotency_key) <= 64 or not idempotency_key.isascii():
         raise HTTPException(400, "The form has expired. Reload the page and try again.")
-    if not operator or len(operator) > 256:
-        raise HTTPException(400, "The operator identity is invalid.")
 
 
 def _check_retained(weeks: Sequence[datetime], now: datetime) -> None:
@@ -198,7 +196,6 @@ def _insert_week(
     team_id: str,
     end: datetime,
     llm: LlmMode,
-    operator: str,
     registry_sha256: str,
     run_id: str,
     now: datetime,
@@ -209,13 +206,13 @@ def _insert_week(
     db.execute(
         "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,"
         "request_hash,team_id,run_at,llm_mode,registry_sha256,run_id,status,active_slot,"
-        "submitted_at,backfill_id) VALUES (:id,:key,:key_hash,:operator,:hash,:team,:at,:mode,"
+        "submitted_at,backfill_id) VALUES (:id,:key,:key_hash,:requester,:hash,:team,:at,:mode,"
         ":registry,:run,'queued',NULL,:now,:backfill)",
         {
             "id": job_id,
             "key": key,
             "key_hash": bytes.fromhex(sha256_text(key)),
-            "operator": operator,
+            "requester": NO_REQUESTER,
             "hash": sha256_text(RunRequest(team=team_id, run_at=end, llm=llm).model_dump_json()),
             "team": team_id,
             "at": _naive(end),
@@ -229,6 +226,16 @@ def _insert_week(
     return job_id
 
 
+def existing_backfill(db: Database, key_hash: bytes, request_hash: str) -> dict[str, Any] | None:
+    """The stored backfill a resubmitted form returns, if any (see matching_submission)."""
+    rows = db.query(
+        "SELECT * FROM run_backfills WHERE idempotency_key_hash=:key_hash", {"key_hash": key_hash}
+    )
+    return matching_submission(
+        rows, request_hash, "This form was already submitted with different weeks or options."
+    )
+
+
 def _now() -> datetime:
     now = datetime.now(UTC).replace(tzinfo=None)
     return now.replace(microsecond=now.microsecond // 1000 * 1000)
@@ -239,13 +246,12 @@ def submit_backfill(
     team_id: str,
     weeks: Sequence[datetime],
     llm: LlmMode,
-    operator: str,
     idempotency_key: str,
     *,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Accept one queued run per week, or refuse the whole request and store nothing."""
-    _validate_operator(operator, idempotency_key)
+    _validate_key(idempotency_key)
     weeks = sorted({_utc(end) for end in weeks})
     if not weeks:
         raise HTTPException(400, "Choose at least one week to backfill.")
@@ -262,16 +268,8 @@ def submit_backfill(
     run_ids = _run_ids(settings, registry, team_id, weeks, llm)
     with connect(settings.config.sql, settings.target_database) as db, db.transaction():
         _team_lock(db, team_id)
-        existing = db.query_one(
-            "SELECT * FROM run_backfills WHERE requested_by=:operator "
-            "AND idempotency_key_hash=:key_hash",
-            {"operator": operator, "key_hash": key_hash},
-        )
+        existing = existing_backfill(db, key_hash, request_hash)
         if existing:
-            if existing["request_hash"] != request_hash:
-                raise HTTPException(
-                    409, "This form was already submitted with different weeks or options."
-                )
             return existing
         if _active_backfill(db, team_id):
             raise HTTPException(
@@ -284,12 +282,12 @@ def submit_backfill(
         submitted = _now()
         db.execute(
             "INSERT INTO run_backfills (backfill_id,team_id,requested_by,idempotency_key_hash,"
-            "request_hash,llm_mode,week_count,submitted_at) VALUES (:id,:team,:operator,"
+            "request_hash,llm_mode,week_count,submitted_at) VALUES (:id,:team,:requester,"
             ":key_hash,:hash,:mode,:count,:now)",
             {
                 "id": backfill_id,
                 "team": team_id,
-                "operator": operator,
+                "requester": NO_REQUESTER,
                 "key_hash": key_hash,
                 "hash": request_hash,
                 "mode": llm,
@@ -304,7 +302,6 @@ def submit_backfill(
                 team_id=team_id,
                 end=end,
                 llm=llm,
-                operator=operator,
                 registry_sha256=registry.file_sha256,
                 run_id=run_ids[end],
                 now=submitted,
@@ -316,7 +313,6 @@ def submit_backfill(
         team_id=team_id,
         weeks=len(weeks),
         llm_mode=llm,
-        operator=operator,
     )
     return row
 
@@ -364,7 +360,7 @@ def week_rows(jobs: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def cancel_backfill(
-    db: Database, backfill_id: str, operator: str, job_id: str | None = None
+    db: Database, backfill_id: str, job_id: str | None = None
 ) -> tuple[dict[str, Any], int]:
     """Cancel every queued week, or one; a claimed week runs to completion."""
     backfill = get_backfill(db, backfill_id)
@@ -372,7 +368,7 @@ def cancel_backfill(
         "id": backfill_id,
         "job": job_id,
         "now": _now(),
-        "message": f"Cancelled by {operator} before it started."[:1000],
+        "message": "Cancelled before it started.",
     }
     cancelled = db.query(
         "UPDATE run_jobs SET status='cancelled',completed_at=:now,error_summary=:message "
@@ -382,9 +378,9 @@ def cancel_backfill(
     )
     if job_id is None:
         db.execute(
-            "UPDATE run_backfills SET cancelled_at=:now,cancelled_by=:operator "
+            "UPDATE run_backfills SET cancelled_at=:now "
             "WHERE backfill_id=:id AND cancelled_at IS NULL",
-            {"id": backfill_id, "now": params["now"], "operator": operator},
+            {"id": backfill_id, "now": params["now"]},
         )
     db.commit()
     log.info(
@@ -392,7 +388,6 @@ def cancel_backfill(
         backfill_id=backfill_id,
         job_id=job_id,
         cancelled=len(cancelled),
-        operator=operator,
     )
     return backfill, len(cancelled)
 
@@ -400,7 +395,6 @@ def cancel_backfill(
 def retry_backfill(
     settings: ApiSettings,
     backfill_id: str,
-    operator: str,
     job_id: str | None = None,
     *,
     now: datetime | None = None,
@@ -441,7 +435,6 @@ def retry_backfill(
                     team_id=team_id,
                     end=end,
                     llm=llm,
-                    operator=operator,
                     registry_sha256=registry.file_sha256,
                     run_id=run_ids[end],
                     now=submitted,
@@ -450,7 +443,6 @@ def retry_backfill(
         "run.backfill_retried",
         backfill_id=backfill_id,
         weeks=len(weeks),
-        operator=operator,
     )
     return backfill, len(weeks)
 

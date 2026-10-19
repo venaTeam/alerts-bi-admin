@@ -34,8 +34,6 @@ _TEMPLATE_OWNED = {
     "ADMIN_REGISTRY_PATH",
     "ADMIN_DATABASE",
 }
-#: Must keep its default: it is the header the OpenShift login proxy sends.
-_FIXED = {"ADMIN_USER_HEADER"}
 #: Legacy trigger listener settings; `alerts-bi-admin serve` does not read them.
 _LEGACY = {"API_HOST", "API_PORT", "API_REGISTRY_PATH", "API_DATABASE"}
 #: Read by libraries rather than through read_*: the log threshold and the model client's CA file.
@@ -51,7 +49,6 @@ _CLUSTER_OBJECTS = {
     "alerts-bi-registry",
     "alerts-bi-ca-bundle",
     "alerts-bi-admin-secrets",
-    "alerts-bi-admin-tls",
 }
 
 
@@ -131,7 +128,7 @@ def test_config_and_secret_examples_cover_exactly_the_runtime_settings() -> None
     read = _settings_read_by_code()
     documented = set(config) | set(secrets)
     assert documented - read == _LIBRARY
-    assert read - documented == _TEST_ONLY | _TEMPLATE_OWNED | _FIXED | _LEGACY
+    assert read - documented == _TEST_ONLY | _TEMPLATE_OWNED | _LEGACY
 
 
 def test_env_files_follow_the_from_env_file_format() -> None:
@@ -147,10 +144,19 @@ def test_every_admin_container_runs_the_one_admin_image() -> None:
     for name in ("admin.yaml", "admin-job.yaml"):
         objects, _ = _template(name)
         images = re.findall(r"^\s*image: (.+)$", objects, flags=re.MULTILINE)
-        assert set(images) <= {'"${ADMIN_IMAGE}"', '"${OAUTH_PROXY_IMAGE}"'}, name
+        assert set(images) <= {'"${ADMIN_IMAGE}"'}, name
     objects, _ = _template("admin.yaml")
     # migrate, admin, run-worker and the weekly CronJob.
     assert objects.count('image: "${ADMIN_IMAGE}"') == 4
+
+
+def test_the_console_has_no_login_proxy_or_client_allowlist() -> None:
+    # Design "Admin console without login", 2026-10-19.
+    objects, _ = _template("admin.yaml")
+    for absent in ("oauth-proxy", "openshift-sar", "kind: Role", "ip_allowlist", "ip_whitelist"):
+        assert absent not in objects, absent
+    assert '{name: ADMIN_HOST, value: "0.0.0.0"}' in objects
+    assert "tls: {termination: edge, insecureEdgeTerminationPolicy: Redirect}" in objects
 
 
 def test_the_init_container_runs_the_integration_tested_setup_command() -> None:

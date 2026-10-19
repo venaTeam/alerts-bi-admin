@@ -189,7 +189,7 @@ def test_a_rerun_reuses_each_identity_s_own_verdict(
 def test_readers_and_decisions_reach_each_identity(db: Database) -> None:
     # Runs after the reruns: a published run can no longer be replaced.
     run_id = _run_id(db)
-    publish_run(db, run_id, published_by="long-identity-test")
+    publish_run(db, run_id)
 
     for key in sorted(KEYS):
         finding = db.query_one(
@@ -207,7 +207,6 @@ def test_readers_and_decisions_reach_each_identity(db: Database) -> None:
             finding_id=findings_on(finding)[-1],
             state="confirmed",
             note=f"decided on the key ending {key[-1]}",
-            decided_by="long-identity-test",
         )
 
     for key in KEYS:

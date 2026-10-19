@@ -22,7 +22,7 @@ tz = ["tzdata"]
 
 [[package]]
 name = "alerts-bi-operations"
-version = "0.2.6"
+version = "0.2.7"
 description = "Alerts BI registry validation, operator actions and SQL-only reports"
 optional = false
 python-versions = ">=3.12"
@@ -1674,4 +1674,4 @@ standard = ["httptools (>=0.8.0)", "python-dotenv (>=0.13)", "pyyaml (>=5.1)", "
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12"
-content-hash = "ee637a78cf21fcec648ffc155fa0ad0f85215cdd69ae14058c6f6b0d163813ee"
+content-hash = "65ed1a13422905bbf5687ae52967b2ab520d0f121f7844d8ee9e94f6bb2263c6"

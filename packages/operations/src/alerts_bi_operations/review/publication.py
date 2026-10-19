@@ -20,6 +20,7 @@ from alerts_bi_shared.db.connection import Database
 from alerts_bi_shared.window import WINDOW_HOURS
 
 __all__ = [
+    "SCHEDULED_PUBLISHER",
     "PublicationRefused",
     "PublishResult",
     "PublishedWeek",
@@ -33,6 +34,9 @@ __all__ = [
 _WEEK = timedelta(hours=WINDOW_HOURS)
 NOTE_LIMIT = 4000
 REASON_LIMIT = 1000
+#: The only ``published_by`` besides "": the weekly scheduler's own marker, which names no
+#: person.
+SCHEDULED_PUBLISHER = "weekly-schedule"
 
 
 class PublicationRefused(ValueError):
@@ -184,16 +188,23 @@ def publish_run(
     db: Database,
     run_id: str,
     *,
-    published_by: str,
+    published_by: str = "",
     note: str | None = None,
     replace: bool = False,
     allow_gap: bool = False,
     now: datetime | None = None,
 ) -> PublishResult:
-    """Publish one completed run as its team's review of that week."""
-    by = _clean(published_by, 128, "operator name")
-    if by is None:
-        raise PublicationRefused("an operator name is required")
+    """Publish one completed run as its team's review of that week.
+
+    People are not recorded (design "Admin console without login", 2026-10-19): only the
+    weekly scheduler names itself in ``published_by``; every other publication stores "".
+    Any other value is refused, so a caller cannot store a person's name.
+    """
+    if published_by not in ("", SCHEDULED_PUBLISHER):
+        raise ValueError(
+            f"published_by may only be {SCHEDULED_PUBLISHER!r} or empty; people are not recorded"
+        )
+    by = published_by
     review_note = _clean(note, NOTE_LIMIT, "review note")
     at = _naive(now or datetime.now(UTC))
 
@@ -222,12 +233,11 @@ def publish_run(
             db.execute(
                 """
                 UPDATE review_publications
-                SET withdrawn_at = :at, withdrawn_by = :by, withdrawn_reason = :reason
+                SET withdrawn_at = :at, withdrawn_by = N'', withdrawn_reason = :reason
                 WHERE publication_id = :publication_id AND withdrawn_at IS NULL
                 """,
                 {
                     "at": at,
-                    "by": by,
                     "reason": f"replaced by run {run_id}",
                     "publication_id": replaced.publication_id,
                 },
@@ -265,15 +275,14 @@ def unpublish_run(
     db: Database,
     run_id: str,
     *,
-    withdrawn_by: str,
     reason: str,
     now: datetime | None = None,
 ) -> None:
-    """Withdraw a run's current publication. The row is kept; readers stop seeing the week."""
-    by = _clean(withdrawn_by, 128, "operator name")
+    """Withdraw a run's current publication. The row is kept; readers stop seeing the week.
+
+    ``withdrawn_by`` stores "" rather than a person: a CHECK requires it set once withdrawn.
+    """
     why = _clean(reason, REASON_LIMIT, "reason")
-    if by is None:
-        raise PublicationRefused("an operator name is required")
     if why is None:
         raise PublicationRefused("a reason is required to withdraw a published review")
 
@@ -288,12 +297,11 @@ def unpublish_run(
         db.execute(
             """
             UPDATE review_publications
-            SET withdrawn_at = :at, withdrawn_by = :by, withdrawn_reason = :reason
+            SET withdrawn_at = :at, withdrawn_by = N'', withdrawn_reason = :reason
             WHERE publication_id = :publication_id
             """,
             {
                 "at": _naive(now or datetime.now(UTC)),
-                "by": by,
                 "reason": why,
                 "publication_id": current["publication_id"],
             },
@@ -316,8 +324,8 @@ def list_publications(db: Database, team_id: str) -> list[dict[str, Any]]:
     return db.query(
         """
         SELECT p.publication_id, p.run_id, p.window_start, p.window_end, p.published_at,
-               p.published_by, p.review_note, p.withdrawn_at, p.withdrawn_by,
-               p.withdrawn_reason, r.status AS run_status
+               p.published_by, p.review_note, p.withdrawn_at, p.withdrawn_reason,
+               r.status AS run_status
         FROM review_publications AS p
         JOIN runs AS r ON r.run_id = p.run_id
         WHERE p.team_id = :team_id

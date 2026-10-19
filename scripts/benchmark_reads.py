@@ -383,7 +383,6 @@ def main() -> None:
                         registry_path=str(registry),
                     )
                 ),
-                headers={"X-Forwarded-User": "capacity-tester"},
                 client=("127.0.0.1", 50000),
             )
         )

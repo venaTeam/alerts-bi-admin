@@ -51,8 +51,9 @@ retention, or not complete yet. The dialog lists the selected weeks in run order
 UTC windows, warns when a selectable week leaves retention within seven days, and offers the
 live/fake/off model mode with live selected.
 
-`POST /teams/{team_id}/backfill` uses the console's same-site actor-bound CSRF form and a
-per-form submission key. Repeating the key returns the same backfill; reusing it with different
+`POST /teams/{team_id}/backfill` uses the console's same-site CSRF form and a per-form
+submission key (amended 2026-10-19: the token is no longer bound to a user, and keys are unique
+across all clients; see design "Admin console without login"). Repeating the key returns the same backfill; reusing it with different
 weeks or model mode is refused with 409. The server accepts 1–12 distinct Mondays and refuses
 the whole request (400 or 409, nothing stored) when the team is not registered, a week is not a
 Monday 00:00 UTC boundary, is not yet complete, starts more than 84 days before acceptance, has
@@ -119,7 +120,8 @@ weeks have no completed run and when the oldest leaves retention.
 | `POST /run-jobs/{job_id}/cancel` | Remove one queued week |
 | `POST /run-jobs/{job_id}/retry` | Retry one failed backfill week |
 
-All require operator identity; POSTs require the same-site actor-bound form token. The run job
+None requires an identity since 2026-10-19 (design "Admin console without login"); POSTs require
+the same-site form token. No requester or canceller is recorded. The run job
 status values become pending, queued, running, completed, failed and cancelled.
 `contracts/console-openapi.json` is regenerated from the console.
 

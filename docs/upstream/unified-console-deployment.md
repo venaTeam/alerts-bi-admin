@@ -1,10 +1,11 @@
 # Unified operator deployment
 
-Use one admin image for the authenticated UI, migration init container, manual worker, weekly
+Use one admin image for the UI, migration init container, manual worker, weekly
 CronJob and one-off admin jobs, plus the separate read-only portal image. Admin contains
-maintained engine source; no runtime wheel or separate trigger image is needed. Preserve the
-existing login proxy and loopback-only application port 8200, identity header, CSRF tokens,
-SQL/ES/LLM settings and registry mount. Since 2026-10-17 runs write no files, so no writable
+maintained engine source; no runtime wheel or separate trigger image is needed. Since
+2026-10-19 the console has no login proxy or identity (design "Admin console without login"):
+it listens on port 8200 behind an edge-TLS Route, and keeps its CSRF tokens, SQL/ES/LLM
+settings and registry mount. Since 2026-10-17 runs write no files, so no writable
 output is needed.
 
 Deploy with the runbooks in the application repositories (amended 2026-10-19): admin's

@@ -102,7 +102,7 @@ def test_016_upgrades_a_populated_database_and_readiness_requires_it(
         )
         # Plain SQL: the engine's verdict writes need migration 018.
         insert_verdict_row(db, sample_verdict(key_field=KEY))
-        publish_run(db, str(run["run_id"]), published_by="upgrade-test", allow_gap=True)
+        publish_run(db, str(run["run_id"]), allow_gap=True)
         db.execute(
             "INSERT INTO finding_decisions (team_id, run_id, alert_schema, application, "
             "key_field, finding_id, state, note, decided_at, decided_by) VALUES "
@@ -121,10 +121,11 @@ def test_016_upgrades_a_populated_database_and_readiness_requires_it(
         "016_case_sensitive_key_fields",
         "017_case_sensitive_teams",
         "018_alert_identity_hash",
+        "019_erase_operator_names",
     ]
 
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "018_alert_identity_hash"
+        assert migrations.current_revision(db) == "019_erase_operator_names"
         assert _counts(db) == before
         check_schema(db)
         stored = db.query(
@@ -204,7 +205,8 @@ def test_a_failed_016_rolls_back_completely_and_a_retry_applies_it(
         "016_case_sensitive_key_fields",
         "017_case_sensitive_teams",
         "018_alert_identity_hash",
+        "019_erase_operator_names",
     ]
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "018_alert_identity_hash"
+        assert migrations.current_revision(db) == "019_erase_operator_names"
         assert _counts(db) == before

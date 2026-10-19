@@ -33,7 +33,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from alerts_bi_operations.registry import TeamEntry, load_registry
-from alerts_bi_operations.review.publication import publish_run
+from alerts_bi_operations.review.publication import SCHEDULED_PUBLISHER, publish_run
 from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.logging_setup import log, redact_error
 
@@ -62,7 +62,7 @@ __all__ = [
 ]
 
 #: Who a scheduled publication is recorded as.
-PUBLISHER = "weekly-schedule"
+PUBLISHER = SCHEDULED_PUBLISHER
 
 #: How long an unhealthy week is held and retried before it is published anyway.
 HOLD_DAYS = 3

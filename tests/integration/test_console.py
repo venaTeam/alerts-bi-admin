@@ -38,7 +38,6 @@ TEAM = "checkout-api"
 RUN = "1" * 64
 OTHER = "2" * 64
 END = datetime(2026, 8, 24)
-USER = {"X-Forwarded-User": "alice"}
 
 
 @pytest.fixture(scope="module")
@@ -90,7 +89,7 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
             "s" * 40,
         )
     )
-    with TestClient(app, headers=USER, follow_redirects=False) as test_client:
+    with TestClient(app, follow_redirects=False) as test_client:
         yield test_client
 
 
@@ -178,12 +177,12 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
     )
     assert decision.status_code == 303 and "done=" in decision.headers["location"]
     history = client.get(decision.headers["location"])
-    assert "Agreed after checking evidence" in history.text and "alice" in history.text
+    assert "Agreed after checking evidence" in history.text and "alice" not in history.text
     assert "tab=findings" in decision.headers["location"]
     all_decisions = client.get("/decisions")
     assert all_decisions.status_code == 200
     assert "Agreed after checking evidence" in all_decisions.text
-    assert "Checkout API" in all_decisions.text and "alice" in all_decisions.text
+    assert "Checkout API" in all_decisions.text and "alice" not in all_decisions.text
     key = finding_key(
         {"alert_schema": "v1", "application": TEAM, "key_field": "checkout-api:cart:node-1"}, "R1"
     )
@@ -195,7 +194,7 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
     )
     assert withdrawn.status_code == 303 and f"run_id={RUN}" in withdrawn.headers["location"]
     activity = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=activity")
-    assert "Review needs correction" in activity.text and "Withdrawn by alice" in activity.text
+    assert "Review needs correction" in activity.text and "Withdrawn by" not in activity.text
     with connect(CONFIG.sql, DB) as db:
         assert db.query_one(
             "SELECT COUNT(*) AS n FROM finding_decisions WHERE run_id=:id", {"id": RUN}
@@ -354,9 +353,9 @@ def test_permanent_deletion_removes_all_run_records(
             ),
         )
         if state in ("published", "withdrawn"):
-            publish_run(db, run_id, published_by="alice")
+            publish_run(db, run_id)
         if state == "withdrawn":
-            unpublish_run(db, run_id, withdrawn_by="alice", reason="correction")
+            unpublish_run(db, run_id, reason="correction")
         with db.transaction():
             db.execute(
                 "INSERT INTO finding_decisions (team_id,run_id,alert_schema,application,key_field,finding_id,state,note,decided_at,decided_by) VALUES ('payments-core',:id,'v1','checkout-api','key','R1','confirmed','test decision',SYSUTCDATETIME(),'alice')",
@@ -437,7 +436,7 @@ def test_admin_ignores_forged_gap_override(client: TestClient) -> None:
     run_id = "8" * 64
     with connect(CONFIG.sql, DB) as db:
         # The 24 August and 14 September weeks leave two unpublished weeks in between.
-        publish_run(db, RUN, published_by="alice")
+        publish_run(db, RUN)
         persist_run(
             db,
             PersistencePayload(
@@ -464,7 +463,7 @@ def test_admin_ignores_forged_gap_override(client: TestClient) -> None:
             )
     finally:
         with connect(CONFIG.sql, DB) as db:
-            unpublish_run(db, RUN, withdrawn_by="alice", reason="test cleanup")
+            unpublish_run(db, RUN, reason="test cleanup")
 
 
 def test_decisions_remain_append_only_with_existing_parent(client: TestClient) -> None:
@@ -486,7 +485,7 @@ def test_failed_deletion_rolls_back_the_parent_and_publication(
     run_id = "9" * 64
     with connect(CONFIG.sql, DB) as db:
         persist_run(db, PersistencePayload(run=sample_run(run_id=run_id, team_id="payments-core")))
-        publish_run(db, run_id, published_by="alice")
+        publish_run(db, run_id)
     execute = Database.execute
 
     def fail_final_delete(db: Database, sql: str, params: dict[str, object] | None = None) -> None:

@@ -186,13 +186,14 @@ def test_exact_job_keys_upgrade_preserves_existing_submissions(
         row = db.query_one("SELECT * FROM run_jobs WHERE job_id=:id", {"id": "a" * 32})
         assert row is not None
         assert row["idempotency_key"] == key and row["idempotency_key_hash"] == digest
-        assert row["requested_by"] == "upgrade-tester" and row["status"] == "failed"
+        # Revision 018 erased the requester; the key stays unique within the empty requester.
+        assert row["requested_by"] == "" and row["status"] == "failed"
         # The database itself rejects duplicate digest identity even for another raw key.
         with pytest.raises(DBAPIError):
             db.execute(
                 "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,request_hash,"
                 "team_id,run_at,llm_mode,registry_sha256,run_id,status,submitted_at) "
-                "VALUES (:id,'different-raw-key',:digest,'upgrade-tester',:hash,'checkout-api',"
+                "VALUES (:id,'different-raw-key',:digest,N'',:hash,'checkout-api',"
                 "SYSUTCDATETIME(),'fake',:hash,:hash,'failed',SYSUTCDATETIME())",
                 {"id": "b" * 32, "digest": digest, "hash": "0" * 64},
             )
