@@ -1,5 +1,34 @@
 # Alerts BI — Design Document
 
+## Fixed-width alert identity keys — accepted 2026-10-19
+
+On 2026-10-19 a team's run failed to persist with SQL Server error 1946: an entry of 986 bytes
+for `pk_alert_findings` exceeded the 900-byte limit for clustered index entries. That key was
+`(run_id, alert_schema, application, key_field)` and `pk_llm_verdicts` was `(application,
+key_field, prompt_version, model_version)`. Both are clustered and could reach 1,668 and 1,856
+bytes, because `application` is NVARCHAR(256) and `key_field` NVARCHAR(512). SQL Server
+created them with only a warning. Beside a 64-character run id, any identity whose
+`application` and `key_field` together exceeded 384 characters made `persist_run` fail and
+roll back the whole run. The failing identity had 427.
+
+Every identity that fits its columns is stored. Migration `018_alert_identity_hash` adds a
+persisted computed column `identity_hash BINARY(32)` to `alert_findings` and `llm_verdicts`:
+SHA-256 over the byte length of the right-trimmed `application`, the right-trimmed
+`application` and the right-trimmed `key_field`. It rebuilds `pk_alert_findings` as `(run_id,
+alert_schema, identity_hash)` and `pk_llm_verdicts` as `(identity_hash, prompt_version,
+model_version)`, at most 164 and 352 bytes. Right-trimming reproduces SQL Server's
+trailing-space padding under the binary collation, so the new keys accept and reject exactly
+the pairs the old keys did. Identity, verdict reuse, decisions and ordering are unchanged.
+The engine's verdict lookups compute the same expression over their parameters, so they seek
+the key. The column is not exposed through any `portal_*` view. View columns in
+`contracts/sql-views.json`, CSV outputs, console routes and shared/operations interfaces are
+unchanged. Existing rows already satisfy the old keys, so the rebuild cannot conflict. Its
+downgrade is refused.
+
+Not covered: values longer than their columns (`application` over 256 or `key_field` over 512
+UTF-16 code units) still fail the run when stored. That has not been observed and needs a
+separate decision. The trailing-space limitation recorded below is unchanged.
+
 ## Operator console redesign — accepted 2026-10-19
 
 The user reviewed three console mocks on 2026-10-18 and chose the guided-steps layout. On
