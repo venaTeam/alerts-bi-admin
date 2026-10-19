@@ -177,12 +177,12 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
     )
     assert decision.status_code == 303 and "done=" in decision.headers["location"]
     history = client.get(decision.headers["location"])
-    assert "Agreed after checking evidence" in history.text and "alice" in history.text
+    assert "Agreed after checking evidence" in history.text and "alice" not in history.text
     assert "tab=findings" in decision.headers["location"]
     all_decisions = client.get("/decisions")
     assert all_decisions.status_code == 200
     assert "Agreed after checking evidence" in all_decisions.text
-    assert "Checkout API" in all_decisions.text and "alice" in all_decisions.text
+    assert "Checkout API" in all_decisions.text and "alice" not in all_decisions.text
     key = finding_key(
         {"alert_schema": "v1", "application": TEAM, "key_field": "checkout-api:cart:node-1"}, "R1"
     )
@@ -194,7 +194,7 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
     )
     assert withdrawn.status_code == 303 and f"run_id={RUN}" in withdrawn.headers["location"]
     activity = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=activity")
-    assert "Review needs correction" in activity.text and "Withdrawn by alice" in activity.text
+    assert "Review needs correction" in activity.text and "Withdrawn by" not in activity.text
     with connect(CONFIG.sql, DB) as db:
         assert db.query_one(
             "SELECT COUNT(*) AS n FROM finding_decisions WHERE run_id=:id", {"id": RUN}
