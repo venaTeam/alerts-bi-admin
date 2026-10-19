@@ -63,10 +63,9 @@ APPLICATION_VIEWS = (
     "portal_run_summaries",
     "portal_v1_rules",
 )
-# Keys and indexes 015 drops and recreates, with whether each is the primary key.
+# Keys and indexes 015 drops and recreates, with whether each is the primary key. Migration 018
+# then keys alert_findings and llm_verdicts by identity_hash instead of application.
 REBUILT_KEYS = {
-    ("alert_findings", "pk_alert_findings"): True,
-    ("llm_verdicts", "pk_llm_verdicts"): True,
     ("run_summaries", "pk_run_summaries"): True,
     ("run_application_daily", "pk_run_application_daily"): True,
     ("run_v1_rules", "pk_run_v1_rules"): True,

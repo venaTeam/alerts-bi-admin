@@ -25,7 +25,7 @@ from tests.helpers.sql import sample_run
 pytestmark = pytest.mark.integration
 CONFIG = load_config()
 DB = CONFIG.sql.test_database
-HEAD = "017_case_sensitive_teams"
+TEAM_REVISION = "017_case_sensitive_teams"
 TABLES = {
     "runs",
     "daily_metrics",
@@ -53,7 +53,7 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
     with connect(CONFIG.sql, DB) as db:
         persist_run(db, PersistencePayload(run=sample_run(run_id="1" * 64, team_id="team-a")))
         publish_run(db, "1" * 64, published_by="test", allow_gap=True)
-        with pytest.raises(ValueError, match=HEAD):
+        with pytest.raises(ValueError, match=TEAM_REVISION):
             check_schema(db)
         # Exercise migration rollback after indexes are dropped.
         db.execute("CREATE VIEW dbo.blocks_017 WITH SCHEMABINDING AS SELECT team_id FROM dbo.runs")
@@ -69,7 +69,7 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
         with connect(CONFIG.sql, DB) as db:
             db.execute("DROP VIEW IF EXISTS dbo.blocks_017")
             db.commit()
-    assert migrations.migrate(CONFIG.sql, DB)[0] == [HEAD]
+    assert migrations.migrate(CONFIG.sql, DB)[0] == [TEAM_REVISION, "018_alert_identity_hash"]
     with connect(CONFIG.sql, DB) as db:
         check_schema(db)
         columns = db.query(
