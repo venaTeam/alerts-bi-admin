@@ -148,6 +148,8 @@ Allow an empty v1 operator list for migrated teams and a nullable v2 operator fo
 
 Implement separate v1 and v2 queries using the selected team's operators and the exact run window. Support pagination so result size does not change correctness.
 
+Filter operators with a `terms` query on `operator.keyword`, not on `operator`. Production maps `operator` as analyzed `text` with a `keyword` subfield in both indices, so a filter on the analyzed field misses any operator containing an uppercase letter (design section 1.3, amended 2026-10-19). The scale probe's operator filter and the Kibana panels use the same subfield.
+
 Capture `run_at` once, use UTC throughout, and query the exact half-open interval from `run_at - 168 hours` through but excluding `run_at`. Assign rows to UTC calendar dates and persist exact boundaries and covered hours for partial first and last buckets.
 
 The reader consumes normalized records one page at a time; the accumulator retains the complete representative source document for LLM input (design section 7.15). Reported distinct counts must be exact; use composite aggregation or exact counting over the paged result instead of relying on approximate cardinality.
