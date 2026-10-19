@@ -8,14 +8,15 @@ from alerts_bi_operations.review.publication import publish_run
 from alerts_bi_shared.db.connection import Database, connect
 from src.engine.config import load_config
 from src.engine.db import migrate as migrations
-from src.engine.db.repositories import (
-    PersistencePayload,
-    insert_verdict_if_absent,
-    persist_run,
-)
+from src.engine.db.repositories import PersistencePayload, persist_run
 from src.readiness import check_schema
 
-from tests.engine.helpers.sql import sample_finding, sample_run, sample_verdict
+from tests.engine.helpers.sql import (
+    insert_verdict_row,
+    sample_finding,
+    sample_run,
+    sample_verdict,
+)
 
 _DAILY = {
     "alert_schema": "v1",
@@ -90,10 +91,11 @@ def test_015_upgrades_a_populated_database_and_readiness_requires_it(
             PersistencePayload(
                 run=run,
                 findings=findings,
-                verdicts=[sample_verdict()],
                 application_daily=[{"run_id": run["run_id"], "application": "Moby", **_DAILY}],
             ),
         )
+        # Plain SQL: the engine's verdict writes need migration 018.
+        insert_verdict_row(db, sample_verdict())
         publish_run(db, str(run["run_id"]), allow_gap=True)
         db.execute(
             "INSERT INTO finding_decisions (team_id, run_id, alert_schema, application, "
@@ -127,7 +129,7 @@ def test_015_upgrades_a_populated_database_and_readiness_requires_it(
         )
         assert decision == {"note": "kept"}
         # The case-only variant that used to collide now fits beside the upgraded row.
-        insert_verdict_if_absent(db, sample_verdict(application="Checkout-API"))
+        insert_verdict_row(db, sample_verdict(application="Checkout-API"))
         db.commit()
         variants = db.query("SELECT application FROM llm_verdicts ORDER BY application")
         assert [row["application"] for row in variants] == ["Checkout-API", "checkout-api"]

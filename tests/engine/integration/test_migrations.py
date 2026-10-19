@@ -239,7 +239,8 @@ def test_populated_read_model_upgrade_preserves_raw_facts(monkeypatch: pytest.Mo
         before = db.query("SELECT * FROM alert_findings")
     migrate(CONFIG.sql, database)
     with connect(CONFIG.sql, database) as db:
-        assert db.query("SELECT * FROM alert_findings") == before
+        # Every column that existed is unchanged; migration 018 adds the computed identity_hash.
+        assert db.query(f"SELECT {', '.join(before[0])} FROM alert_findings") == before
         facts, examples, days = read_summary(db, run["run_id"], "admin", ("checkout-api",))
         assert facts["schemas"]["v1"]["events"] == 4
         assert facts["schemas"]["v1"]["rules"]["R1"] == [4, 1]

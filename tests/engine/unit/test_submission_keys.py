@@ -1,7 +1,7 @@
 """Which stored submission a retried key returns, without a database.
 
 Submission keys are unique across every client (design "Admin console without login",
-2026-10-19). Migration 018 kept a key that several people had used as one ``#<id>`` row
+2026-10-19). Migration 019 kept a key that several people had used as one ``#<id>`` row
 each, so a key can match several rows.
 """
 
@@ -42,12 +42,12 @@ def test_a_key_reused_with_other_options_is_refused() -> None:
     assert refusal([row("1", OTHER)], SAME).detail == CONFLICT
 
 
-def test_after_018_a_retry_returns_the_one_migrated_row_with_its_options() -> None:
+def test_after_019_a_retry_returns_the_one_migrated_row_with_its_options() -> None:
     mine = row("1", SAME, "#1")
     assert matching_submission([row("2", OTHER, "#2"), mine], SAME, CONFLICT) is mine
     assert refusal([row("1", OTHER, "#1"), row("2", OTHER, "#2")], SAME).detail == CONFLICT
 
 
-def test_after_018_a_key_two_people_used_with_the_same_options_is_refused() -> None:
+def test_after_019_a_key_two_people_used_with_the_same_options_is_refused() -> None:
     detail = refusal([row("1", SAME, "#1"), row("2", SAME, "#2")], SAME).detail
     assert detail.startswith("Several earlier submissions used this key.")

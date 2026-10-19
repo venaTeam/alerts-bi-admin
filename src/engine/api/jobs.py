@@ -124,7 +124,7 @@ def matching_submission(
 ) -> dict[str, Any] | None:
     """The one stored submission that a retry with this key and request returns, if any.
 
-    Migration 018 kept a key that several people had used as one ``#<id>`` row each, so a key
+    Migration 019 kept a key that several people had used as one ``#<id>`` row each, so a key
     can match several rows: a retry gets the one with its own options, and refuses when that
     is still more than one.
     """

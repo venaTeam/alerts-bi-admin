@@ -70,7 +70,7 @@ Runs and weekly jobs write no files: the three CSV downloads render from SQL on 
 `report` exports a stored run's CSVs to `--out` (default `out/<run id prefix>`), and
 `run --out` and `weekly --out` also export. The OpenShift templates in `deploy/openshift/`
 have no ADMIN_OUT_DIR, output mounts or weekly `--out`. Restoring older manifests and images is
-subject to the database recovery requirements for migrations 015–017 in
+subject to the database recovery requirements for migrations 015–018 in
 `deploy/openshift/README.md`; image-only rollback is insufficient once an
 unknown revision has been applied. An explicit `--registry` takes precedence over
 `ADMIN_REGISTRY_PATH`.
@@ -281,6 +281,16 @@ A database restore loses subsequent writes. Migration 017 refuses downgrade; do 
 revert its binary columns or use an older portal with newly encoded team links. Follow the
 migration gate (backup, sizing and maintenance window) in `deploy/openshift/README.md`.
 
+## Long alert identities (2026-10-19)
+
+Apply migration `018_alert_identity_hash` through `db setup`. Before it, a run fails with SQL
+error 1946 (`pk_alert_findings` exceeds 900 bytes) when an identity's `application` and
+`key_field` together exceed 384 characters, and persists nothing. The migration keys
+`alert_findings` and `llm_verdicts` by a computed SHA-256 `identity_hash`; identity comparison
+is unchanged, and admin readiness refuses an older schema. It refuses downgrade, and an image
+without 018 cannot start its migration init container against a migrated database. Follow the
+migration gate (backup, sizing and maintenance window) in `deploy/openshift/README.md`.
+
 ## No login and no operator names (2026-10-19)
 
 The console has no login and records no names (design "Admin console without login").
@@ -288,6 +298,6 @@ Publications, withdrawals, decisions, runs and backfills store no person; only t
 scheduler still marks its own publications `weekly-schedule`. The CLI no longer takes `--by`
 and `serve` no longer takes `--dev-user`. Operations 0.2.7 carries this change.
 
-Migration `018_erase_operator_names` blanks every name already stored. It is roll-forward only:
-an image without 018 cannot start its init container against an 018 database, and only a
-pre-018 backup holds the erased names. Follow the migration gate in `deploy/openshift/README.md`.
+Migration `019_erase_operator_names` blanks every name already stored. It is roll-forward only:
+an image without 019 cannot start its init container against an 019 database, and only a
+pre-019 backup holds the erased names. Follow the migration gate in `deploy/openshift/README.md`.

@@ -209,9 +209,9 @@ migration means a [migration gate](#74-migration-gate). Migrations are roll-forw
 is applied, an older image stops in its init container with
 `Can't locate revision identified by '<revision>'`, and only a database restore goes back.
 
-`018_erase_operator_names` permanently blanks every stored operator name: publishers,
+`019_erase_operator_names` permanently blanks every stored operator name: publishers,
 withdrawers, decision makers, run and backfill requesters, and cancellers named in run messages.
-The scheduler's own `weekly-schedule` marker stays. Only the pre-018 backup from the migration
+The scheduler's own `weekly-schedule` marker stays. Only the pre-019 backup from the migration
 gate holds those names afterwards.
 
 ## 6. Fresh install
@@ -396,15 +396,15 @@ Expect `succeeded=1`, a `revision:` line naming a migration listed below it, and
 ### 7.4 Migration gate
 
 Pending migrations can lock tables for a long time and cannot be undone except by restoring a
-backup. 015, 016 and 017 rebuild the primary keys and indexes of the largest tables; while they
-run, portal pages and every query on those tables wait. 018 erases stored operator names for
+backup. 015, 016, 017 and 018 rebuild the primary keys and indexes of the largest tables; while they
+run, portal pages and every query on those tables wait. 019 erases stored operator names for
 good (section 5). Before applying any pending migration,
 the database owner must confirm all of the following to you in writing. You cannot do them yourself:
 
 1. They will take a database backup in this window, after section 7.5 has stopped every
    writer and before the first pending migration, and confirm that it restores.
 2. The window is sized from a rehearsal on a restored copy of comparable size, including index
-   rebuilds and transaction-log space (015 and 016 each rewrite `alert_findings` and
+   rebuilds and transaction-log space (015, 016 and 018 each rewrite `alert_findings` and
    `llm_verdicts`; 017 changes eight team tables).
 3. The maintenance window lies outside `WEEKLY_SCHEDULE`, and portal readers have been told
    that pages may wait.
@@ -538,7 +538,7 @@ oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly --dry
 oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly-status
 ```
 
-Expect every migration `applied` (the last one `018_erase_operator_names`), the registry valid
+Expect every migration `applied` (the last one `019_erase_operator_names`), the registry valid
 with the expected teams, the due weeks listed without anything being run, and each enrolled
 team's latest published week.
 
@@ -680,7 +680,7 @@ Rollback means redeploying the previous release with its own files and image.
   registry. A restore loses every write since the backup; it needs the service owner's
   explicit authorization and stopped writers.
 - **A release with the login proxy** (7.1 found `oauth-proxy`): this release applies migration
-  018, so returning to such an image also needs the database restore above. Its proxy reads
+  019, so returning to such an image also needs the database restore above. Its proxy reads
   `COOKIE_SECRET` from `alerts-bi-admin-secrets`, which 7.6 removed and 7.1 did not export.
   Before applying the previous manifests, set a new value (it only signs out browser sessions)
   and delete the current Deployment, Service and Route, as 7.6 did the other way:

@@ -2,8 +2,8 @@
 
 from src.db.ledger import apply_sql
 
-revision = "018_erase_operator_names"
-down_revision = "017_case_sensitive_teams"
+revision = "019_erase_operator_names"
+down_revision = "018_alert_identity_hash"
 branch_labels = None
 depends_on = None
 
@@ -14,5 +14,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise NotImplementedError(
-        "Erased operator names cannot be restored; recover them only from a pre-018 backup"
+        "Erased operator names cannot be restored; recover them only from a pre-019 backup"
     )

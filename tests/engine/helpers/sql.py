@@ -9,7 +9,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from alerts_bi_shared.db.connection import Database
+from src.engine.db.bulk import insert_rows
+
 __all__ = [
+    "insert_verdict_row",
     "sample_daily",
     "sample_finding",
     "sample_run",
@@ -133,3 +137,12 @@ def sample_verdict(**overrides: Any) -> dict[str, Any]:
         "first_run_id": "a" * 64,
         **overrides,
     }
+
+
+def insert_verdict_row(db: Database, verdict: dict[str, Any]) -> None:
+    """Insert a verdict with plain SQL, as a schema before migration 018 needs.
+
+    The engine's insert-if-absent finds a stored verdict by ``identity_hash``, which older
+    schemas do not have yet.
+    """
+    insert_rows(db, "llm_verdicts", tuple(verdict), [verdict])

@@ -279,9 +279,15 @@ def review_documents(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 # ---- explicit index mappings, so a clean reload is reproducible ----
 # Without them the first document decides the mapping dynamically, which makes a reloaded
-# index depend on insertion order. `operator` and `key_field` must be keyword for exact,
-# case-sensitive term matching - the whole ownership model rests on that.
+# index depend on insertion order. `key_field` must be keyword for exact, case-sensitive
+# term matching. `operator` mirrors the production v1/v2 mapping - analyzed text with a
+# `keyword` subfield - so the reader's exact match on `operator.keyword` is exercised here;
+# a query on the analyzed field itself would silently drop mixed-case operators.
 _TEXT_WITH_RAW = {"type": "text", "fields": {"raw": {"type": "keyword", "ignore_above": 1024}}}
+_TEXT_WITH_KEYWORD = {
+    "type": "text",
+    "fields": {"keyword": {"type": "keyword", "ignore_above": 256}},
+}
 INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
     ES_CONFIG.v1_index: {
         "@timestamp": {"type": "date"},
@@ -290,7 +296,7 @@ INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
         "object": {"type": "keyword"},
         "message": _TEXT_WITH_RAW,
         "severity": {"type": "integer"},
-        "operator": {"type": "keyword"},
+        "operator": _TEXT_WITH_KEYWORD,
         "key_field": {"type": "keyword"},
         "time_created": {"type": "date"},
         "node_name": {"type": "keyword"},
@@ -310,7 +316,7 @@ INDEX_MAPPINGS: dict[str, dict[str, Any]] = {
         "runbook_url": {"type": "keyword"},
         "environment": {"type": "keyword"},
         "site": {"type": "keyword"},
-        "operator": {"type": "keyword"},
+        "operator": _TEXT_WITH_KEYWORD,
         "key_field": {"type": "keyword"},
         "time_created": {"type": "date"},
         "node_name": {"type": "keyword"},

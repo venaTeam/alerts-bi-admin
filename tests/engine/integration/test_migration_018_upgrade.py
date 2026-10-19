@@ -1,33 +1,42 @@
-"""Migration 018 erases stored operator names and leaves every other value in place."""
+"""Migration 018 on a populated 017 database: rows survive, and a failure leaves 017 intact."""
 
 from __future__ import annotations
-
-from collections.abc import Callable
 
 import pytest
 from alembic import command
 from alerts_bi_operations.review.publication import publish_run
 from alerts_bi_shared.db.connection import Database, connect
-from alerts_bi_shared.hashing import sha256_text
-from fastapi import HTTPException
-from sqlalchemy.exc import DBAPIError
-from src.engine.api import backfill as backfill_api
-from src.engine.api import jobs as jobs_api
 from src.engine.config import load_config
 from src.engine.db import migrate as migrations
-from src.engine.db.repositories import PersistencePayload, persist_run
+from src.engine.db.repositories import (
+    PersistencePayload,
+    find_verdicts,
+    persist_run,
+)
 from src.readiness import check_schema
 
-from tests.engine.helpers.sql import sample_finding, sample_run
+from tests.engine.helpers.sql import (
+    insert_verdict_row,
+    sample_finding,
+    sample_run,
+    sample_verdict,
+)
 
 pytestmark = pytest.mark.integration
 
 CONFIG = load_config()
 DB = CONFIG.sql.test_database
 PREVIOUS_HEAD = "017_case_sensitive_teams"
-HASH = "0" * 64
-OTHER = "1" * 64
-COUNTED = ("review_publications", "finding_decisions", "run_jobs", "run_backfills")
+KEY = "checkout-api:cart:node-1"
+# With checkout-api and a 64-character run id, past the 384 characters the old keys allowed.
+LONG_KEY = "k8s:prod-cluster/checkout/" + "pod-" * 100
+COUNTED = (
+    "alert_findings",
+    "llm_verdicts",
+    "finding_decisions",
+    "run_alert_list",
+    "run_summaries",
+)
 
 
 def _counts(db: Database) -> dict[str, int]:
@@ -35,6 +44,17 @@ def _counts(db: Database) -> dict[str, int]:
         table: int(db.query_one(f"SELECT COUNT(*) AS n FROM {table}")["n"])  # type: ignore[index]
         for table in COUNTED
     }
+
+
+def _key_columns(db: Database, index: str) -> list[str]:
+    rows = db.query(
+        "SELECT c.name FROM sys.indexes AS i "
+        "JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id "
+        "JOIN sys.columns AS c ON c.object_id = ic.object_id AND c.column_id = ic.column_id "
+        "WHERE i.name = :index ORDER BY ic.key_ordinal",
+        {"index": index},
+    )
+    return [str(row["name"]) for row in rows]
 
 
 def _reset_to_previous_head(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -50,186 +70,137 @@ def _reset_to_previous_head(monkeypatch: pytest.MonkeyPatch) -> None:
             pytest.skip(f"SQL Server is not reachable: {exc}")
 
 
-def _digest(key: str) -> bytes:
-    return bytes.fromhex(sha256_text(key))
-
-
-def _job(db: Database, job_id: str, key: str, requester: str, **extra: object) -> None:
-    db.execute(
-        "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,"
-        "request_hash,team_id,run_at,llm_mode,registry_sha256,run_id,status,submitted_at,"
-        "error_summary,backfill_id) VALUES (:id,:key,:digest,:requester,:request,'checkout-api',"
-        "SYSUTCDATETIME(),'fake',:hash,:hash,:status,SYSUTCDATETIME(),:error,:backfill)",
-        {
-            "id": job_id,
-            "key": key,
-            "digest": _digest(key),
-            "requester": requester,
-            "request": extra.get("request", HASH),
-            "hash": HASH,
-            "status": extra.get("status", "failed"),
-            "error": extra.get("error"),
-            "backfill": extra.get("backfill"),
-        },
-    )
-
-
-def _backfill(db: Database, backfill_id: str, key: str, requester: str, request: str) -> None:
-    db.execute(
-        "INSERT INTO run_backfills (backfill_id,team_id,requested_by,idempotency_key_hash,"
-        "request_hash,llm_mode,week_count,submitted_at) VALUES "
-        "(:id,'checkout-api',:requester,:digest,:request,'fake',1,SYSUTCDATETIME())",
-        {"id": backfill_id, "requester": requester, "digest": _digest(key), "request": request},
-    )
-
-
-def _refusal(lookup: Callable[[], object]) -> str:
-    with pytest.raises(HTTPException) as caught:
-        lookup()
-    assert caught.value.status_code == 409
-    return str(caught.value.detail)
-
-
-def test_018_erases_names_and_keeps_everything_else(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_018_upgrades_a_populated_database_and_readiness_requires_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     _reset_to_previous_head(monkeypatch)
     run = sample_run()
-    run_id = str(run["run_id"])
+    findings = [
+        sample_finding(
+            key_field=KEY,
+            core_rule_ids="R1",
+            quality_state="rule_flagged",
+            llm_principle_id=None,
+            llm_confidence=None,
+            llm_justification=None,
+        ),
+        sample_finding(key_field="checkout-api:payments:node-2"),
+    ]
     with connect(CONFIG.sql, DB) as db:
         assert migrations.current_revision(db) == PREVIOUS_HEAD
-        persist_run(db, PersistencePayload(run=run, findings=[sample_finding()]))
-        # A person published and withdrew the week, and 017 stored both names (publish_run now
-        # refuses a name); the scheduler then published it again.
-        publish_run(db, run_id, allow_gap=True)
-        db.execute(
-            "UPDATE review_publications SET published_by=N'alice', withdrawn_at=SYSUTCDATETIME(), "
-            "withdrawn_by=N'bob', withdrawn_reason=N'wrong week' WHERE run_id=:run",
-            {"run": run_id},
-        )
-        publish_run(db, run_id, published_by="weekly-schedule", allow_gap=True)
+        persist_run(db, PersistencePayload(run=run, findings=findings))
+        insert_verdict_row(db, sample_verdict(key_field=KEY))
+        publish_run(db, str(run["run_id"]), published_by="upgrade-test", allow_gap=True)
         db.execute(
             "INSERT INTO finding_decisions (team_id, run_id, alert_schema, application, "
             "key_field, finding_id, state, note, decided_at, decided_by) VALUES "
-            "(:team, :run, 'v1', 'checkout-api', 'checkout-api:cart:node-1', 'R1', "
-            "'confirmed', 'kept', SYSUTCDATETIME(), 'carol')",
-            {"team": run["team_id"], "run": run_id},
-        )
-        db.execute(
-            "INSERT INTO run_backfills (backfill_id,team_id,requested_by,idempotency_key_hash,"
-            "request_hash,llm_mode,week_count,submitted_at,cancelled_at,cancelled_by) VALUES "
-            "(:id,'checkout-api','dave',:digest,:hash,'fake',1,SYSUTCDATETIME(),"
-            "SYSUTCDATETIME(),'dave')",
-            {"id": "f" * 32, "digest": _digest("backfill-form"), "hash": HASH},
-        )
-        # Two people once used the same backfill form key with different weeks.
-        _backfill(db, "1" * 32, "shared-form", "erin", HASH)
-        _backfill(db, "2" * 32, "shared-form", "frank", OTHER)
-        # Two people once used one submission key with different options, two others one key
-        # with the same options; a fifth key was used once.
-        _job(db, "a" * 32, "shared-key", "erin")
-        _job(db, "b" * 32, "shared-key", "frank", request=OTHER)
-        _job(db, "c" * 32, "own-key", "grace")
-        _job(db, "e" * 32, "same-options-key", "heidi")
-        _job(db, "f" * 32, "same-options-key", "ivan")
-        _job(
-            db,
-            "d" * 32,
-            "backfill-week",
-            "dave",
-            status="cancelled",
-            error="Cancelled by dave before it started.",
-            backfill="f" * 32,
+            "(:team, :run, 'v1', 'checkout-api', :key, 'R1', 'confirmed', 'kept', "
+            "SYSUTCDATETIME(), 'upgrade-test')",
+            {"team": run["team_id"], "run": run["run_id"], "key": KEY},
         )
         db.commit()
         before = _counts(db)
-        with pytest.raises(ValueError, match="018_erase_operator_names"):
+        assert all(before.values()), before
+        with pytest.raises(ValueError, match="018_alert_identity_hash"):
             check_schema(db)
-
-    applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["018_erase_operator_names"]
-
-    with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "018_erase_operator_names"
-        assert _counts(db) == before
-        check_schema(db)
-        publications = db.query(
-            "SELECT published_by, withdrawn_by, withdrawn_reason FROM review_publications "
-            "ORDER BY publication_id"
-        )
-        assert publications == [
-            # ck_review_publications_withdrawn keeps a withdrawn row's withdrawn_by non-NULL.
-            {"published_by": "", "withdrawn_by": "", "withdrawn_reason": "wrong week"},
-            {"published_by": "weekly-schedule", "withdrawn_by": None, "withdrawn_reason": None},
-        ]
-        assert db.query("SELECT decided_by, note FROM finding_decisions") == [
-            {"decided_by": "", "note": "kept"}
-        ]
-        assert db.query("SELECT decided_by FROM portal_decisions") == [{"decided_by": ""}]
-        jobs = db.query("SELECT job_id, requested_by, error_summary FROM run_jobs ORDER BY job_id")
-        assert jobs == [
-            {"job_id": "a" * 32, "requested_by": "#" + "a" * 32, "error_summary": None},
-            {"job_id": "b" * 32, "requested_by": "#" + "b" * 32, "error_summary": None},
-            {"job_id": "c" * 32, "requested_by": "", "error_summary": None},
-            {
-                "job_id": "d" * 32,
-                "requested_by": "",
-                "error_summary": "Cancelled before it started.",
-            },
-            {"job_id": "e" * 32, "requested_by": "#" + "e" * 32, "error_summary": None},
-            {"job_id": "f" * 32, "requested_by": "#" + "f" * 32, "error_summary": None},
-        ]
-        backfills = db.query(
-            "SELECT backfill_id, requested_by, cancelled_by FROM run_backfills ORDER BY backfill_id"
-        )
-        assert backfills == [
-            {"backfill_id": "1" * 32, "requested_by": "#" + "1" * 32, "cancelled_by": None},
-            {"backfill_id": "2" * 32, "requested_by": "#" + "2" * 32, "cancelled_by": None},
-            {"backfill_id": "f" * 32, "requested_by": "", "cancelled_by": None},
-        ]
-
-        # A retry after the upgrade returns the one submission with its key and options, also
-        # where two people had used its key, and refuses rather than guess or add a duplicate.
-        def job(key: str, request: str) -> str:
-            found = jobs_api._existing_submission(db, _digest(key), request)
-            assert found is not None, key
-            return str(found["job_id"])
-
-        def form(key: str, request: str) -> str:
-            found = backfill_api.existing_backfill(db, _digest(key), request)
-            assert found is not None, key
-            return str(found["backfill_id"])
-
-        assert job("own-key", HASH) == "c" * 32
-        assert job("shared-key", HASH) == "a" * 32
-        assert job("shared-key", OTHER) == "b" * 32
-        assert "different options" in _refusal(
-            lambda: jobs_api._existing_submission(db, _digest("shared-key"), "2" * 64)
-        )
-        assert "Several earlier submissions" in _refusal(
-            lambda: jobs_api._existing_submission(db, _digest("same-options-key"), HASH)
-        )
-        assert form("backfill-form", HASH) == "f" * 32
-        assert form("shared-form", HASH) == "1" * 32
-        assert form("shared-form", OTHER) == "2" * 32
-        assert "different weeks" in _refusal(
-            lambda: backfill_api.existing_backfill(db, _digest("shared-form"), "2" * 64)
-        )
-        assert _counts(db) == before
-        # The append-only protection is back: a decision still cannot be changed.
-        with pytest.raises(DBAPIError, match="append-only"):
-            db.execute("UPDATE finding_decisions SET note = N'changed'")
+        # The failure the run log reported: the old clustered key cannot hold this identity.
+        with pytest.raises(Exception, match="1946"):
+            insert_verdict_row(db, sample_verdict(key_field=LONG_KEY))
         db.rollback()
 
+    applied, _already = migrations.migrate(CONFIG.sql, DB)
+    assert applied == ["018_alert_identity_hash", "019_erase_operator_names"]
 
-def test_018_refuses_downgrade() -> None:
-    import importlib.util
+    with connect(CONFIG.sql, DB) as db:
+        assert migrations.current_revision(db) == "019_erase_operator_names"
+        assert _counts(db) == before
+        check_schema(db)
+        assert _key_columns(db, "pk_alert_findings") == ["run_id", "alert_schema", "identity_hash"]
+        assert _key_columns(db, "pk_llm_verdicts") == [
+            "identity_hash",
+            "prompt_version",
+            "model_version",
+        ]
+        # Upgraded rows are found through the hash the engine computes for its lookups.
+        found = find_verdicts(db, "1.0.0", "fake-model-1", [("checkout-api", KEY)])
+        assert [row["key_field"] for row in found.values()] == [KEY]
+        decision = db.query(
+            "SELECT note FROM portal_decisions WHERE application=N'checkout-api' AND key_field=:key",
+            {"key": KEY},
+        )
+        assert decision == [{"note": "kept"}]
 
-    from src.engine.db.ledger import MIGRATIONS_DIR
+        # The identity that failed before the upgrade now persists with its verdict.
+        long_run = sample_run(run_id="d" * 64)
+        persist_run(
+            db,
+            PersistencePayload(
+                run=long_run,
+                findings=[sample_finding(run_id=long_run["run_id"], key_field=LONG_KEY)],
+                verdicts=[sample_verdict(key_field=LONG_KEY)],
+            ),
+        )
+        found = find_verdicts(db, "1.0.0", "fake-model-1", [("checkout-api", LONG_KEY)])
+        assert [row["key_field"] for row in found.values()] == [LONG_KEY]
+        stored = db.query_one(
+            "SELECT COUNT(*) AS n FROM alert_findings WHERE run_id=:run AND key_field=:key",
+            {"run": long_run["run_id"], "key": LONG_KEY},
+        )
+        assert stored == {"n": 1}
 
-    path = MIGRATIONS_DIR / "versions" / "018_erase_operator_names.py"
-    spec = importlib.util.spec_from_file_location("revision_018", path)
-    assert spec is not None and spec.loader is not None
-    revision = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(revision)
-    assert revision.down_revision == PREVIOUS_HEAD
-    with pytest.raises(NotImplementedError, match="cannot be restored"):
-        revision.downgrade()
+
+def test_a_failed_018_rolls_back_completely_and_a_retry_applies_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _reset_to_previous_head(monkeypatch)
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(db, PersistencePayload(run=sample_run(), findings=[sample_finding()]))
+        insert_verdict_row(db, sample_verdict())
+        # A conflicting column fails the second batch, after both keys were dropped.
+        db.execute("ALTER TABLE llm_verdicts ADD identity_hash INT NULL")
+        db.commit()
+        before = _counts(db)
+
+    try:
+        with pytest.raises(Exception, match="identity_hash"):
+            migrations.migrate(CONFIG.sql, DB)
+
+        with connect(CONFIG.sql, DB) as db:
+            assert migrations.current_revision(db) == PREVIOUS_HEAD
+            ledger = db.query_one(
+                "SELECT COUNT(*) AS n FROM schema_migrations "
+                "WHERE version = N'018_alert_identity_hash'"
+            )
+            assert ledger == {"n": 0}
+            assert _counts(db) == before
+            assert _key_columns(db, "pk_alert_findings") == [
+                "run_id",
+                "alert_schema",
+                "application",
+                "key_field",
+            ]
+            assert _key_columns(db, "pk_llm_verdicts") == [
+                "application",
+                "key_field",
+                "prompt_version",
+                "model_version",
+            ]
+            added = db.query_one(
+                "SELECT COUNT(*) AS n FROM sys.columns "
+                "WHERE object_id = OBJECT_ID(N'alert_findings') AND name = N'identity_hash'"
+            )
+            assert added == {"n": 0}
+    finally:
+        # A failed assertion must not leave the blocker behind for later tests.
+        with connect(CONFIG.sql, DB) as db:
+            db.execute(
+                "IF COL_LENGTH(N'llm_verdicts', N'identity_hash') = 4 "
+                "ALTER TABLE llm_verdicts DROP COLUMN identity_hash"
+            )
+            db.commit()
+
+    applied, _already = migrations.migrate(CONFIG.sql, DB)
+    assert applied == ["018_alert_identity_hash", "019_erase_operator_names"]
+    with connect(CONFIG.sql, DB) as db:
+        assert migrations.current_revision(db) == "019_erase_operator_names"
+        assert _counts(db) == before

@@ -84,7 +84,8 @@ def check_schema(db: Database) -> None:
         "015_case_sensitive_applications",
         "016_case_sensitive_key_fields",
         "017_case_sensitive_teams",
-        "018_erase_operator_names",
+        "018_alert_identity_hash",
+        "019_erase_operator_names",
     ):
         if (
             db.query_one(
