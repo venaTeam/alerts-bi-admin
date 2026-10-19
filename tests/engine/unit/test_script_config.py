@@ -31,6 +31,10 @@ def test_mock_rows_mappings_and_reset_use_configured_names(
     module = runpy.run_path(str(ROOT / "scripts/generate_mock_alerts.py"))
     definitions = json.loads((ROOT / "scripts/mock_teams.json").read_text(encoding="utf-8"))
     assert set(module["INDEX_MAPPINGS"]) == {"mock-custom-v1", "mock-custom-v2"}
+    for mapping in module["INDEX_MAPPINGS"].values():
+        # Mirrors production: analyzed text whose exact value lives in operator.keyword.
+        assert mapping["operator"]["type"] == "text"
+        assert mapping["operator"]["fields"]["keyword"]["type"] == "keyword"
     for schema in ("v1", "v2"):
         team = next(team for team in definitions["teams"] if team.get(schema + "Defs"))
         rows = module["expand_" + schema](team, team[schema + "Defs"][0])

@@ -36,7 +36,7 @@ def client() -> EsClient:
 def test_the_query_is_scoped_to_exact_operators_and_the_half_open_window() -> None:
     query = build_query(["a", "b"], WINDOW)
     filters = query["bool"]["filter"]
-    assert filters[0] == {"terms": {"operator": ["a", "b"]}}
+    assert filters[0] == {"terms": {"operator.keyword": ["a", "b"]}}
     # Milliseconds are always written, even at a whole second: one instant format is used
     # everywhere, and the hashed run and batch identifiers depend on it.
     assert filters[1]["range"]["@timestamp"]["gte"] == "2026-08-18T18:00:00.000Z"
@@ -61,6 +61,14 @@ def test_operator_matching_is_exact_and_case_sensitive(client: EsClient) -> None
     wrong_case = read_schema(client, "v1", ["BATCH-TEAM"], WINDOW)
     assert exact.rows
     assert wrong_case.rows == []
+
+
+def test_mixed_case_operators_are_read(client: EsClient) -> None:
+    # operator is analyzed text with a keyword subfield; the analyzed field lowercases.
+    result = read_schema(client, "v1", ["BATCH_JOBS"], WINDOW)
+    assert result.rows
+    assert {r.operator for r in result.rows} == {"BATCH_JOBS"}
+    assert read_schema(client, "v1", ["batch_jobs"], WINDOW).rows == []
 
 
 def test_a_team_listing_several_case_variants_gets_all_of_them(client: EsClient) -> None:
