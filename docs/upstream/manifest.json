@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "8f220e4427d66cee491f4a6d3a3dd62b17cddca3",
+  "revision": "3d65ae3139dea1b1fcc78dcb6f715a1023af651d",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
-    "docs/upstream/alerts_bi_design.md": "1d71a5fef836bba20528018ca4a4d0fa27fd23587746e79325998a3218da5423",
+    "docs/upstream/alerts_bi_design.md": "5b73e854745e40aef9b844178ef64b5b9c340377cafa5a64afe30f505ccd426e",
     "docs/upstream/alerts_bi_flow.md": "f45ed1cfac46d266ad188ed2210ec4fe73a6e11d6e78497ee305b121f89a0573",
     "docs/upstream/alerts_bi_implementation_plan.md": "05d5fe5e71aff5fecbc18d01d9aed1165204e9cf6ca72bb5acff765bcf829571",
     "docs/upstream/async-runs.md": "179e91d592b4bcd762d151b5bc0662b67adfd30264b7b739a9608ed09a3946ff",
@@ -11,22 +11,22 @@
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",
     "docs/upstream/manual-worker-runbook.md": "7ce0162babb06c0508c6b21d28bdfa8aaa2c7c16fb7f1ad88ec3055d4e313e24",
-    "docs/upstream/openshift-deployment.md": "4b91ef9d3f16fd67866d0796a5c48ff2e794c75022c055a9544cffd9fbe0859a",
+    "docs/upstream/openshift-deployment.md": "b3919cb43b9f5a620c9077d4fde4687fa69bce222d78c9f62e0a917435ceba68",
     "docs/upstream/outputs.md": "7e32b3238eb1a2cbf572183c65350918b447a25c48f5cf03f842492360cf0589",
     "docs/upstream/read-path-performance.md": "6db0e7bf73a2eb57c4706f6597634d8a36ed3b1d841ca8ac38e7a7ebbc4c7e2d",
     "docs/upstream/repository-separation-plan.md": "fe214a73e2e619b6525f36c7c3bce50ebd5a784c41add6c266936e8bcde5bf5c",
-    "docs/upstream/runs-retirement.md": "2447c91fd42a693a6bc5d18513ea7a10be18474ecfc9c7c02fc7f521e63c3b0b",
+    "docs/upstream/runs-retirement.md": "16ff2388b37e8ae6f2385c52135126b2e12e5dbf37b50c20fb9562da94eca7f2",
     "docs/upstream/source-map.md": "25dc12eed0e54dbb398acdcc45d87f4b8d8e75ab470ae2a7a6aa65799d9401c1",
     "docs/upstream/superpowers/plans/2026-10-01-team-summary.md": "d618655c5445f235fed2647e8fe2d4699adb9de489b0045669d951114ff18b51",
     "docs/upstream/superpowers/specs/2026-10-01-team-summary-design.md": "c453b3517b45049ab108648f4a54839f9a2bb272ff29151a247b3a206188595e",
     "docs/upstream/team_alert_status.md": "8a11d1d1cbb398549803458b4faaffba96374d2b88e61e88a8f2c05d045371b2",
     "docs/upstream/unified-console-deployment.md": "214a67db380ac8ae06134a8eaaacf971952b5df5c2e198302720b2838d77121b",
     "docs/upstream/what_is_an_incorrect_alert_EN.md": "c6bd1aa5170657f66e271eb4898e59d3a72a5de628a084449e75929185ff95ec",
-    "docs/upstream/contracts/console-http.json": "e3533f282fdd9e0893c6ea9881e3491f149d030a877596e8ce8e718b1cf68828",
+    "docs/upstream/contracts/console-http.json": "5ea888549ee8890b3c85e777627bfcfdd3b3a04a06856f85c31f8e56d30c9caa",
     "docs/upstream/contracts/console-openapi.json": "84991213484ef29f3d428f0f9876474fb0d1f8ed735c365a47080380db41e61d",
-    "docs/upstream/contracts/migrations.json": "53152b6585b80a2e8806cb03a21385ef5e5497614d6b91ad9251d0d406d231e6",
+    "docs/upstream/contracts/migrations.json": "e2a26d26f3875cac3a84af3979060a93aca33ce879d6d54d14af764e4c31efa8",
     "docs/upstream/contracts/outputs.json": "1f652c38199a27d7a564e137a331655ed3134f69c08b8d415e947773cb799cd2",
-    "docs/upstream/contracts/README.md": "016a5a9b6d875fece33f1b81e7e00ca4877851bfa7d8525484f7624773a21b18",
+    "docs/upstream/contracts/README.md": "14046ebd683c4d0765cdde1ccc2a7af48e2c2bc124bfe05a00b5289aad3777c0",
     "docs/upstream/contracts/sql-views.json": "eb70f19304a7701c5b18c685331832f4b9e19757fd7265f07a1189fb444fa8ec",
     "docs/upstream/contracts/teams.schema.json": "bbb6e9e7689a811181d0f4a641ec03704ce05a75e9db32d7c2b6f3ca2cbc165d",
     "docs/upstream/contracts/trigger-openapi.json": "a3ee79591fd82a2a8f9f9badc8fd6188fca5b3f6ff1ad4c7e54213b344c3936c",
@@ -36,6 +36,6 @@
     "docs/decisions/004-admin-run-lifecycle.md": "bd87594ee44166948457ac0cfb8b279c1f249c4adbf57bf5ef1dff58d3fd79c4",
     "docs/decisions/005-operator-backfill.md": "e3902ffb8f994916cf90e13f243538c477eba481ab26300278c665702dce1d50",
     "docs/decisions/006-console-redesign.md": "7da58c1c69238b99b624d052932d1b68ce0855a084f62421b6c43f9b06402030",
-    "docs/decisions/007-admin-console-without-login.md": "bc6b2961404a0132a242afe0a4935abb23dcb77b1f4e9ca6973055b79e4de061"
+    "docs/decisions/007-admin-console-without-login.md": "aa7886d9a43ec1c14d61f3c1a9d366b3bfc54029e399a619f6177f6516afc943"
   }
 }

@@ -73,7 +73,7 @@ before the UI and manual worker start. It uses the same admin image digest, SQL 
 and credentials, selecting ADMIN_DATABASE when nonempty and otherwise SQL_DATABASE (the CLI
 default is alerts_bi_dev); deployments leave ADMIN_DATABASE unset. It creates SQL_DATABASE
 when absent, then applies only missing revisions after checking the immutable ledger; current
-head is 018_alert_identity_hash. No data reset occurs. Before every rollout the runbook lists
+head is 019_erase_operator_names. No data reset occurs. Before every rollout the runbook lists
 pending revisions with `db status` from the new image; any pending revision passes the
 migration gate below.
 
@@ -84,7 +84,7 @@ reads of the eight refreshed views, and every query on the seven tables, wait un
 commits. Once it is applied, an earlier admin image's `migrate` init container stops with
 `Can't locate revision identified by '015_case_sensitive_applications'`, and the revision
 refuses to downgrade. Restoring the database is then the only way back to an earlier image.
-Before any rollout containing unapplied revisions 015, 016, 017 or 018 (the migration gate; the
+Before any rollout containing unapplied revisions 015 to 019 (the migration gate; the
 database owner confirms each item, because the deploying agent cannot):
 
 1. Take one database backup before the first pending revision and confirm that it restores.
@@ -204,7 +204,7 @@ Runs write no files, so the application needs no writable output volume; CSV dow
 from SQL. Earlier images write files after every run, so a rollback to those images also needs
 the previous manifests (ADMIN_OUT_DIR, the output emptyDir mounts and the weekly
 `--out /app/out/weekly`). This is subject to the database restore requirements for revisions
-015–018 above; changing manifests alone cannot roll back a migrated database. CSVs left on an
+015–019 above; changing manifests alone cannot roll back a migrated database. CSVs left on an
 old emptyDir are discarded with its pod; no cleanup is needed. Keep the image/registry access
 policies appropriate to the existing deployment.
 
