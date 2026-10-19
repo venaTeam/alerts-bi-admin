@@ -11,6 +11,7 @@ Unified operator UI, execution, migrations, weekly jobs, registry and shared/ope
 - design: `docs/upstream/outputs.md` — Output and API meanings.
 - design: `docs/upstream/async-runs.md` — Durable manual submissions, worker/recovery, HTTP compatibility and output storage.
 - design: `docs/upstream/backfill.md` — Operator multi-week backfill: selection, queued job states, worker claim order and weekly priority.
+- deployment: `deploy/openshift/README.md` — The OpenShift procedure, Templates and value files; implements `docs/upstream/openshift-deployment.md`. Keep the Templates, examples and runbook in step (tests/unit/test_openshift_deploy.py).
 
 ### Verification
 

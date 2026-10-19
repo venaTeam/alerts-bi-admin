@@ -1,0 +1,85 @@
+# OpenShift Template for one alerts-bi-admin command run once as a Job, for example
+# `db status`, `weekly --dry-run`, `weekly-status`, `registry check` or the maintenance
+# migration `db setup`. It uses the same image, configuration and registry as admin.yaml.
+#
+# Do not edit values here. Render with the same values file as admin.yaml plus two parameters:
+#   oc process -f admin-job.yaml --param-file <values.env> --ignore-unknown-parameters \
+#     -p JOB_NAME=alerts-bi-db-status -p "JOB_COMMAND=db status" | oc create -n <NAMESPACE> -f -
+# Then read `oc logs -f job/<JOB_NAME>` and delete the Job. README.md lists every command used.
+#
+# Never run `db setup` this way while the admin pod is running: stop the UI and worker first
+# (README.md "Maintenance migration"). Normal rollouts migrate through the init container.
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: alerts-bi-admin-job
+  annotations:
+    description: One alerts-bi-admin command run once with the admin image, configuration and registry.
+objects:
+  - apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: "${JOB_NAME}"
+      labels: {app: alerts-bi-admin-job, app.kubernetes.io/part-of: alerts-bi}
+    spec:
+      backoffLimit: 0
+      # Deleted automatically a day after it finishes; delete it yourself to reuse the name sooner.
+      ttlSecondsAfterFinished: 86400
+      # No activeDeadlineSeconds: a migration must never be cut short.
+      template:
+        metadata:
+          labels: {app: alerts-bi-admin-job, app.kubernetes.io/part-of: alerts-bi}
+        spec:
+          restartPolicy: Never
+          # The project's default account, so the Job also runs before admin.yaml has created
+          # alerts-bi-admin (fresh install checks). It needs no API access and no token.
+          serviceAccountName: default
+          automountServiceAccountToken: false
+          imagePullSecrets: [{name: "${IMAGE_PULL_SECRET}"}]
+          securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+          containers:
+            - name: admin-command
+              image: "${ADMIN_IMAGE}"
+              command: ["/bin/sh", "-ec"]
+              args: ["exec alerts-bi-admin ${JOB_COMMAND}"]
+              env:
+                # Commands without --registry read the mounted production registry, not the packaged mock one.
+                - {name: ADMIN_REGISTRY_PATH, value: /etc/alerts-bi/teams.json}
+              envFrom:
+                - configMapRef: {name: alerts-bi-config}
+                - secretRef: {name: alerts-bi-secrets}
+              volumeMounts:
+                - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
+                - {name: ca-bundle, mountPath: /etc/alerts-bi-ca, readOnly: true}
+              resources:
+                requests: {cpu: "${ANALYSIS_CPU_REQUEST}", memory: "${ANALYSIS_MEMORY_REQUEST}"}
+                limits: {memory: "${ANALYSIS_MEMORY_LIMIT}"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+          volumes:
+            - {name: registry, configMap: {name: alerts-bi-registry}}
+            - {name: ca-bundle, configMap: {name: alerts-bi-ca-bundle, optional: true}}
+
+parameters:
+  - name: JOB_NAME
+    description: Job name, unique among existing Jobs, for example alerts-bi-db-status.
+    required: true
+  - name: JOB_COMMAND
+    description: alerts-bi-admin arguments, for example "db status" or "weekly --dry-run".
+    required: true
+  - name: ADMIN_IMAGE
+    description: alerts-bi-admin image by digest; the same value as for admin.yaml unless README.md says otherwise.
+    required: true
+  - name: IMAGE_PULL_SECRET
+    description: Pull secret for ADMIN_IMAGE. If no such Secret exists, the pod pulls without credentials.
+    value: alerts-bi-pull
+  - name: ANALYSIS_CPU_REQUEST
+    description: CPU request of the Job.
+    value: 250m
+  - name: ANALYSIS_MEMORY_REQUEST
+    description: Memory request of the Job.
+    value: 512Mi
+  - name: ANALYSIS_MEMORY_LIMIT
+    description: Memory limit of the Job.
+    value: 2Gi

@@ -1,18 +1,21 @@
 # Unified operator deployment
 
-Use one admin image for the authenticated UI, migration jobs and weekly jobs, plus the separate
-read-only portal image. Admin contains maintained engine source; no runtime wheel or separate
-trigger image is needed. Preserve the existing login proxy and loopback-only application port
-8200, identity header, CSRF tokens, SQL/ES/LLM settings and registry mount. Since 2026-10-17
-runs write no files, so no writable output is needed.
+Use one admin image for the authenticated UI, migration init container, manual worker, weekly
+CronJob and one-off admin jobs, plus the separate read-only portal image. Admin contains
+maintained engine source; no runtime wheel or separate trigger image is needed. Preserve the
+existing login proxy and loopback-only application port 8200, identity header, CSRF tokens,
+SQL/ES/LLM settings and registry mount. Since 2026-10-17 runs write no files, so no writable
+output is needed.
 
-Follow [the OpenShift examples](openshift-deployment.md) and [ordered cutover/rollback](runs-retirement.md).
-Apply the updated admin Deployment with the same image digest in its migration init container,
-UI and manual worker. Recreate stops the previous pod; initialization automatically applies
-missing migrations through 011 before the UI/worker start. Failure blocks startup. The SQL
-login must allow schema migrations. No separate migration job is needed for normal rollout.
-Run one dedicated manual worker using
-`alerts-bi-admin run-worker` with matching registry and SQL/ES/model settings (ADMIN_OUT_DIR was
-removed on 2026-10-17; runs write no files).
-See [async runs](async-runs.md). Run one UI worker/replica and exactly one weekly scheduler. This is deployment preparation,
-not a claim that infrastructure has been changed or verified on a cluster.
+Deploy with the runbooks in the application repositories (amended 2026-10-19): admin's
+`deploy/openshift/README.md`, then portal's `deploy/openshift/README.md`. They implement
+[the OpenShift requirements](openshift-deployment.md) and the
+[ordered cutover/rollback](runs-retirement.md). The admin Deployment's migration init container,
+UI and manual worker share one image digest. Recreate stops the previous pod; initialization
+automatically applies every missing migration before the UI/worker start, and failure blocks
+startup. The SQL login must allow schema migrations. No separate migration job is needed for
+normal rollout. The dedicated manual worker runs `alerts-bi-admin run-worker` with the same
+registry and SQL/ES/model settings (ADMIN_OUT_DIR was removed on 2026-10-17; runs write no
+files). See [async runs](async-runs.md). Run one UI worker/replica and exactly one weekly
+scheduler. This is deployment preparation, not a claim that infrastructure has been changed
+or verified on a cluster.

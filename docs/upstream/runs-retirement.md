@@ -48,15 +48,24 @@ worker/replica and one weekly scheduler.
 
 ## Authorized deployment procedure (execute separately)
 
+Amended 2026-10-19: admin's `deploy/openshift/README.md` (section "Upgrade an existing
+installation") carries out these steps with exact commands, followed by the portal's
+`deploy/openshift/README.md`.
+
 1. Review and merge the design, admin, portal and retirement PRs in dependency order. Record
    the merged commits and build immutable admin/portal images plus library artifact hashes.
 2. Inventory old trigger consumers, CronJobs, migration jobs, registries, image references,
    secrets, routes and monitoring. Preserve the current registry bytes and database backup.
 3. Suspend the old weekly CronJob and wait for its active Job and in-flight manual analyses
    to finish. Do not enable a replacement scheduler while an old one is active.
-4. Run `alerts-bi-admin db status --database <existing-database>` from the new image, then
-   `db setup` once. Expect schema head 008 and no new applied migrations. Do not reset, stamp,
-   downgrade, copy or recreate the database. Stop rollout if ledger checks differ.
+4. Run `alerts-bi-admin db status` against the existing database from the new image. Every
+   revision must be `applied` or `pending`; stop rollout if ledger checks differ. At approval
+   the expected head was 008 with nothing pending; later releases add revisions (head
+   018_alert_identity_hash on 2026-10-19), and any pending revision first passes the migration
+   gate in [the OpenShift requirements](openshift-deployment.md). The admin Deployment's init
+   container then applies them once. Do not reset, stamp, downgrade, copy or recreate the
+   database. Stop the runs-era trigger before that step: every run writer must use the updated
+   image.
 5. Replace the existing authenticated admin application container with the new image. Keep
    the proxy, service account, authorization, TLS and loopback upstream. Supply the engine's
    ES/LLM settings and registry mount (no writable output since 2026-10-17). No `--dev-user`
@@ -67,8 +76,8 @@ worker/replica and one weekly scheduler.
 7. Switch the existing weekly CronJob to the same admin digest and `alerts-bi-admin weekly`.
    Keep the registry, SQL settings, UTC schedule, concurrency policy and SQL lock. Inspect
    `weekly --dry-run` and `weekly-status`; enable exactly one scheduler and verify its next Job.
-8. After migrating authenticated API callers and verifying monitoring, remove the obsolete
-   trigger Deployment/Service/Route and old migration-job image references. Preserve rollback
+8. After migrating authenticated API callers to the console's `POST /run-jobs` and verifying
+   monitoring, remove the obsolete (already stopped) trigger Deployment/Service/Route and old migration-job image references. Preserve rollback
    images, records, secrets still needed by admin, and all persistent data.
 
 ## Rollback and eventual archival

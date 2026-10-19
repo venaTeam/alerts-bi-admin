@@ -2,6 +2,8 @@
 
 This guide covers [PR #3](https://github.com/venaTeam/alerts-bi-admin/pull/3).
 It explains the configuration changes and what to add to an existing deployment.
+For the complete current settings and the OpenShift procedure, use
+[`deploy/openshift/README.md`](../deploy/openshift/README.md) and its `config.env.example`.
 
 ## Environment variables to add
 

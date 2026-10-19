@@ -14,7 +14,9 @@ now live under admin's `src/engine`; the installed namespace is `alerts_bi_admin
 | admin | packages/shared | Separately versioned SQL primitives and pure insights/presentation |
 | admin | packages/operations | Registry, operator transactions, reports and parser |
 | admin | config, scripts, test/fixtures, tests/engine | Registry, original mock tooling and acceptance coverage |
+| admin | deploy/openshift | OpenShift runbook, Templates and value files for the console, worker, migrations and weekly CronJob |
 | portal | src | GET-only published views and reader pages |
+| portal | deploy/openshift | OpenShift runbook, Template and value file for the portal |
 | design | docs, decisions, contracts, releases | Requirements and compatibility evidence |
 
 Supported executables are `alerts-bi-admin` and `alerts-bi-portal`. Admin is independently

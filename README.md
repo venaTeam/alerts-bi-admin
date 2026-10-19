@@ -68,10 +68,10 @@ using `ADMIN_REGISTRY_PATH` or an explicit `--registry`. The listener, registry 
 manual runs, weekly jobs and weekly status all honor that environment variable.
 Runs and weekly jobs write no files: the three CSV downloads render from SQL on request.
 `report` exports a stored run's CSVs to `--out` (default `out/<run id prefix>`), and
-`run --out` and `weekly --out` also export. Deploy the updated manifests (no ADMIN_OUT_DIR,
-output mounts or weekly `--out`) with this image. Restoring older manifests and images is
-subject to the database recovery requirements for migrations 015–017 in
-`docs/upstream/openshift-deployment.md`; image-only rollback is insufficient once an
+`run --out` and `weekly --out` also export. The OpenShift templates in `deploy/openshift/`
+have no ADMIN_OUT_DIR, output mounts or weekly `--out`. Restoring older manifests and images is
+subject to the database recovery requirements for migrations 015–018 in
+`deploy/openshift/README.md`; image-only rollback is insufficient once an
 unknown revision has been applied. An explicit `--registry` takes precedence over
 `ADMIN_REGISTRY_PATH`.
 
@@ -143,7 +143,7 @@ Manual browser runs now return immediately after saving a SQL-backed submission.
 `alerts-bi-admin db migrate` before starting the updated app, then run
 `alerts-bi-admin run-worker` in a separate terminal/process with matching ADMIN_DATABASE,
 ADMIN_REGISTRY_PATH, SQL, Elasticsearch and model settings. The worker does not
-require ADMIN_SECRET or a writable output directory. The shipped deploy/admin.yaml includes a
+require ADMIN_SECRET or a writable output directory. The shipped deploy/openshift/admin.yaml includes a
 dedicated worker with the same image, registry and SQL/ES/model configuration. Its migration init container
 automatically runs db setup before UI/worker startup, targeting ADMIN_DATABASE or SQL_DATABASE.
 Recreate stops the previous pod before initialization; migration failure blocks startup. The
@@ -233,10 +233,8 @@ ingestion. This option changes only local `alerts_bi_test`; production enablemen
 the separately authorized, drained-connection procedure documented in the design.
 
 Runs write no files, so the admin image needs no writable output directory; explicit CLI
-exports write to their own `--out`. Deployment examples and
-the ordered scheduler/migration transfer, rollback and eventual archival checklist are in
-`docs/upstream/openshift-deployment.md` and `docs/upstream/runs-retirement.md`. PRs do not deploy
-or stop services. Canonical requirements stay in alerts-bi-design; snapshots here are pinned.
+exports write to their own `--out`. PRs do not deploy or stop services. Canonical
+requirements stay in alerts-bi-design; snapshots here are pinned.
 
 
 The Checks workflow also runs real SQL/ES integration and critical acceptance tests on
@@ -248,11 +246,18 @@ The committed console-openapi.json contract describes async submissions and stat
 console keeps public schema endpoints disabled. Operators have shared access across teams.
 
 
-For automatic deployment migrations, build the updated image and set the same digest in
-the migrate init container, admin and run-worker entries of deploy/admin.yaml, then apply
-that manifest. The configured SQL credentials must allow schema migrations. No separate
-deploy/migrate.yaml Job is needed for normal rollout; it remains an optional maintenance
-tool with UI/worker writers stopped. Do not run it alongside deployment initialization.
+## Deploying on OpenShift
+
+Follow [`deploy/openshift/README.md`](deploy/openshift/README.md); deploy the portal afterwards
+with the runbook in `alerts-bi-portal`. It covers a fresh install and the upgrade from the
+runs-era deployment: the values to supply, the ConfigMaps and Secrets, the migration gate,
+verification, enabling the single weekly scheduler, day-2 changes and rollback. You fill only
+the `*.env.example` files there; the `admin.yaml` and `admin-job.yaml` Templates render
+everything else with `oc process`. One image digest serves the migrate init container, the
+console, the run worker and the weekly CronJob, so a rollout migrates automatically before the
+console starts. The configured SQL login must allow schema migrations. `admin-job.yaml` runs
+single commands such as `db status`, and the maintenance migration only with the console and
+scheduler stopped.
 
 ## Team registry compatibility (2026-10-18)
 
@@ -273,7 +278,7 @@ forward-compatible image that knows 017, or an explicitly authorized restore of 
 pre-migration database backup together with its matching image, manifests and registry.
 A database restore loses subsequent writes. Migration 017 refuses downgrade; do not manually
 revert its binary columns or use an older portal with newly encoded team links. Follow the
-backup, sizing and maintenance checklist in `docs/upstream/openshift-deployment.md`.
+migration gate (backup, sizing and maintenance window) in `deploy/openshift/README.md`.
 
 ## Long alert identities (2026-10-19)
 
@@ -283,4 +288,4 @@ error 1946 (`pk_alert_findings` exceeds 900 bytes) when an identity's `applicati
 `alert_findings` and `llm_verdicts` by a computed SHA-256 `identity_hash`; identity comparison
 is unchanged, and admin readiness refuses an older schema. It refuses downgrade, and an image
 without 018 cannot start its migration init container against a migrated database. Follow the
-backup, sizing and maintenance checklist in `docs/upstream/openshift-deployment.md`.
+migration gate (backup, sizing and maintenance window) in `deploy/openshift/README.md`.
