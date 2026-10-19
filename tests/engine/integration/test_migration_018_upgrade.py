@@ -90,7 +90,7 @@ def test_018_upgrades_a_populated_database_and_readiness_requires_it(
         assert migrations.current_revision(db) == PREVIOUS_HEAD
         persist_run(db, PersistencePayload(run=run, findings=findings))
         insert_verdict_row(db, sample_verdict(key_field=KEY))
-        publish_run(db, str(run["run_id"]), published_by="upgrade-test", allow_gap=True)
+        publish_run(db, str(run["run_id"]), allow_gap=True)
         db.execute(
             "INSERT INTO finding_decisions (team_id, run_id, alert_schema, application, "
             "key_field, finding_id, state, note, decided_at, decided_by) VALUES "
