@@ -43,12 +43,12 @@ document.addEventListener('click', event => {
   const dialog = document.getElementById(open.dataset.dialog);
   if (dialog) {
    opener = open; event.preventDefault();
-   if (open.dataset.week) {
-    dialog.querySelectorAll('input[name=week]').forEach(input => {
-     input.checked = input.value === open.dataset.week;
-     input.dispatchEvent(new Event('change', {bubbles: true}));
-    });
-   }
+   // Every opener starts the week list afresh: its own week, else the page's default.
+   const week = open.dataset.week;
+   dialog.querySelectorAll('input[name=week]').forEach(input => {
+    input.checked = week ? input.value === week : input.defaultChecked;
+    input.dispatchEvent(new Event('change', {bubbles: true}));
+   });
    dialog.showModal();
   }
  }
@@ -907,15 +907,22 @@ def week_steps(selected: Mapping[str, Any] | None, job: Mapping[str, Any] | None
     )
 
 
-def _run_again(can_run: bool) -> str:
+def _run_again(end: datetime, *, can_run: bool, runnable: bool) -> str:
+    """Retry one week: the opener checks only that week in the New runs dialog."""
+    if not can_run:
+        return ""
+    if not runnable:
+        return (
+            '<span class="abi-small abi-muted">This week can no longer be started here: it is '
+            "published, already queued or running, or past the 84-day retention.</span>"
+        )
     return (
-        '<button type="button" class="abi-btn primary" data-dialog="new-runs">Run this week again</button>'
-        if can_run
-        else ""
+        '<button type="button" class="abi-btn primary" data-dialog="new-runs" '
+        f'data-week="{_utc(end):%Y-%m-%d}">Run this week again</button>'
     )
 
 
-def job_panel(job: Mapping[str, Any], *, can_run: bool = True) -> str:
+def job_panel(job: Mapping[str, Any], *, can_run: bool = True, runnable: bool = True) -> str:
     """The selected manual submission while it waits or runs, or after it failed."""
     week = _job_week(job)
     status = str(job["status"])
@@ -930,7 +937,7 @@ def job_panel(job: Mapping[str, Any], *, can_run: bool = True) -> str:
             f'<section class="abi-panel" aria-labelledby="step-title"><h2 id="step-title">The run of {h(week)} failed</h2>'
             f'<p class="abi-message">{h(job.get("error_summary") or "Analysis failed.")}</p>{facts}'
             '<div class="abi-panel-foot"><span class="abi-small abi-muted">Nothing was published.</span>'
-            f"{_run_again(can_run)}</div></section>"
+            f"{_run_again(job['run_at'], can_run=can_run, runnable=runnable)}</div></section>"
         )
     return (
         f'<section class="abi-panel" aria-labelledby="step-title" data-job-url="/run-jobs/{h(job["job_id"])}" data-job-state="{h(status)}">'
@@ -1158,7 +1165,7 @@ def published_panel(run: Mapping[str, Any], totals: str, findings: str) -> str:
     )
 
 
-def failed_panel(run: Mapping[str, Any], *, can_run: bool = True) -> str:
+def failed_panel(run: Mapping[str, Any], *, can_run: bool = True, runnable: bool = True) -> str:
     """A run that did not finish: its error and a way to run the week again."""
     retry = (
         "The schedule tries again every day. " if run.get("scheduled") else ""
@@ -1167,7 +1174,7 @@ def failed_panel(run: Mapping[str, Any], *, can_run: bool = True) -> str:
         '<section class="abi-panel" aria-labelledby="step-title"><h2 id="step-title">The run didn\'t finish</h2>'
         f'<p class="abi-message">{h(run.get("error_summary") or "No error was recorded.")}</p>'
         f'<div class="abi-panel-foot"><span class="abi-small abi-muted">{h(retry)}</span>'
-        f"{_run_again(can_run)}</div></section>"
+        f"{_run_again(run['window_end'], can_run=can_run, runnable=runnable)}</div></section>"
     )
 
 

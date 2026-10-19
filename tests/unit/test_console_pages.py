@@ -389,8 +389,31 @@ def test_run_again_buttons_appear_only_where_new_runs_exists() -> None:
     assert 'data-dialog="new-runs"' not in pages.job_panel(job, can_run=False)
 
 
+def test_run_again_names_its_week_and_explains_when_it_cannot_run() -> None:
+    # admin#16 review: the shared dialog must retry the failed week even after another
+    # opener changed the selection, so the retry opener carries its own week.
+    failed = run(status="failed", error_summary="Source unavailable")
+    retry = 'data-dialog="new-runs" data-week="2026-10-12">Run this week again'
+    assert retry in pages.failed_panel(failed)
+    job = {"job_id": "a" * 32, "run_at": END, "status": "failed", "error_summary": "Boom"}
+    assert retry in pages.job_panel(job)
+    for html in (
+        pages.failed_panel(failed, runnable=False),
+        pages.job_panel(job, runnable=False),
+    ):
+        assert "Run this week again" not in html
+        assert "This week can no longer be started here" in html
+
+
 def test_new_runs_script_tolerates_a_dialog_without_weeks() -> None:
     # Polling setup follows the dialog code, so a missing element must not stop the script.
     assert "if (count) count.textContent" in pages.SCRIPT
     assert "if (foot) foot.textContent" in pages.SCRIPT
     assert "open.dataset.week" in pages.SCRIPT
+
+
+def test_every_new_runs_opener_resets_the_week_selection() -> None:
+    # Cancel and reopen must not keep an earlier selection: an opener with a week checks
+    # only that week, any other opener restores the server-rendered default.
+    assert "input.checked = week ? input.value === week : input.defaultChecked;" in pages.SCRIPT
+    assert "if (open.dataset.week)" not in pages.SCRIPT

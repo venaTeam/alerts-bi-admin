@@ -402,9 +402,14 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             first_end = queries.first_run_end(db, team_id) if runs else None
             view, content, details, dialogs = "review", "", "", ""
             preselect: datetime | None = None
+            runnable = set(pages.runnable_weeks(calendar, now))
             if selected_job is not None:
                 view = "job"
-                content = pages.job_panel(selected_job, can_run=team_id in names)
+                content = pages.job_panel(
+                    selected_job,
+                    can_run=team_id in names,
+                    runnable=pages.as_utc(selected_job["run_at"]) in runnable,
+                )
                 if selected_job["status"] == "failed":
                     preselect = pages.as_utc(selected_job["run_at"])
             elif selected is None:
@@ -512,7 +517,11 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                         )
                 elif selected["status"] == "failed":
                     view = "failed"
-                    content = pages.failed_panel(selected, can_run=team_id in names)
+                    content = pages.failed_panel(
+                        selected,
+                        can_run=team_id in names,
+                        runnable=pages.as_utc(selected["window_end"]) in runnable,
+                    )
                     preselect = pages.as_utc(selected["window_end"])
                 else:
                     view, content = "other", pages.other_status_panel(selected)
