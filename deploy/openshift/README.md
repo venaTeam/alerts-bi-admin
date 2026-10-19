@@ -367,7 +367,12 @@ analysis still running is interrupted (it then shows as failed and must be start
 Tell the operators, ask them not to start runs, and check for unfinished runs:
 
 ```bash
-oc exec -n "$NS" deploy/alerts-bi-admin -c run-worker -- python -c 'from alerts_bi_shared.config.sql import load_sql_config; from alerts_bi_shared.db.connection import connect; db = connect(load_sql_config()).__enter__(); print(db.query("SELECT status, COUNT(*) AS jobs FROM run_jobs GROUP BY status"))'
+oc exec -n "$NS" deploy/alerts-bi-admin -c run-worker -- python -c '
+from alerts_bi_shared.config.sql import load_sql_config
+from alerts_bi_shared.db.connection import connect
+with connect(load_sql_config()) as db:
+    print(db.query("SELECT status, COUNT(*) AS jobs FROM run_jobs GROUP BY status"))
+'
 ```
 
 Expect no `queued`, `pending` or `running` rows. Wait and repeat while there are any. If the
@@ -427,25 +432,33 @@ to the migrated database. Its JSON callers move to the console's authenticated `
 oc scale deployment/<old-trigger> -n "$NS" --replicas=0
 ```
 
-Then install the configuration (skip these four commands if 7.1 already created the objects
+Then install the configuration (skip these three commands if 7.1 already created the objects
 and the files have not changed since):
 
 ```bash
 oc create configmap alerts-bi-config -n "$NS" --from-env-file="$VALUES_DIR/config.env" --dry-run=client -o yaml | oc apply -n "$NS" -f -
 oc create secret generic alerts-bi-secrets -n "$NS" --from-env-file="$VALUES_DIR/secrets.env" --dry-run=client -o yaml | oc apply -n "$NS" -f -
 oc create configmap alerts-bi-registry -n "$NS" --from-file=teams.json="$VALUES_DIR/teams.json" --dry-run=client -o yaml | oc apply -n "$NS" -f -
-rm "$VALUES_DIR/secrets.env"
 ```
 
 A warning about the missing `last-applied-configuration` annotation is expected the first time.
-`oc apply` does not delete keys it did not create, so check that the live ConfigMap has exactly
-the keys of your file:
+`oc apply` does not delete keys it did not create, so check that the live ConfigMap and Secret
+have exactly the keys of your files:
 
 ```bash
 diff <(grep -oE '^[A-Z0-9_]+' "$VALUES_DIR/config.env" | sort) <(oc get configmap alerts-bi-config -n "$NS" -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}' | sort)
+diff <(grep -oE '^[A-Z0-9_]+' "$VALUES_DIR/secrets.env" | sort) <(oc get secret alerts-bi-secrets -n "$NS" -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}' | sort)
 ```
 
-Expect no output. Remove each `>` key with `oc set data configmap/alerts-bi-config -n "$NS" <KEY>-`.
+Expect no output from either. Remove each `>` key: `oc set data configmap/alerts-bi-config -n "$NS" <KEY>-`
+for the first, `oc set data secret/alerts-bi-secrets -n "$NS" <KEY>-` for the second. A key left in
+the Secret overrides the ConfigMap (the Secret is loaded last), so a stale `SQL_ENCRYPT` there would
+silently win. When both diffs are empty, delete the credentials file:
+
+```bash
+rm "$VALUES_DIR/secrets.env"
+```
+
 Create the CA bundle (6.4) if `config.env` refers to `/etc/alerts-bi-ca/`, and the pull secret
 (6.1) if needed.
 
@@ -569,8 +582,12 @@ Job afterwards: `oc delete job alerts-bi-weekly-check -n "$NS"`.
 
 **New release.** Build the image from the new commit, set `ADMIN_IMAGE`, check out the templates
 at that commit and compare the new `*.env.example` files with yours (the `diff` of 7.1). Run
-7.2, 7.3 and 7.4; when 7.4 applies, also stop the console and have the backup taken as at the
-end of 7.5. Then run 7.6 and section 8. The CronJob moves to the same image in the same apply.
+7.2, 7.3 and 7.4. Then stop the scheduler, because Recreate does not stop a running weekly Job
+and migrations do not wait for it: set `WEEKLY_SUSPEND=true` in `values.env`, suspend
+`alerts-bi-weekly` and wait until it has no active Job (the first block of 7.5, for
+`alerts-bi-weekly`). When 7.4 applies, also stop the console and have the backup taken as at the
+end of 7.5. Then run 7.6 (it renders the CronJob still suspended, on the new image) and section 8,
+and only then section 9, which sets `WEEKLY_SUSPEND=false` again.
 
 **Configuration or credential change.** Edit `config.env`, or re-create `secrets.env` with the
 export command from 7.1 and edit it, run the matching command from 7.5 (it deletes `secrets.env`
@@ -682,6 +699,7 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
 | Browser: `Application is not available` | No ready pod: `oc get pods -n "$NS" -l app=alerts-bi-admin` and the rows above |
 | Browser shows an OpenShift login page or a client refusal | The former login proxy or Route allowlist is still in place: run "Remove the login proxy" in 7.6 and re-apply |
 | Route shows `HostAlreadyClaimed` | `ADMIN_ROUTE_HOST` is used by another Route; use the existing host or another name |
+| Apply or dry run fails on the Route's `spec.host` (immutable, or `routes/custom-host` forbidden) | `ADMIN_ROUTE_HOST` differs from the live Route's host, and changing an existing Route's host needs a right the `edit`/`admin` roles lack. Use the live host; to move to another host, `oc delete route/alerts-bi-admin -n "$NS"` within the window and re-apply (creating a Route with a host needs only the default rights) |
 | Apply fails: `spec.selector: ... field is immutable` | The existing `alerts-bi-admin` Deployment uses other labels. Within the window, `oc delete deployment alerts-bi-admin -n "$NS" --wait=true` (it stops the old pod, as Recreate would) and repeat the apply |
 | Model calls fail with certificate errors | Add the model's CA to `alerts-bi-ca-bundle` and set `SSL_CERT_FILE` (6.4) |
 | Pods rejected: `must specify limits.cpu` | The project's quota needs CPU limits. Stop and ask the project owner for a LimitRange with default CPU limits |

@@ -8,7 +8,14 @@ application reads must be in config.env.example or secrets.env.example.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
+
+import alerts_bi_shared.config.sql as sql_config
+import alerts_bi_shared.db.connection as connection
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "deploy" / "openshift"
@@ -169,3 +176,36 @@ def test_templates_reference_only_the_documented_cluster_objects() -> None:
         assert referenced <= _CLUSTER_OBJECTS, name
     for cluster_object in _CLUSTER_OBJECTS:
         assert f"`{cluster_object}`" in runbook, cluster_object
+
+
+def test_the_drain_check_queries_while_its_connection_is_open(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The runbook's `oc exec ... python -c` snippet must hold the connection open around its
+    # query; a dropped context manager closes it before the query under CPython.
+    runbook = (DEPLOY / "README.md").read_text("utf-8")
+    match = re.search(r"-c run-worker -- python -c '\n(.*?)\n'\n```", runbook, flags=re.DOTALL)
+    assert match is not None, "the drain check snippet"
+    queries: list[str] = []
+
+    class FakeDatabase:
+        open = True
+
+        def query(self, sql: str) -> list[dict[str, Any]]:
+            assert self.open, "the query ran on a closed connection"
+            queries.append(sql)
+            return [{"status": "completed", "jobs": 3}]
+
+    @contextmanager
+    def fake_connect(config: object, database: str | None = None) -> Iterator[FakeDatabase]:
+        db = FakeDatabase()
+        try:
+            yield db
+        finally:
+            db.open = False
+
+    monkeypatch.setattr(connection, "connect", fake_connect)
+    monkeypatch.setattr(sql_config, "load_sql_config", lambda: object())
+    exec(compile(match.group(1), "deploy/openshift/README.md", "exec"), {})
+    assert len(queries) == 1 and "FROM run_jobs" in queries[0]
+    assert "'completed'" in capsys.readouterr().out
