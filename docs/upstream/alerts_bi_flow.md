@@ -103,6 +103,8 @@ The tool queries Elasticsearch directly:
 - `appchi-v1`: alerts in the run window whose `operator` is one of the team's configured v1 operators.
 - `appchi-v2`: alerts in the run window whose `operator` equals the team's configured v2 operator.
 
+Both filters compare exactly and case-sensitively against `operator.keyword`. Production maps `operator` as analyzed `text` with a `keyword` subfield in both indices, and the mock mirrors that mapping (design section 1.3, amended 2026-10-19); the analyzed `operator` field is never used for matching.
+
 The queries do not restrict `application`, apply Grafana panel filters, read the SQL hot table, or sweep alerts belonging to other teams.
 
 The tool counts and evaluates every returned row incrementally, then releases its document. It retains exact daily and identity facts and the latest full representative, not the entire raw week (design section 7.15). It does not persist or depend on Elasticsearch row IDs because source documents expire.
