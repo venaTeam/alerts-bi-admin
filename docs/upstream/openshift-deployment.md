@@ -14,7 +14,7 @@ deploying agent works from the release checkouts and supplies only the listed va
 | Repository | Files | What they do |
 |---|---|---|
 | admin | `deploy/openshift/README.md` | The runbook: values, fresh install, upgrade from the runs era, migration gate, verification, weekly scheduler, day-2 changes, rollback, troubleshooting |
-| admin | `deploy/openshift/admin.yaml` | OpenShift Template: ServiceAccount, Deployment (migrate init container, admin, run-worker, oauth-proxy), Service, Route, Role, RoleBinding, CronJob `alerts-bi-weekly` |
+| admin | `deploy/openshift/admin.yaml` | OpenShift Template: ServiceAccount, Deployment (migrate init container, admin, run-worker), Service, Route, CronJob `alerts-bi-weekly` |
 | admin | `deploy/openshift/admin-job.yaml` | OpenShift Template: one `alerts-bi-admin` command as a Job (`db status`, `registry check`, the maintenance `db setup`) |
 | admin | `deploy/openshift/{values,config,secrets}.env.example` | Template values, the `alerts-bi-config` ConfigMap keys and the `alerts-bi-secrets` keys |
 | portal | `deploy/openshift/README.md`, `portal.yaml`, `values.env.example` | The portal runbook and Template: ServiceAccount, Deployment, Service, Route |
@@ -30,14 +30,12 @@ that were in this document are replaced. Deploy admin first, then the portal.
 
 | Object | Kind | Created by | Read by |
 |---|---|---|---|
-| `alerts-bi-admin` | Deployment, Service, Route, ServiceAccount | `admin.yaml` | operators, through the proxy |
-| `alerts-bi-admin-access` | Role, RoleBinding to the operator Group | `admin.yaml` | the proxy's access check |
+| `alerts-bi-admin` | Deployment, Service, Route, ServiceAccount | `admin.yaml` | anyone with the Route URL (no login) |
 | `alerts-bi-weekly` | CronJob, created suspended | `admin.yaml` | — |
 | `alerts-bi-config` | ConfigMap of non-secret settings | operator, from `config.env` | admin, its jobs, portal |
 | `alerts-bi-secrets` | Secret: SQL_USER, SQL_PASSWORD, ES_USERNAME, ES_PASSWORD, LLM_API_KEY | operator, from `secrets.env` | admin, its jobs; portal reads SQL_USER and SQL_PASSWORD only |
 | `alerts-bi-registry` | ConfigMap with `teams.json` | operator | admin, its jobs |
-| `alerts-bi-admin-secrets` | Secret: ADMIN_SECRET, COOKIE_SECRET | operator, generated | admin container, oauth-proxy |
-| `alerts-bi-admin-tls` | Secret | service CA, from the Service annotation | oauth-proxy |
+| `alerts-bi-admin-secrets` | Secret: ADMIN_SECRET | operator, generated | admin container |
 | `alerts-bi-ca-bundle` | optional ConfigMap with `ca-bundle.crt` | operator, for a private CA | admin, its jobs, portal (mounted at `/etc/alerts-bi-ca`) |
 | `alerts-bi-portal` | Deployment, Service, Route, ServiceAccount | `portal.yaml` | readers |
 | `alerts-bi-portal-sql` | optional Secret: SQL_USER, SQL_PASSWORD | operator, for a reader-only login | portal |
@@ -54,15 +52,14 @@ on the retired runs package/image/repository. Apply migrations before consumers.
 | LLM_ENABLED, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_MODEL_REVISION, LLM_TIMEOUT_MS, LLM_MAX_BATCH_SIZE, LLM_MAX_COMPLETION_TOKENS | Admin, run worker and weekly execution only; unchanged model configuration |
 | SSL_CERT_FILE | Optional; set to the mounted CA bundle when the model endpoint uses a private CA (the model client honours it). Never set but empty |
 | LOG_LEVEL | debug, info, warn or error; default info |
-| ADMIN_HOST=127.0.0.1, ADMIN_PORT=8200 | Set by the template on the admin container; ADMIN_USER_HEADER keeps its default X-Forwarded-User |
-| ADMIN_SECRET | Private random value of at least 32 characters, signs actor-bound CSRF tokens |
+| ADMIN_HOST=0.0.0.0, ADMIN_PORT=8200 | Set by the template on the admin container (amended 2026-10-19: no login, so the console listens on the pod address) |
+| ADMIN_SECRET | Private random value of at least 32 characters, signs the CSRF tokens (bound to the day only since 2026-10-19) |
 | ADMIN_REGISTRY_PATH=/etc/alerts-bi/teams.json | Set by the templates on every admin container and job, so commands without `--registry` read the mounted registry, never the packaged mock one |
 | ADMIN_DATABASE | Amended 2026-10-19: must stay unset in a deployment (it was an optional UI/worker/migration override). The weekly job, `weekly-status` and the portal always use SQL_DATABASE, so a different value would split the data; an upgrade that finds a different value stops until the database owner names the real database |
-| COOKIE_SECRET | Existing proxy session secret; keep it on upgrade and its supported encoding and rotation procedure |
 | PORTAL_HOST=0.0.0.0, PORTAL_PORT=8100, PORTAL_ALLOWED_NETWORKS, PORTAL_PAGE_SIZE | Set by the portal template; an upgrade carries over the existing reader allowlist and page size |
 
 Keep SQL/ES/model credentials in `alerts-bi-secrets` and non-secret values in
-`alerts-bi-config`; keep the registry in `alerts-bi-registry` and proxy/admin secrets separate.
+`alerts-bi-config`; keep the registry in `alerts-bi-registry` and the admin form secret separate.
 Portal requires only its SQL/reader settings, no registry, engine, operations or ES/model settings.
 Validate an edited registry with `alerts-bi-admin registry check --registry <path>` before
 installing it, increment registry_version, and preserve immutable snapshots in stored runs. Do
@@ -72,7 +69,7 @@ PORTAL_DATABASE, PORTAL_SQL_*) are removed from the ConfigMap on upgrade.
 ## Automatic migrations
 
 Accepted 2026-10-13: the admin Deployment runs `db setup` in a regular `migrate` init container
-before the UI, manual worker and proxy start. It uses the same admin image digest, SQL settings
+before the UI and manual worker start. It uses the same admin image digest, SQL settings
 and credentials, selecting ADMIN_DATABASE when nonempty and otherwise SQL_DATABASE (the CLI
 default is alerts_bi_dev); deployments leave ADMIN_DATABASE unset. It creates SQL_DATABASE
 when absent, then applies only missing revisions after checking the immutable ledger; current
@@ -157,34 +154,34 @@ concurrently with the Deployment, or change this topology to multiple/rolling po
 coordinating migration execution. Manual pod deletion is not the Recreate upgrade ordering
 guarantee; confirm prior writer sessions have ended before maintenance recreation. Every run
 writer must use the updated image: on the first upgrade the runs-era trigger is stopped before
-migrations and its JSON callers move to the console's authenticated `POST /run-jobs`.
+migrations and its JSON callers move to the console's `POST /run-jobs`.
 
-## Authenticated admin
+## Admin console access
 
-Preserve the existing oauth-proxy identity, authorization, cookie and TLS configuration; an
-upgrade compares the running proxy arguments with the template's and stops on a difference. The
-Service targets only proxy port 8443; no Service exposes application port 8200. The proxy
-admits users allowed to `get` the `alerts-bi-admin` Service in the deployment's namespace (a
-SubjectAccessReview). The RoleBinding grants that to the operator Group; the built-in `view`,
-`edit` and `admin` roles in the namespace grant it as well, so their holders also reach the
-console. Keep one UI worker, one replica and
-one dedicated manual worker. Browser submissions and status checks return promptly; analysis
-duration is independent of the Route timeout. The compatibility POST /runs is still synchronous
-and retains its existing timeout considerations. An unauthenticated /healthz request correctly
-returns 401.
+Amended 2026-10-19 (design "Admin console without login"): the console has no login proxy,
+OAuth client, access Role or client allowlist. The Route uses edge TLS (HTTP redirects to HTTPS)
+to a Service on port 8200, and the console listens on the pod address. Anyone who has the URL
+and can reach the router may use every function, including Delete run; the URL is the only
+barrier. No route returns 401, and no action records a person. Forms and JSON writes still need
+the same-site CSRF token signed with `ADMIN_SECRET`. The first upgrade to this release deletes
+the former proxy's objects (the `oauth-proxy` container, the `alerts-bi-admin-access` Role and
+RoleBinding, the `alerts-bi-admin-tls` Secret, `COOKIE_SECRET`, the ServiceAccount's OAuth
+redirect annotation and the Route allowlist annotations), because `oc apply` would keep them.
 
-Probes (amended 2026-10-19): the oauth-proxy container is probed on `/oauth/healthz` (HTTPS
-8443); the admin container's readiness probe checks only that its loopback listener accepts
-connections, from inside the pod. `/healthz` is not a probe, because it also needs
-Elasticsearch, and an Elasticsearch outage must not take the publish, withdraw and decide pages
-offline; the runbook checks `/healthz` from inside the pod, a trusted path that sends the
-identity header over loopback. The worker has no probe. Containers run with the restricted
-security context (no privilege escalation, all capabilities dropped, RuntimeDefault seccomp) and
-memory limits; the analysis containers' 2 GiB default limit leaves headroom over the 233 MiB
-peak measured for 1.2 million events and 20,000 identities. Keep resource limits appropriate to
-the existing deployment: an upgrade keeps larger running limits. Routes set both the
-`ip_allowlist` and the older `ip_whitelist` annotation, so every 4.x router applies the client
-allowlist.
+Keep one UI worker, one replica and one dedicated manual worker. Browser submissions and status
+checks return promptly; analysis duration is independent of the Route timeout. The
+compatibility POST /runs is still synchronous and retains its existing timeout considerations.
+
+Probes: the admin container's readiness and liveness probes are TCP checks on port 8200, which
+show only that the listener accepts connections. `/healthz` is not a probe, because it also
+needs Elasticsearch, and an Elasticsearch outage must not take the publish, withdraw and decide
+pages offline; the runbook checks `/healthz` through the Route. The worker has no probe.
+Containers run with the restricted security context (no privilege escalation, all capabilities
+dropped, RuntimeDefault seccomp) and memory limits; the analysis containers' 2 GiB default limit
+leaves headroom over the 233 MiB peak measured for 1.2 million events and 20,000 identities.
+Keep resource limits appropriate to the existing deployment: an upgrade keeps larger running
+limits. The portal Route keeps both the `ip_allowlist` and the older `ip_whitelist` annotation,
+so every 4.x router applies its client allowlist.
 
 Runs write no files, so the application needs no writable output volume; CSV downloads render
 from SQL. Earlier images write files after every run, so a rollback to those images also needs
@@ -247,7 +244,8 @@ Enable encryption in this order:
 5. Rollback: images built before shared 0.1.7 ignore SQL_ENCRYPT and connect in plaintext.
    Set SQL_ENCRYPT=false when rolling back, so the configuration does not claim encryption.
 
-Validate login denial, authenticated health, run navigation, a permitted test execution,
-publication, decision attribution, withdrawal, exports and portal visibility, then observe a
+Validate that the console opens without a login and names nobody, health through the Route,
+run navigation, a permitted test execution, publication, decisions, withdrawal, exports and
+portal visibility, then observe a
 scheduled cycle. Follow the retirement document for old-trigger removal, rollback and archival.
 No commands in this document have been executed on a cluster by this change.

@@ -17,14 +17,15 @@ backfill is in progress.
 
 - Browser `POST /teams/{team_id}/trigger` validates identity, same-site CSRF and run options,
   persists a submission, then immediately redirects (303) to that team's workspace with `job_id`.
-- JSON `POST /run-jobs` requires operator identity, same-site `X-CSRF-Token` and an
+- Amended 2026-10-19 (design "Admin console without login"): no route requires an operator
+  identity and no requester is recorded; submission keys are unique across all clients.
+- JSON `POST /run-jobs` requires same-site `X-CSRF-Token` and an
   `Idempotency-Key` (1–64 ASCII characters). It accepts the existing team/run_at/llm body and
   returns 202 with `job_id`, `team_id`, `run_id`, status/timestamps, `error_summary`,
   `status_url`, `result_url` (null until completed) and a Location pointing to status.
-- Authenticated `GET /run-jobs/{job_id}` returns current durable state. Unknown jobs return 404.
+- `GET /run-jobs/{job_id}` returns current durable state. Unknown jobs return 404.
   The status response never exposes configuration, submission keys or full error payloads.
-  Authenticated standardization operators can inspect any team's job; there is no per-team
-  operator ACL. The team workspace still rejects a selected job from another team.
+  Anyone who can reach the console can inspect any team's job; there is no per-team ACL. The team workspace still rejects a selected job from another team.
   The complete console HTTP schema is pinned in contracts/console-openapi.json.
 - Pending/running submissions appear above the selected analysis in the team workspace.
   Same-origin polling every three seconds updates state; it pauses while the page is hidden.

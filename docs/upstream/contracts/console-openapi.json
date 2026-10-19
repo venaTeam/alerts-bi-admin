@@ -695,11 +695,8 @@
           "400": {
             "description": "Invalid ASCII submission key or unknown team"
           },
-          "401": {
-            "description": "Operator identity required"
-          },
           "403": {
-            "description": "Same-site actor-bound CSRF required"
+            "description": "Same-site CSRF token required"
           },
           "409": {
             "description": "Another operation is active or the key has different options"
@@ -725,7 +722,7 @@
               "minLength": 1,
               "maxLength": 64
             },
-            "description": "Exact ASCII key scoped to the authenticated operator"
+            "description": "Exact ASCII submission key"
           },
           {
             "name": "X-CSRF-Token",
@@ -734,14 +731,14 @@
             "schema": {
               "type": "string"
             },
-            "description": "Actor-bound token from authenticated GET /csrf"
+            "description": "Token from GET /csrf"
           }
         ]
       }
     },
     "/run-jobs/{job_id}": {
       "get": {
-        "summary": "Read durable job state for an authenticated operator",
+        "summary": "Read durable job state",
         "operationId": "read_job_run_jobs__job_id__get",
         "parameters": [
           {
@@ -764,9 +761,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Operator identity required"
           },
           "404": {
             "description": "Unknown submission"
@@ -824,7 +818,7 @@
     },
     "/backfills/{backfill_id}": {
       "get": {
-        "summary": "Read backfill progress for an authenticated operator",
+        "summary": "Read backfill progress",
         "operationId": "read_backfill_backfills__backfill_id__get",
         "parameters": [
           {
@@ -847,9 +841,6 @@
                 }
               }
             }
-          },
-          "401": {
-            "description": "Operator identity required"
           },
           "404": {
             "description": "Unknown backfill"

@@ -192,8 +192,8 @@ or a reader will see one enormous row.
 
 Shapes are declared as Pydantic models and checked against the pinned wire contract. The
 unified admin listener disables public `/openapi.json` and `/docs`; the legacy API factory
-exists only for contract tests. Every supported route below requires operator identity,
-and JSON writes require a same-site CSRF token from authenticated `GET /csrf`.
+exists only for contract tests. Since 2026-10-19 no route requires an identity (design "Admin
+console without login"); JSON writes require a same-site CSRF token from `GET /csrf`.
 
 `POST /runs` takes a JSON body:
 
@@ -209,7 +209,7 @@ are not expected totals for the newly selected Monday window.
 `llm` is `live` (the default), `fake` or `off`, mirroring the CLI's
 default, `--fake-llm` and `--no-llm`.
 
-Admin's `POST /runs/{run_id}/delete` requires same-site actor-bound form CSRF and
+Admin's `POST /runs/{run_id}/delete` requires same-site form CSRF and
 `confirm_delete=1`. It permanently removes that run and its publications/decisions/results;
 all its GET report and download routes then return 404. The redirect selects the team
 without the deleted run id. SQL views and CSV columns are unchanged. See design section
