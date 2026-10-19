@@ -52,7 +52,7 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
         migrations.reset_test_database(CONFIG.sql, DB)
     with connect(CONFIG.sql, DB) as db:
         persist_run(db, PersistencePayload(run=sample_run(run_id="1" * 64, team_id="team-a")))
-        publish_run(db, "1" * 64, published_by="test", allow_gap=True)
+        publish_run(db, "1" * 64, allow_gap=True)
         with pytest.raises(ValueError, match=HEAD):
             check_schema(db)
         # Exercise migration rollback after indexes are dropped.
@@ -83,10 +83,10 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
                 {"view": view},
             ) == {"collation_name": "Latin1_General_100_BIN2"}
         persist_run(db, PersistencePayload(run=sample_run(run_id="2" * 64, team_id="Team-A")))
-        second = publish_run(db, "2" * 64, published_by="test", allow_gap=True)
+        second = publish_run(db, "2" * 64, allow_gap=True)
         assert second.replaced_run_id is None
         persist_run(db, PersistencePayload(run=sample_run(run_id="3" * 64, team_id="Team-A")))
-        replacement = publish_run(db, "3" * 64, published_by="test", replace=True, allow_gap=True)
+        replacement = publish_run(db, "3" * 64, replace=True, allow_gap=True)
         assert replacement.replaced_run_id == "2" * 64
         assert [r["run_id"] for r in team_runs(db, "team-a")] == ["1" * 64]
         assert {r["run_id"] for r in team_runs(db, "Team-A")} == {"2" * 64, "3" * 64}

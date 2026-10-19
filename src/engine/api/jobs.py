@@ -119,14 +119,36 @@ def refuse_active_job(db: Database) -> None:
         raise ExecutionBusy("A run is already pending or running. Try again after it finishes.")
 
 
+def matching_submission(
+    rows: list[dict[str, Any]], request_hash: str, conflict: str
+) -> dict[str, Any] | None:
+    """The one stored submission that a retry with this key and request returns, if any.
+
+    Migration 018 kept a key that several people had used as one ``#<id>`` row each, so a key
+    can match several rows: a retry gets the one with its own options, and refuses when that
+    is still more than one.
+    """
+    if not rows:
+        return None
+    same = [row for row in rows if row["request_hash"] == request_hash]
+    if not same:
+        raise HTTPException(409, conflict)
+    if len(same) > 1:
+        raise HTTPException(
+            409,
+            "Several earlier submissions used this key. Reload the page, or use a new "
+            "Idempotency-Key, and submit again.",
+        )
+    return same[0]
+
+
 def _existing_submission(db: Database, key_hash: bytes, request_hash: str) -> dict[str, Any] | None:
-    existing = db.query_one(
-        "SELECT * FROM run_jobs WHERE requested_by=:requester AND idempotency_key_hash=:key_hash",
-        {"requester": NO_REQUESTER, "key_hash": key_hash},
+    rows = db.query(
+        "SELECT * FROM run_jobs WHERE idempotency_key_hash=:key_hash", {"key_hash": key_hash}
     )
-    if existing and existing["request_hash"] != request_hash:
-        raise HTTPException(409, "This submission key was already used with different options.")
-    return existing
+    return matching_submission(
+        rows, request_hash, "This submission key was already used with different options."
+    )
 
 
 def _admit(

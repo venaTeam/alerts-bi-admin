@@ -485,8 +485,8 @@ oc delete role/alerts-bi-admin-access rolebinding/alerts-bi-admin-access secret/
 oc annotate serviceaccount/alerts-bi-admin -n "$NS" serviceaccounts.openshift.io/oauth-redirectreference.admin-
 ```
 
-If 7.1 listed `COOKIE_SECRET`, remove it too:
-`oc set data secret/alerts-bi-admin-secrets -n "$NS" COOKIE_SECRET-`.
+If 7.1 listed `COOKIE_SECRET`, remove it too (a rollback to the login proxy sets a new one,
+section 12): `oc set data secret/alerts-bi-admin-secrets -n "$NS" COOKIE_SECRET-`.
 
 Then deploy. The weekly CronJob stays suspended (`WEEKLY_SUSPEND=true`) until section 9.
 
@@ -674,6 +674,20 @@ Rollback means redeploying the previous release with its own files and image.
   restore the backup from the migration gate together with the previous image, files and
   registry. A restore loses every write since the backup; it needs the service owner's
   explicit authorization and stopped writers.
+- **A release with the login proxy** (7.1 found `oauth-proxy`): this release applies migration
+  018, so returning to such an image also needs the database restore above. Its proxy reads
+  `COOKIE_SECRET` from `alerts-bi-admin-secrets`, which 7.6 removed and 7.1 did not export.
+  Before applying the previous manifests, set a new value (it only signs out browser sessions)
+  and delete the current Deployment, Service and Route, as 7.6 did the other way:
+
+  ```bash
+  oc set data secret/alerts-bi-admin-secrets -n "$NS" COOKIE_SECRET="$(openssl rand -base64 32)"
+  oc delete deployment/alerts-bi-admin service/alerts-bi-admin route/alerts-bi-admin -n "$NS" --wait=true
+  ```
+
+  The previous manifests or `previous/objects.yaml` bring back the access Role, RoleBinding and
+  the ServiceAccount's OAuth redirect annotation; the recreated Service makes OpenShift issue
+  `alerts-bi-admin-tls` again.
 - **Queued runs** (from the backfill feature) must be finished or cancelled before rolling back
   to an image that predates migration 014; `docs/upstream/manual-worker-runbook.md` has the steps.
 - **Scheduler**: suspend `alerts-bi-weekly` before re-enabling any old scheduler.

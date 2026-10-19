@@ -172,7 +172,7 @@ def test_case_only_variants_persist_publish_and_take_decisions_separately(
         )
         assert [row["application"] for row in rows] == [application]
 
-    publish_run(db, run_id, published_by="case-test", allow_gap=True)
+    publish_run(db, run_id, allow_gap=True)
     for application in APPLICATIONS:
         finding = next(f for f in payload.findings if f["application"] == application)
         finding_id = str(finding["core_rule_ids"]).split(",")[0]

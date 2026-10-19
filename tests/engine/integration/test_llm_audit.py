@@ -153,7 +153,7 @@ def test_evaluation_cannot_populate_completed_runs_or_verdicts(db: Database) -> 
 def test_published_run_refuses_assessment_before_any_model_call(db: Database) -> None:
     scope = "f" * 64
     persist_run(db, PersistencePayload(run=sample_run(run_id=scope)))
-    publish_run(db, scope, published_by="audit-test")
+    publish_run(db, scope)
     client = FakeLlmClient()
     with pytest.raises(RunIsPublished):
         assess(db, scope, client)

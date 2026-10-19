@@ -8,13 +8,18 @@ branch is pinned here.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import pytest
 from alerts_bi_operations.review.publication import (
+    SCHEDULED_PUBLISHER,
     PublicationRefused,
     PublishedWeek,
     check_publication,
+    publish_run,
 )
+from alerts_bi_shared.db.connection import Database
+from src.engine.weekly.runner import PUBLISHER
 
 WEEK = timedelta(hours=168)
 END = datetime(2026, 8, 30, 16, 44, 35, tzinfo=UTC)
@@ -116,3 +121,15 @@ def test_a_window_that_is_not_exactly_168_hours_is_refused() -> None:
     odd = PublishedWeek("odd", END - timedelta(hours=100), END)
     with pytest.raises(PublicationRefused, match="168"):
         check_publication(odd, [], replace=False, allow_gap=True)
+
+
+@pytest.mark.parametrize("name", ["alice", " weekly-schedule", "Weekly-Schedule", "operator"])
+def test_a_publication_never_records_a_person(name: str) -> None:
+    # Design "Admin console without login", 2026-10-19: only the scheduler's marker or "".
+    # The refusal comes before any database work, so no connection is needed.
+    with pytest.raises(ValueError, match="people are not recorded"):
+        publish_run(cast(Database, None), "0" * 64, published_by=name)
+
+
+def test_the_scheduler_publishes_under_its_own_marker() -> None:
+    assert PUBLISHER == SCHEDULED_PUBLISHER == "weekly-schedule"

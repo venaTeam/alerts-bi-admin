@@ -353,7 +353,7 @@ def test_permanent_deletion_removes_all_run_records(
             ),
         )
         if state in ("published", "withdrawn"):
-            publish_run(db, run_id, published_by="alice")
+            publish_run(db, run_id)
         if state == "withdrawn":
             unpublish_run(db, run_id, reason="correction")
         with db.transaction():
@@ -436,7 +436,7 @@ def test_admin_ignores_forged_gap_override(client: TestClient) -> None:
     run_id = "8" * 64
     with connect(CONFIG.sql, DB) as db:
         # The 24 August and 14 September weeks leave two unpublished weeks in between.
-        publish_run(db, RUN, published_by="alice")
+        publish_run(db, RUN)
         persist_run(
             db,
             PersistencePayload(
@@ -485,7 +485,7 @@ def test_failed_deletion_rolls_back_the_parent_and_publication(
     run_id = "9" * 64
     with connect(CONFIG.sql, DB) as db:
         persist_run(db, PersistencePayload(run=sample_run(run_id=run_id, team_id="payments-core")))
-        publish_run(db, run_id, published_by="alice")
+        publish_run(db, run_id)
     execute = Database.execute
 
     def fail_final_delete(db: Database, sql: str, params: dict[str, object] | None = None) -> None:

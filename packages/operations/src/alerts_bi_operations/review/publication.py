@@ -20,6 +20,7 @@ from alerts_bi_shared.db.connection import Database
 from alerts_bi_shared.window import WINDOW_HOURS
 
 __all__ = [
+    "SCHEDULED_PUBLISHER",
     "PublicationRefused",
     "PublishResult",
     "PublishedWeek",
@@ -33,6 +34,9 @@ __all__ = [
 _WEEK = timedelta(hours=WINDOW_HOURS)
 NOTE_LIMIT = 4000
 REASON_LIMIT = 1000
+#: The only ``published_by`` besides "": the weekly scheduler's own marker, which names no
+#: person.
+SCHEDULED_PUBLISHER = "weekly-schedule"
 
 
 class PublicationRefused(ValueError):
@@ -194,8 +198,13 @@ def publish_run(
 
     People are not recorded (design "Admin console without login", 2026-10-19): only the
     weekly scheduler names itself in ``published_by``; every other publication stores "".
+    Any other value is refused, so a caller cannot store a person's name.
     """
-    by = _clean(published_by, 128, "publisher") or ""
+    if published_by not in ("", SCHEDULED_PUBLISHER):
+        raise ValueError(
+            f"published_by may only be {SCHEDULED_PUBLISHER!r} or empty; people are not recorded"
+        )
+    by = published_by
     review_note = _clean(note, NOTE_LIMIT, "review note")
     at = _naive(now or datetime.now(UTC))
 

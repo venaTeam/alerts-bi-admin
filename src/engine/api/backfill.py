@@ -30,7 +30,7 @@ from fastapi import HTTPException
 from ..config import ApiSettings
 from ..run.orchestrator import compute_run_id
 from ..weekly.plan import RETENTION_DAYS, is_week_boundary, latest_week_end
-from .jobs import ACTIVE_STATES, NO_REQUESTER, get_job, lock_team_queue
+from .jobs import ACTIVE_STATES, NO_REQUESTER, get_job, lock_team_queue, matching_submission
 from .schemas import LlmMode, RunRequest
 from .service import close_client, select_client
 
@@ -226,6 +226,16 @@ def _insert_week(
     return job_id
 
 
+def existing_backfill(db: Database, key_hash: bytes, request_hash: str) -> dict[str, Any] | None:
+    """The stored backfill a resubmitted form returns, if any (see matching_submission)."""
+    rows = db.query(
+        "SELECT * FROM run_backfills WHERE idempotency_key_hash=:key_hash", {"key_hash": key_hash}
+    )
+    return matching_submission(
+        rows, request_hash, "This form was already submitted with different weeks or options."
+    )
+
+
 def _now() -> datetime:
     now = datetime.now(UTC).replace(tzinfo=None)
     return now.replace(microsecond=now.microsecond // 1000 * 1000)
@@ -258,16 +268,8 @@ def submit_backfill(
     run_ids = _run_ids(settings, registry, team_id, weeks, llm)
     with connect(settings.config.sql, settings.target_database) as db, db.transaction():
         _team_lock(db, team_id)
-        existing = db.query_one(
-            "SELECT * FROM run_backfills WHERE requested_by=:requester "
-            "AND idempotency_key_hash=:key_hash",
-            {"requester": NO_REQUESTER, "key_hash": key_hash},
-        )
+        existing = existing_backfill(db, key_hash, request_hash)
         if existing:
-            if existing["request_hash"] != request_hash:
-                raise HTTPException(
-                    409, "This form was already submitted with different weeks or options."
-                )
             return existing
         if _active_backfill(db, team_id):
             raise HTTPException(

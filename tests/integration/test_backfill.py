@@ -154,7 +154,7 @@ def test_admission_refuses_locked_and_unretained_weeks_storing_nothing(
                 )
             ),
         )
-        publish_run(db, "c" * 64, published_by="op", allow_gap=True)
+        publish_run(db, "c" * 64, allow_gap=True)
     manual = jobs.submit_job(
         api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "manual"
     )

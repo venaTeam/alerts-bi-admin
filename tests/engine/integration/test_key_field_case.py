@@ -195,7 +195,7 @@ def test_each_case_variant_reuses_only_its_own_stored_verdict(
 def test_readers_and_decisions_tell_case_variants_apart(db: Database) -> None:
     # Runs last: a published run can no longer be replaced by a rerun.
     run_id = _run_id(db)
-    publish_run(db, run_id, published_by="key-case-test")
+    publish_run(db, run_id)
 
     for key in sorted(KEYS):
         finding = db.query_one(

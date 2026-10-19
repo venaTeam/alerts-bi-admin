@@ -207,7 +207,7 @@ def test_history_published_by_hand_off_the_monday_boundary_blocks_the_team(
             db=db,
         )
         persist_run(db, payload)
-        publish_run(db, summary.run_id, published_by="operator")
+        publish_run(db, summary.run_id)
 
     outcomes = weekly(registry, MOCK_NOW + timedelta(days=14), tmp_path, teams=[TEAM])
     assert [o.outcome for o in outcomes] == ["blocked"]
