@@ -135,7 +135,7 @@ These are the only inputs. "Upgrade" says where the running deployment already h
 | `ES_URL`, `ES_V1_INDEX`, `ES_V2_INDEX` | config.env | yes | The Elasticsearch owner: URL and the v1/v2 source indices, aliases or patterns |
 | `ES_USERNAME`, `ES_PASSWORD` | secrets.env | if ES uses basic auth | The Elasticsearch owner |
 | `ES_CA_CERT` and the CA file | config.env | if ES uses a private CA | Set `ES_CA_CERT=/etc/alerts-bi-ca/ca-bundle.crt` and create [the CA bundle](#64-private-ca-bundle-only-when-needed) |
-| `LLM_ENABLED` | config.env | yes | The service owner: `true` in production with the model. Upgrade: unchanged (an absent key means `false`) |
+| `LLM_ENABLED` | config.env | yes | The service owner: `true` in production with the model; with `false` the scheduler publishes unassessed weeks after three days (section 9). Upgrade: unchanged (an absent key means `false`) |
 | `LLM_BASE_URL`, `LLM_MODEL`, `LLM_MODEL_REVISION` | config.env | when `LLM_ENABLED=true` | The model owner. Upgrade: unchanged |
 | `LLM_API_KEY` | secrets.env | if the endpoint needs a key | The model owner |
 | `SSL_CERT_FILE` | config.env | if the model endpoint uses a private CA | Uncomment the line in config.env and add the CA to the bundle |
@@ -550,7 +550,12 @@ deployed (its runbook), check that it shows the published week.
 
 ## 9. Enable the weekly scheduler
 
-Only after section 8 passed. Make sure no other scheduler is active:
+Only after section 8 passed. With `LLM_ENABLED` false or empty, the model assesses nothing:
+every week is held, and the scheduler publishes it anyway, with a reader note saying how many
+alerts were not assessed, three days after it first held it. If unassessed weeks must not
+reach the portal, leave `WEEKLY_SUSPEND=true` and stop here until the model is enabled.
+
+Make sure no other scheduler is active:
 
 ```bash
 oc get cronjob -n "$NS" -o custom-columns='NAME:.metadata.name,SUSPEND:.spec.suspend,ACTIVE:.status.active'
