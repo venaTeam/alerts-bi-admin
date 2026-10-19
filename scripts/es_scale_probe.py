@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from alerts_bi_shared.config.env import read_str
 from src.engine.config import load_dotenv, load_es_config
+from src.engine.es.reader import OPERATOR_FIELD
 
 load_dotenv()
 ES_CONFIG = load_es_config()
@@ -124,7 +125,7 @@ def probe(
 
     filters: list[dict[str, Any]] = [{"range": {"@timestamp": window}}]
     if not all_teams:
-        filters.append({"terms": {"operator": team_operators}})
+        filters.append({"terms": {OPERATOR_FIELD: team_operators}})
     query = {"bool": {"filter": filters}}
 
     head = _search(

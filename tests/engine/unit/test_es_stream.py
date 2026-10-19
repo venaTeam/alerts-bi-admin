@@ -78,6 +78,18 @@ def test_reader_uses_configured_source_for_each_schema(schema: str, index: str) 
     assert client.closed == ["pit-1"]
 
 
+@pytest.mark.parametrize("schema", ["v1", "v2"])
+def test_operators_match_the_exact_keyword_subfield_verbatim(schema: str) -> None:
+    # The indices map operator as analyzed text plus a keyword subfield; a terms query on
+    # the analyzed field only matches all-lowercase values, so 893_Lannister read 0 rows.
+    client = Client([page(1, total=0, empty=True)])
+    operators = ["893_Lannister", "batch-team", "BATCH_JOBS"]
+    scan_schema(cast(EsClient, client), schema, operators, WINDOW, lambda row: None)
+    filters = client.requests[0]["query"]["bool"]["filter"]
+    assert {"terms": {"operator.keyword": operators}} in filters
+    assert not any("operator" in f.get("terms", {}) for f in filters)
+
+
 def test_unknown_schema_fails_before_querying() -> None:
     client = Client([])
     with pytest.raises(ValueError, match="unknown alert schema"):
