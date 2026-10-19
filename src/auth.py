@@ -1,12 +1,12 @@
-"""Who is signed in, and proof that a form was submitted from this app.
+"""Proof that a form was submitted from this app.
 
-Identity comes from the login proxy's header (``X-Forwarded-User`` from OpenShift's
-oauth-proxy). The app binds to loopback, so only the proxy can set it.
+The console has no login (design "Admin console without login", 2026-10-19): anyone who can
+reach it may use it, and no request carries or records an operator identity.
 
-Every write is a POST carrying a token: an HMAC of the signed-in user and the UTC date under
-``ADMIN_SECRET``. A page elsewhere on the company network cannot produce one, so it cannot
-make a signed-in operator's browser publish or withdraw something. Browsers that send
-``Sec-Fetch-Site`` are additionally refused unless the request came from this site.
+Every write is a POST carrying a token: an HMAC of the UTC date under ``ADMIN_SECRET``. A page
+on another site cannot read one, so it cannot make a visitor's browser publish, withdraw or
+delete something through the console. Browsers that send ``Sec-Fetch-Site`` are additionally
+refused unless the request came from this site.
 """
 
 from __future__ import annotations
@@ -17,32 +17,20 @@ from datetime import date, timedelta
 
 from starlette.requests import Request
 
-from .config import AdminSettings
-
-__all__ = ["csrf_token", "identity", "same_site", "valid_csrf"]
-
-_MAX_NAME = 128
+__all__ = ["csrf_token", "same_site", "valid_csrf"]
 
 
-def identity(request: Request, settings: AdminSettings) -> str | None:
-    """The signed-in operator, or ``None`` when there is none."""
-    value = request.headers.get(settings.user_header, "").strip()
-    if value:
-        return value[:_MAX_NAME]
-    return settings.dev_user
-
-
-def csrf_token(secret: str, user: str, day: date) -> str:
-    message = f"{user}|{day.isoformat()}".encode()
+def csrf_token(secret: str, day: date) -> str:
+    message = f"console|{day.isoformat()}".encode()
     return hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
 
 
-def valid_csrf(secret: str, user: str, token: str, today: date) -> bool:
+def valid_csrf(secret: str, token: str, today: date) -> bool:
     """Accept today's token or yesterday's, so a form left open past midnight UTC still works."""
     if len(token) != 64 or any(char not in "0123456789abcdef" for char in token):
         return False
     return any(
-        hmac.compare_digest(csrf_token(secret, user, day), token)
+        hmac.compare_digest(csrf_token(secret, day), token)
         for day in (today, today - timedelta(days=1))
     )
 

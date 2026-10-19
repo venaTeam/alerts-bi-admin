@@ -1,8 +1,12 @@
 # Deploying Alerts BI admin on OpenShift
 
 This folder holds everything needed to deploy `alerts-bi-admin` on OpenShift: the operator
-console, its run worker, the login proxy, the SQL migrations and the single weekly scheduler.
-Deploy the read-only portal afterwards with `deploy/openshift/README.md` in `alerts-bi-portal`.
+console, its run worker, the SQL migrations and the single weekly scheduler. Deploy the
+read-only portal afterwards with `deploy/openshift/README.md` in `alerts-bi-portal`.
+
+The console has no login (design "Admin console without login", 2026-10-19). Anyone who has its
+URL and can reach the cluster's router may use it, including Delete run, and nothing records
+who did what. Share the URL only with the team that operates it.
 
 Follow the sections in order. You supply only the values listed in [Values you supply](#3-values-you-supply);
 everything else is fixed by the files here. Never edit the templates to make a deployment work.
@@ -15,18 +19,18 @@ pinned design). This runbook is the procedure; where the two seem to disagree, s
 
 | File | What it is |
 |---|---|
-| `admin.yaml` | Template: ServiceAccount, Deployment, Service, Route, Role, RoleBinding and the weekly CronJob |
+| `admin.yaml` | Template: ServiceAccount, Deployment, Service, Route and the weekly CronJob |
 | `admin-job.yaml` | Template: one `alerts-bi-admin` command run once as a Job (status checks, maintenance migration) |
-| `values.env.example` | Template values: namespace, images, route, access group, schedule, sizing |
+| `values.env.example` | Template values: image, route, schedule, sizing |
 | `config.env.example` | Non-secret settings: becomes the ConfigMap `alerts-bi-config` |
 | `secrets.env.example` | Credentials: becomes the Secret `alerts-bi-secrets` |
 
 ## 1. What gets deployed
 
 ```text
-operators --HTTPS--> Route alerts-bi-admin (client allowlist, reencrypt TLS)
-            --> Service alerts-bi-admin :443 --> oauth-proxy :8443 (OpenShift login, OPERATOR_GROUP only)
-            --> admin 127.0.0.1:8200 (console)          } one pod, Deployment alerts-bi-admin,
+operators --HTTPS--> Route alerts-bi-admin (edge TLS, no login, no client allowlist)
+            --> Service alerts-bi-admin :8200
+            --> admin 0.0.0.0:8200 (console)            } one pod, Deployment alerts-bi-admin,
                 run-worker (manual and backfill runs)    } 1 replica, Recreate; the migrate init
                                                          } container runs first
 CronJob alerts-bi-weekly --> alerts-bi-admin weekly (one scheduler for the database)
@@ -36,36 +40,29 @@ Portal (alerts-bi-portal) --> the same SQL_DATABASE, published portal_* views on
 
 | Object | Kind | Created by | Purpose |
 |---|---|---|---|
-| `alerts-bi-admin` | Deployment | `admin.yaml` | Console, run worker and login proxy; migrations in its init container |
-| `alerts-bi-admin` | Service, Route, ServiceAccount | `admin.yaml` | HTTPS entry through the proxy; the ServiceAccount is the proxy's OAuth client |
-| `alerts-bi-admin-access` | Role and RoleBinding | `admin.yaml` | Lets OPERATOR_GROUP pass the proxy's access check (see the note below) |
+| `alerts-bi-admin` | Deployment | `admin.yaml` | Console and run worker; migrations in its init container |
+| `alerts-bi-admin` | Service, Route, ServiceAccount | `admin.yaml` | HTTPS entry to the console; the ServiceAccount carries the pull secret |
 | `alerts-bi-weekly` | CronJob | `admin.yaml` | The only weekly scheduler; created suspended |
-| `alerts-bi-admin-tls` | Secret | OpenShift service CA | Proxy serving certificate, created from the Service annotation |
 | `alerts-bi-config` | ConfigMap | you, from `config.env` | Non-secret settings, also read by the portal |
 | `alerts-bi-secrets` | Secret | you, from `secrets.env` | SQL, Elasticsearch and model credentials |
 | `alerts-bi-registry` | ConfigMap | you, from `teams.json` | The team registry, mounted at `/etc/alerts-bi/teams.json` |
-| `alerts-bi-admin-secrets` | Secret | you, generated | `ADMIN_SECRET` (signs forms) and `COOKIE_SECRET` (proxy session) |
+| `alerts-bi-admin-secrets` | Secret | you, generated | `ADMIN_SECRET`, which signs the console's forms |
 | `alerts-bi-ca-bundle` | ConfigMap | you, only for a private CA | `ca-bundle.crt`, mounted at `/etc/alerts-bi-ca` |
 | `alerts-bi-pull` | Secret | you, only if the registry needs credentials | Image pull credentials |
 
-The runs-era objects (the `alerts-bi-runs` trigger, its image and any old weekly CronJob) are
-replaced by these. [Upgrade](#7-upgrade-an-existing-installation) says how.
-
-Who can sign in: the proxy admits every user allowed to `get` the Service `alerts-bi-admin`.
-The RoleBinding grants that to `OPERATOR_GROUP`, but the built-in `view`, `edit` and `admin`
-roles grant it too, so anyone holding one of those roles in the project also reaches the
-console. This is the existing access model; keep those roles to people who may operate the
-console.
+The runs-era objects (the `alerts-bi-runs` trigger, its image and any old weekly CronJob) and
+the former login proxy's objects (the `oauth-proxy` container, the Role and RoleBinding
+`alerts-bi-admin-access` and the Secret `alerts-bi-admin-tls`) are replaced or removed.
+[Upgrade](#7-upgrade-an-existing-installation) says how.
 
 ## 2. Before you start
 
 You need:
 
-- `oc` 4.14 or later, logged in (`oc whoami`) with the `admin` role in the target project
-  (creating the Role and RoleBinding needs it). The cluster must be OpenShift 4.14 or later
-  (`oc version` shows a Kubernetes server version of v1.27 or later), because the CronJob uses
-  `timeZone`. The Route sets both `ip_allowlist` and the older `ip_whitelist` annotation, so
-  every 4.x router applies the client allowlist.
+- `oc` 4.14 or later, logged in (`oc whoami`) with the `edit` or `admin` role in the target
+  project (removing the former login proxy's Role and RoleBinding on an upgrade needs `admin`).
+  The cluster must be OpenShift 4.14 or later (`oc version` shows a Kubernetes server version of
+  v1.27 or later), because the CronJob uses `timeZone`.
 - A POSIX shell: bash on Linux or macOS, or Git Bash on Windows. Every command below is bash.
 - `openssl` (Git for Windows includes it).
 - The `alerts-bi-admin` checkout at the release commit. The templates must come from the same
@@ -90,7 +87,7 @@ Set up your shell once per session. Every later command uses these three variabl
 ```bash
 ADMIN_REPO=/path/to/alerts-bi-admin          # checkout at the release commit
 VALUES_DIR=/path/to/private/alerts-bi-values # private directory outside every repository
-NS=alerts-bi                                 # the NAMESPACE value from values.env
+NS=alerts-bi                                 # the OpenShift project to deploy into
 cd "$ADMIN_REPO/deploy/openshift"
 oc get project "$NS"                         # Expect: the project is listed
 ```
@@ -127,12 +124,9 @@ These are the only inputs. "Upgrade" says where the running deployment already h
 
 | Value | File | Required | Where to get it |
 |---|---|---|---|
-| `NAMESPACE` | values.env | yes | The project to deploy into. Upgrade: the existing project |
+| Project (`NS`) | shell | yes | The project to deploy into. Upgrade: the existing project |
 | `ADMIN_IMAGE` | values.env | yes | Digest of the CI image for the release commit; see [Image references](#image-references) |
-| `OAUTH_PROXY_IMAGE` | values.env | yes | Upgrade: the running proxy image. Fresh: the cluster image stream; see [Image references](#image-references) |
-| `OPERATOR_GROUP` | values.env | yes | The service owner names the OpenShift Group of the operators (`oc get groups` lists them if you may read groups). Upgrade: `oc get rolebinding alerts-bi-admin-access -n "$NS" -o jsonpath='{range .subjects[*]}{.kind} {.name}{"\n"}{end}'`. The template grants exactly one Group: if this prints more than one subject, or a `User`, stop until the service owner names the one Group to keep (with those people in it) |
 | `ADMIN_ROUTE_HOST` | values.env | no | Empty generates a host. Upgrade: `oc get route alerts-bi-admin -n "$NS" -o jsonpath='{.spec.host}'` |
-| `ADMIN_ROUTE_ALLOWLIST` | values.env | no | Client networks allowed to reach the console. Upgrade: the Route's `haproxy.router.openshift.io/ip_allowlist` (or `ip_whitelist`) annotation |
 | `ADMIN_ROUTE_TIMEOUT` | values.env | no | Upgrade: the Route's `haproxy.router.openshift.io/timeout` annotation, if set |
 | `WEEKLY_SCHEDULE` | values.env | no | Upgrade: the schedule of the weekly CronJob in use today (section 4), `oc get cronjob <name> -n "$NS" -o jsonpath='{.spec.schedule} {.spec.timeZone}{"\n"}'`. Convert it to UTC if its time zone is not UTC |
 | `UI_*`, `ANALYSIS_*` sizing | values.env | no | Upgrade: when the running containers have larger memory limits (`oc get deployment alerts-bi-admin -n "$NS" -o jsonpath='{range .spec.template.spec.containers[*]}{.name} {.resources}{"\n"}{end}'`), use those |
@@ -164,7 +158,7 @@ Fill in the REQUIRED lines. Each example file states its format rules; follow th
 
 ### Image references
 
-Every image is referenced by digest (`@sha256:`), never by tag, so the pod, its init container
+The image is referenced by digest (`@sha256:`), never by tag, so the pod, its init container
 and the CronJob run exactly the same build.
 
 ```bash
@@ -174,21 +168,6 @@ oc image info <registry>/<repository>:<tag>
 Expect a `Digest: sha256:<64 hex>` line. The value is `<registry>/<repository>@sha256:<64 hex>`.
 If the registry needs credentials, add `--registry-config=<auth.json>`. If the output lists
 several platforms, add `--filter-by-os=linux/amd64` and use that digest.
-
-For `OAUTH_PROXY_IMAGE` on an upgrade, keep what runs today:
-
-```bash
-oc get deployment alerts-bi-admin -n "$NS" -o jsonpath='{.spec.template.spec.containers[?(@.name=="oauth-proxy")].image}{"\n"}'
-```
-
-If that prints a tag instead of a digest, resolve it with `oc image info`. On a fresh install use
-the cluster's own image stream:
-
-```bash
-oc get imagestream oauth-proxy -n openshift -o jsonpath='{range .status.tags[*]}{.tag}{"  "}{.items[0].dockerImageReference}{"\n"}{end}'
-```
-
-Use the `dockerImageReference` it prints (it already contains `@sha256:`).
 
 ### Check the values
 
@@ -230,6 +209,11 @@ migration means a [migration gate](#74-migration-gate). Migrations are roll-forw
 is applied, an older image stops in its init container with
 `Can't locate revision identified by '<revision>'`, and only a database restore goes back.
 
+`018_erase_operator_names` permanently blanks every stored operator name: publishers,
+withdrawers, decision makers, run and backfill requesters, and cancellers named in run messages.
+The scheduler's own `weekly-schedule` marker stays. Only the pre-018 backup from the migration
+gate holds those names afterwards.
+
 ## 6. Fresh install
 
 ### 6.1 Pull secret (only when the registry needs credentials)
@@ -255,7 +239,7 @@ Expect `configmap/alerts-bi-config created` and `secret/alerts-bi-secrets create
 generate the console's own secrets. They never leave the cluster:
 
 ```bash
-oc create secret generic alerts-bi-admin-secrets -n "$NS" --from-literal=ADMIN_SECRET="$(openssl rand -hex 32)" --from-literal=COOKIE_SECRET="$(openssl rand -base64 32)"
+oc create secret generic alerts-bi-admin-secrets -n "$NS" --from-literal=ADMIN_SECRET="$(openssl rand -hex 32)"
 ```
 
 ### 6.3 Team registry
@@ -304,7 +288,7 @@ oc apply -n "$NS" -f "$VALUES_DIR/admin.rendered.yaml"
 oc rollout status deployment/alerts-bi-admin -n "$NS" --timeout=60m
 ```
 
-Expect the dry run to list seven objects ending in `(server dry run)`, the apply to list them as
+Expect the dry run to list five objects ending in `(server dry run)`, the apply to list them as
 `created`, and `deployment "alerts-bi-admin" successfully rolled out`. Then continue with
 section 8 (verify) and section 9 (enable the weekly scheduler).
 
@@ -356,27 +340,25 @@ diff <(grep -oE '^[A-Z0-9_]+' secrets.env.example | sort) <(grep -oE '^[A-Z0-9_]
 
 Add each `<` key empty. Treat each `>` key by the rules above: `ADMIN_DATABASE` in the Secret
 follows the `ADMIN_DATABASE` rule, a non-secret setting moves to `config.env`, the obsolete keys
-are deleted, and any other key is kept and reported. Then check the login proxy. The template's
-proxy arguments are fixed; print the running ones:
+are deleted, and any other key is kept and reported.
+
+Then check whether the running deployment still has the former login proxy:
 
 ```bash
-oc get deployment alerts-bi-admin -n "$NS" -o jsonpath='{range .spec.template.spec.containers[?(@.name=="oauth-proxy")].args[*]}{@}{"\n"}{end}'
+oc get deployment alerts-bi-admin -n "$NS" -o jsonpath='{range .spec.template.spec.containers[*]}{.name}{"\n"}{end}'
+oc get role/alerts-bi-admin-access rolebinding/alerts-bi-admin-access secret/alerts-bi-admin-tls -n "$NS" --ignore-not-found -o name
 ```
 
-Expect the same arguments as the `oauth-proxy` container in `admin.yaml`, with this project's
-name in `--openshift-sar`. If the running proxy has other or extra arguments (for example
-another `--openshift-sar`, `--openshift-delegate-urls` or `--email-domain`), stop and report
-them: the service owner decides whether the template's access rules replace them.
-
-Then check that `alerts-bi-admin-secrets` exists with both keys:
+If the first command lists `oauth-proxy` or the second lists anything, section 7.6 removes them
+first ("Remove the login proxy"). Then check that `alerts-bi-admin-secrets` exists:
 
 ```bash
 oc get secret alerts-bi-admin-secrets -n "$NS" -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}'
 ```
 
-Expect `ADMIN_SECRET` and `COOKIE_SECRET`. Keep the existing Secret; it holds the live proxy
-session secret. If it is missing, create it as in section 6.2. If only `ADMIN_SECRET` is missing,
-add it: `oc set data secret/alerts-bi-admin-secrets -n "$NS" ADMIN_SECRET="$(openssl rand -hex 32)"`.
+Expect `ADMIN_SECRET` (a leftover `COOKIE_SECRET` is removed in 7.6). Keep the existing Secret.
+If it is missing, create it as in section 6.2. If only `ADMIN_SECRET` is missing, add it:
+`oc set data secret/alerts-bi-admin-secrets -n "$NS" ADMIN_SECRET="$(openssl rand -hex 32)"`.
 
 ### 7.2 Announce the window and drain
 
@@ -410,7 +392,8 @@ Expect `succeeded=1`, a `revision:` line naming a migration listed below it, and
 
 Pending migrations can lock tables for a long time and cannot be undone except by restoring a
 backup. 015, 016 and 017 rebuild the primary keys and indexes of the largest tables; while they
-run, portal pages and every query on those tables wait. Before applying any pending migration,
+run, portal pages and every query on those tables wait. 018 erases stored operator names for
+good (section 5). Before applying any pending migration,
 the database owner must confirm all of the following to you in writing. You cannot do them yourself:
 
 1. They will take a database backup in this window, after section 7.5 has stopped every
@@ -478,7 +461,21 @@ and to confirm in writing that it restores. Continue only after that confirmatio
 
 ### 7.6 Deploy
 
-The weekly CronJob stays suspended (`WEEKLY_SUSPEND=true`) until section 9.
+**Remove the login proxy** (only when 7.1 found it). `oc apply` would leave the old proxy
+container, Service port and Route allowlist in place, so delete the login-era objects first.
+This stops the old pod, as Recreate would. First make sure `ADMIN_ROUTE_HOST` in `values.env`
+is the host 7.1 printed, because the Route is recreated:
+
+```bash
+oc delete deployment/alerts-bi-admin service/alerts-bi-admin route/alerts-bi-admin -n "$NS" --wait=true
+oc delete role/alerts-bi-admin-access rolebinding/alerts-bi-admin-access secret/alerts-bi-admin-tls -n "$NS" --ignore-not-found
+oc annotate serviceaccount/alerts-bi-admin -n "$NS" serviceaccounts.openshift.io/oauth-redirectreference.admin-
+```
+
+If 7.1 listed `COOKIE_SECRET`, remove it too:
+`oc set data secret/alerts-bi-admin-secrets -n "$NS" COOKIE_SECRET-`.
+
+Then deploy. The weekly CronJob stays suspended (`WEEKLY_SUSPEND=true`) until section 9.
 
 ```bash
 oc process --local -f admin.yaml --param-file "$VALUES_DIR/values.env" --ignore-unknown-parameters -o yaml > "$VALUES_DIR/admin.rendered.yaml"
@@ -511,20 +508,15 @@ oc logs -n "$NS" deploy/alerts-bi-admin -c migrate
 Expect one `applied <revision>` line per pending migration, or `database is up to date`.
 
 ```bash
-oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- python -c '
-import urllib.error, urllib.request
-request = urllib.request.Request("http://127.0.0.1:8200/healthz", headers={"X-Forwarded-User": "deploy-check"})
-try:
-    response = urllib.request.urlopen(request, timeout=60)
-except urllib.error.HTTPError as error:
-    response = error
-print(response.getcode(), response.read().decode())
-'
+ROUTE_HOST=$(oc get route alerts-bi-admin -n "$NS" -o jsonpath='{.spec.host}')
+curl -sk -w '\n%{http_code}\n' "https://$ROUTE_HOST/healthz"
 ```
 
-Expect `200` and JSON starting `{"ok":true`, whose `checks` show `elasticsearch` and
-`sql_server` each with `"ok":true`. A `503` has `"ok":false` and marks the failing check; a
-failing schema check appears as an extra `operator_schema` entry (Troubleshooting).
+Run the `curl` from a machine that can reach the router. Expect JSON starting `{"ok":true`,
+whose `checks` show `elasticsearch` and `sql_server` each with `"ok":true`, then `200`. A `503`
+has `"ok":false` and marks the failing check; a failing schema check appears as an extra
+`operator_schema` entry (Troubleshooting). There is no sign-in step: the console answers anyone
+with the URL.
 
 ```bash
 oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin db status
@@ -533,22 +525,15 @@ oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly --dry
 oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly-status
 ```
 
-Expect every migration `applied`, the registry valid with the expected teams, the due weeks
-listed without anything being run, and each enrolled team's latest published week.
+Expect every migration `applied` (the last one `018_erase_operator_names`), the registry valid
+with the expected teams, the due weeks listed without anything being run, and each enrolled
+team's latest published week.
 
-```bash
-ROUTE_HOST=$(oc get route alerts-bi-admin -n "$NS" -o jsonpath='{.spec.host}')
-curl -sk -o /dev/null -w '%{http_code}\n' "https://$ROUTE_HOST/healthz"
-```
-
-Run the `curl` from a machine inside `ADMIN_ROUTE_ALLOWLIST`. Expect `302` or `403` (the login
-proxy), never `200`: nobody reaches the console without signing in.
-
-Ask an operator in `OPERATOR_GROUP` to check in a browser: signing in works and someone outside
-the group is refused; the Teams page lists the registry's teams; a team week opens; a test run
+Ask an operator to check in a browser: the console opens without signing in and shows no
+"signed in" name; the Teams page lists the registry's teams; a team week opens; a test run
 completes, for a team and week the service owner approves for testing; publishing, a decision
-and a withdrawal work and show the operator's name; the three CSV downloads open. After the
-portal is deployed (its runbook), check that it shows the published week.
+and a withdrawal work and name nobody; the three CSV downloads open. After the portal is
+deployed (its runbook), check that it shows the published week.
 
 ## 9. Enable the weekly scheduler
 
@@ -607,9 +592,8 @@ oc create configmap alerts-bi-registry -n "$NS" --from-file=teams.json="$VALUES_
 oc rollout restart deployment/alerts-bi-admin -n "$NS"
 ```
 
-**Rotate the console secrets.** Recreate `alerts-bi-admin-secrets` (6.2, with `oc delete secret
-alerts-bi-admin-secrets -n "$NS"` first) and restart. Operators sign in again; forms left open fail
-once and must be reloaded.
+**Rotate the form secret.** Recreate `alerts-bi-admin-secrets` (6.2, with `oc delete secret
+alerts-bi-admin-secrets -n "$NS"` first) and restart. Forms left open fail once and must be reloaded.
 
 **Run a command.** With the console running, use `oc exec -n "$NS" deploy/alerts-bi-admin -c admin --
 alerts-bi-admin <command>`. Otherwise use `admin_job <job-name> <command>`. Never run `db reset-test`,
@@ -688,7 +672,6 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
 | `Init:Error` or `Init:CrashLoopBackOff` | `oc logs ... -c migrate`. `Login failed` or `Cannot open database`: credentials or permissions (section 2). Timeout: network to SQL Server |
 | migrate log `Can't locate revision identified by '...'` | The image is older than the database. Deploy an image that has that migration; never stamp |
 | `CreateContainerConfigError` | A ConfigMap, Secret or key is missing; `oc describe pod -n "$NS" -l app=alerts-bi-admin` names it |
-| `ContainerCreating` with a `secret "alerts-bi-admin-tls" not found` event | The service CA has not created it yet; it appears within a minute of the Service. `oc get secret alerts-bi-admin-tls -n "$NS"` |
 | `ImagePullBackOff` | Wrong digest or missing credentials: check `oc describe pod`, the digest, and 6.1 |
 | Event `FailedToRetrieveImagePullSecret` | Harmless when the registry needs no credentials (6.1) |
 | admin container exits: `ADMIN_SECRET must be at least 32 characters` | Recreate `alerts-bi-admin-secrets` (6.2) |
@@ -697,8 +680,7 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
 | `/healthz` 503, `elasticsearch` not ok | `ES_URL`, credentials, CA (`ES_CA_CERT`), or an index setting matches nothing |
 | `/healthz` 503, `sql_server` or `operator_schema` not ok | SQL unreachable, or the schema is behind: check the migrate log and `db status` |
 | Browser: `Application is not available` | No ready pod: `oc get pods -n "$NS" -l app=alerts-bi-admin` and the rows above |
-| Browser: refused after signing in | The user may not `get` the Service: not in `OPERATOR_GROUP` (the service owner checks the Group's members) and no `view`/`edit`/`admin` role in the project, or `NAMESPACE` differs from the project |
-| Browser: OAuth error about the redirect URI | The ServiceAccount annotation must name the Route `alerts-bi-admin`; re-apply `admin.yaml` |
+| Browser shows an OpenShift login page or a client refusal | The former login proxy or Route allowlist is still in place: run "Remove the login proxy" in 7.6 and re-apply |
 | Route shows `HostAlreadyClaimed` | `ADMIN_ROUTE_HOST` is used by another Route; use the existing host or another name |
 | Apply fails: `spec.selector: ... field is immutable` | The existing `alerts-bi-admin` Deployment uses other labels. Within the window, `oc delete deployment alerts-bi-admin -n "$NS" --wait=true` (it stops the old pod, as Recreate would) and repeat the apply |
 | Model calls fail with certificate errors | Add the model's CA to `alerts-bi-ca-bundle` and set `SSL_CERT_FILE` (6.4) |
@@ -711,8 +693,9 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
 - One `alerts-bi-admin` replica with the Recreate strategy. Never scale it above 1 or change the strategy.
 - One weekly scheduler per database: `alerts-bi-weekly`, enabled only by section 9.
 - One `ADMIN_IMAGE` digest for the init container, console, worker, CronJob and admin Jobs.
-- The console listens only on 127.0.0.1:8200 behind the proxy. Never expose 8200, never set
-  `ADMIN_HOST` to another address and never use `--dev-user`.
+- The console has no login: anyone with the Route URL who can reach the router may run, publish,
+  withdraw, decide and permanently delete runs. Share the URL only with the operating team, and
+  expose it through nothing but its Route.
 - `ADMIN_DATABASE` stays unset: the weekly job and the portal always use `SQL_DATABASE`.
 - Migrations only through the init container or the maintenance Job above; never with the console
   running, never with a deadline, never stamped, downgraded, edited or reset.

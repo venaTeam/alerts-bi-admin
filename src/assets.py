@@ -41,8 +41,6 @@ html,body{margin:0;min-height:100%;color-scheme:light}body{background:#f4f6f8}
 #abi-console .abi-nav{display:flex;align-items:center;gap:12px;min-height:44px;padding:0 12px;border-radius:10px;color:var(--abi-side-ink);text-decoration:none;font-weight:500}
 #abi-console .abi-nav:hover{background:var(--abi-side-hover);color:#fff}
 #abi-console .abi-nav[aria-current=page]{background:var(--abi-side-active);color:#fff}
-#abi-console .abi-user{margin-top:auto;display:flex;align-items:center;gap:10px;padding:0 8px;color:var(--abi-side-ink);font-size:14px;overflow-wrap:anywhere}
-#abi-console .abi-avatar{flex:none;width:32px;height:32px;border-radius:50%;background:var(--abi-side-active);color:#e5eaef;display:grid;place-items:center;font-size:12px;font-weight:600}
 #abi-console .abi-main{flex:999 1 560px;min-width:0;padding:32px 40px 56px}
 #abi-console .abi-page{max-width:960px;display:flex;flex-direction:column;gap:20px}
 #abi-console .abi-page.wide{max-width:1240px}
@@ -248,7 +246,6 @@ html,body{margin:0;min-height:100%;color-scheme:light}body{background:#f4f6f8}
  #abi-console .abi-side{flex-basis:100%;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px}
  #abi-console .abi-navs{flex-direction:row;flex-wrap:wrap;gap:4px}
  #abi-console .abi-nav{padding:0 10px}#abi-console .abi-nav svg{display:none}
- #abi-console .abi-user{margin:0 0 0 auto}#abi-console .abi-user-name{display:none}
  #abi-console .abi-main{padding:20px 16px 40px}
  #abi-console .abi-panel{padding:20px}#abi-console .abi-more-body{padding:0 16px 20px}
  #abi-console details.abi-more>summary{padding:16px}

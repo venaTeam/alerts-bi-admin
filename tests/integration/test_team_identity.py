@@ -69,7 +69,7 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
         with connect(CONFIG.sql, DB) as db:
             db.execute("DROP VIEW IF EXISTS dbo.blocks_017")
             db.commit()
-    assert migrations.migrate(CONFIG.sql, DB)[0] == [HEAD]
+    assert migrations.migrate(CONFIG.sql, DB)[0] == [HEAD, "018_erase_operator_names"]
     with connect(CONFIG.sql, DB) as db:
         check_schema(db)
         columns = db.query(
@@ -121,9 +121,7 @@ def test_slash_ids_reach_workspace_summary_trigger_and_backfill(tmp_path: Path) 
         encoding="utf-8",
     )
     settings = AdminSettings(AdminConfig(CONFIG.sql), DB, "s" * 40, registry_path=str(registry))
-    with TestClient(
-        build_admin(settings), headers={"X-Forwarded-User": "route-test"}, follow_redirects=False
-    ) as client:
+    with TestClient(build_admin(settings), follow_redirects=False) as client:
         assert client.get("/").status_code == 200
         for team in teams:
             path = "/teams/" + encode_team_id(team)

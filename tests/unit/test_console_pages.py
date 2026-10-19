@@ -110,25 +110,23 @@ def test_team_cards_show_active_submissions_and_teams_without_runs() -> None:
 def test_teams_page_puts_attention_first_and_filters_it() -> None:
     teams = [("calm", "Calm", True), ("broken", "Broken", True), ("new", "New", False)]
     overview = {"calm": {"run": run(publication_id=1)}, "broken": {"run": run(status="failed")}}
-    html = pages.dashboard_page("alice", teams, overview, None, False)
+    html = pages.dashboard_page(teams, overview, None, False)
     no_inline_styles(html)
     names = re.findall(r'class="abi-card-name"><span>([^<]+)<', html)
     assert names == ["Broken", "Calm", "New"]
     assert "All · 3" in html and "Needs you · 1" in html and ">Manual<" in html
     assert 'href="/teams/broken?tab=overview"' in html
-    attention = pages.dashboard_page("alice", teams, overview, None, False, "attention")
+    attention = pages.dashboard_page(teams, overview, None, False, "attention")
     assert re.findall(r'class="abi-card-name"><span>([^<]+)<', attention) == ["Broken"]
-    calm = pages.dashboard_page(
-        "alice", teams[:1], {"calm": overview["calm"]}, None, False, "attention"
-    )
+    calm = pages.dashboard_page(teams[:1], {"calm": overview["calm"]}, None, False, "attention")
     assert "Nothing needs you right now" in calm
 
 
 def test_layout_has_the_sidebar_and_no_top_bar() -> None:
-    html = pages.layout("Teams", "alice", "<p>x</p>", "Saved.", nav="schedule")
+    html = pages.layout("Teams", "<p>x</p>", "Saved.", nav="schedule")
     assert '<aside class="abi-side">' in html and "abi-top" not in html
     assert '<a class="abi-nav" href="/schedule" aria-current=page>' in html
-    assert "Signed in as alice" in html and 'class="abi-flash"' in html
+    assert "Signed in" not in html and 'class="abi-flash"' in html
     assert pages.STYLESHEET_PATH in html
 
 
@@ -163,11 +161,11 @@ def test_review_shows_held_and_withdrawn_notes_and_leads_to_publish() -> None:
         "<totals>",
         "<findings>",
         2,
-        withdrawal={"by": "bob", "at": END, "note": "Wrong week"},
+        withdrawal={"at": END, "note": "Wrong week"},
     )
     assert "The model couldn&#x27;t assess 14 alerts, so this week is held." in held
     assert "three days after it was first held" in held
-    assert "Withdrawn by bob" in held and "Wrong week" in held
+    assert "Withdrawn on" in held and "Wrong week" in held and "Withdrawn by" not in held
     assert f"/teams/checkout-api?tab=publish&amp;run_id={RUN}" in held
     assert "2 alerts with findings" in held
 
@@ -230,14 +228,11 @@ def test_findings_list_shows_this_runs_decision_only() -> None:
 
 
 def test_finding_page_records_decisions_only_after_publication() -> None:
-    unpublished = pages.finding_page(
-        "alice", "Checkout API", run(), ROW, "R1", [], "csrf", 1, None, False
-    )
+    unpublished = pages.finding_page("Checkout API", run(), ROW, "R1", [], "csrf", 1, None, False)
     no_inline_styles(unpublished)
     assert "Publish this run before recording a decision." in unpublished
     assert "/decide" not in unpublished and "&lt;b&gt;latency&lt;/b&gt;" in unpublished
     published = pages.finding_page(
-        "alice",
         "Checkout API",
         run(publication_id=1),
         ROW,
@@ -252,6 +247,7 @@ def test_finding_page_records_decisions_only_after_publication() -> None:
         f'action="/runs/{RUN}/decide"' in published and 'data-dialog="record-decision"' in published
     )
     assert 'name="state" value="confirmed" checked' in published
+    assert "alice" not in published, "who decided is not shown"
     assert (
         "confirmed note" in published
         and "Decision history" in published
@@ -273,7 +269,7 @@ def test_decisions_page_keeps_filters_in_pagination() -> None:
         }
     ]
     teams = [("checkout-api", "Checkout API", True)]
-    html = pages.decisions_page("alice", rows, 120, 2, teams, team="checkout-api", state="pending")
+    html = pages.decisions_page(rows, 120, 2, teams, team="checkout-api", state="pending")
     no_inline_styles(html)
     assert (
         '<option value="checkout-api" selected>' in html
@@ -282,7 +278,7 @@ def test_decisions_page_keeps_filters_in_pagination() -> None:
     assert "/decisions?team=checkout-api&amp;state=pending&amp;page=1" in html
     assert "/decisions?team=checkout-api&amp;state=pending&amp;page=3" in html
     assert f"/runs/{RUN}/findings?finding=" in html
-    empty = pages.decisions_page("alice", [], 0, 1, teams, state="confirmed")
+    empty = pages.decisions_page([], 0, 1, teams, state="confirmed")
     assert "No decisions match these filters." in empty
 
 
@@ -291,7 +287,7 @@ def test_schedule_names_the_next_week_and_each_teams_next_step() -> None:
         "a": {"last": {"outcome": "held", "window_end": END, "invoked_at": END, "run_id": RUN}}
     }
     html = pages.schedule_page(
-        "alice", [("a", "A", True), ("b", "B", False)], overview, datetime(2026, 10, 14, tzinfo=UTC)
+        [("a", "A", True), ("b", "B", False)], overview, datetime(2026, 10, 14, tzinfo=UTC)
     )
     no_inline_styles(html)
     assert "12 Oct \u2013 19 Oct 2026" in html and "after it ends on 19 Oct" in html
@@ -300,7 +296,6 @@ def test_schedule_names_the_next_week_and_each_teams_next_step() -> None:
 
 
 SECRET = "s" * 40
-USER = {"X-Forwarded-User": "alice"}
 
 
 @pytest.fixture
@@ -309,7 +304,7 @@ def client() -> TestClient:
 
 
 def form(**fields: Any) -> dict[str, Any]:
-    return {"csrf": csrf_token(SECRET, "alice", datetime.now(UTC).date()), **fields}
+    return {"csrf": csrf_token(SECRET, datetime.now(UTC).date()), **fields}
 
 
 def test_new_runs_with_one_week_submits_a_manual_job(
@@ -317,20 +312,19 @@ def test_new_runs_with_one_week_submits_a_manual_job(
 ) -> None:
     calls: list[Any] = []
 
-    def submit_job(settings: Any, body: Any, operator: str, key: str) -> dict[str, Any]:
-        calls.append((body.team, body.run_at, body.llm, operator, key))
+    def submit_job(settings: Any, body: Any, key: str) -> dict[str, Any]:
+        calls.append((body.team, body.run_at, body.llm, key))
         return {"job_id": "a" * 32, "status": "pending"}
 
     monkeypatch.setattr(console, "submit_job", submit_job)
     response = client.post(
         "/teams/checkout-api/trigger",
-        headers=USER,
         data=form(week="2026-10-12", llm="fake", weeks_form="1", submission_key="k1"),
         follow_redirects=False,
     )
     assert response.status_code == 303 and f"job_id={'a' * 32}" in response.headers["location"]
-    team, run_at, llm, operator, key = calls[0]
-    assert (team, llm, operator, key) == ("checkout-api", "fake", "alice", "k1")
+    team, run_at, llm, key = calls[0]
+    assert (team, llm, key) == ("checkout-api", "fake", "k1")
     assert run_at.replace(tzinfo=None) == datetime(2026, 10, 12)
 
 
@@ -346,15 +340,14 @@ def test_new_runs_with_several_weeks_submits_a_backfill(
     monkeypatch.setattr(console, "submit_backfill", submit_backfill)
     response = client.post(
         "/teams/checkout-api/trigger",
-        headers=USER,
         data=form(
             week=["2026-10-12", "2026-10-05"], llm="off", weeks_form="1", submission_key="k2"
         ),
         follow_redirects=False,
     )
     assert response.status_code == 303 and "2+runs+accepted" in response.headers["location"]
-    team, weeks, llm, operator, key = calls[0]
-    assert (team, llm, operator, key) == ("checkout-api", "off", "alice", "k2")
+    team, weeks, llm, key = calls[0]
+    assert (team, llm, key) == ("checkout-api", "off", "k2")
     assert [week.replace(tzinfo=None) for week in weeks] == [
         datetime(2026, 10, 5),
         datetime(2026, 10, 12),
@@ -364,7 +357,6 @@ def test_new_runs_with_several_weeks_submits_a_backfill(
 def test_new_runs_without_a_week_is_refused(client: TestClient) -> None:
     response = client.post(
         "/teams/checkout-api/trigger",
-        headers=USER,
         data=form(llm="live", weeks_form="1"),
         follow_redirects=False,
     )
@@ -375,9 +367,9 @@ def test_new_runs_without_a_week_is_refused(client: TestClient) -> None:
 
 
 def test_console_query_parameters_are_validated(client: TestClient) -> None:
-    assert client.get("/?show=everything", headers=USER).status_code == 422
-    assert client.get("/decisions?state=maybe", headers=USER).status_code == 422
-    assert client.get("/teams/checkout-api?tab=nonsense", headers=USER).status_code == 422
+    assert client.get("/?show=everything").status_code == 422
+    assert client.get("/decisions?state=maybe").status_code == 422
+    assert client.get("/teams/checkout-api?tab=nonsense").status_code == 422
 
 
 def test_run_again_buttons_appear_only_where_new_runs_exists() -> None:

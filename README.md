@@ -31,10 +31,11 @@ is introduced by the repository move. The run-deletion feature requires schema h
 `009_run_deletion`; apply it through `db setup` before using Delete run. It preserves
 append-only decision protection while a run exists. Never edit applied migration files.
 
-The listener binds only to loopback, default port 8200, behind the trusted login proxy's
-`X-Forwarded-User`. Local-only `serve --dev-user your-name` supplies an explicit development
-identity. Every HTTP route requires identity. Writes require actor-bound CSRF tokens and
-same-site requests; JSON `POST /runs` gets its token from authenticated `GET /csrf`.
+The console has no login (design "Admin console without login", 2026-10-19): anyone who can
+reach its address may use it, including Delete run, so where it listens is the only access
+boundary. It binds to loopback (port 8200) unless `ADMIN_HOST` says otherwise; the OpenShift
+deployment sets `0.0.0.0`. No action records who did it. Writes still require a CSRF token
+signed with `ADMIN_SECRET` and same-site requests; JSON `POST /runs` gets its token from `GET /csrf`.
 `GET /healthz` checks SQL, Elasticsearch and operator schema, returning a redacted 503 when
 unavailable. Keep one UI worker/replica; manual analysis is synchronous and uses a process gate.
 
@@ -49,9 +50,9 @@ poetry run alerts-bi-admin db status
 poetry run alerts-bi-admin registry check --registry config/teams.json
 poetry run alerts-bi-admin report --run-id <id>
 poetry run alerts-bi-admin publications --team <team>
-poetry run alerts-bi-admin publish --run-id <id> --by <operator>
-poetry run alerts-bi-admin unpublish --run-id <id> --reason <reason> --by <operator>
-poetry run alerts-bi-admin decide --run-id <id> --schema v1 --application <app> --key-field <key> --finding R1 --state confirmed --note <note> --by <operator>
+poetry run alerts-bi-admin publish --run-id <id>
+poetry run alerts-bi-admin unpublish --run-id <id> --reason <reason>
+poetry run alerts-bi-admin decide --run-id <id> --schema v1 --application <app> --key-field <key> --finding R1 --state confirmed --note <note>
 poetry run alerts-bi-admin decisions --team <team>
 ```
 
@@ -61,8 +62,7 @@ reject other weekdays or times. Omitted `run_at` / `--run-at` uses the latest co
 Monday week. Historical runs and the fixed-clock acceptance oracle remain readable.
 Weekly jobs retain
 the Monday UTC windows, SQL schedule lock, health gate, catch-up and publication policy.
-Run exactly one weekly scheduler. Operator `--by` defaults to the OS user; web writes use the
-proxy identity. Operator commands support `--database`, while the listener additionally
+Run exactly one weekly scheduler. Operator commands support `--database`, while the listener additionally
 supports `ADMIN_DATABASE`. Registry is admin-owned `config/teams.json`; mount production values
 using `ADMIN_REGISTRY_PATH` or an explicit `--registry`. The listener, registry check,
 manual runs, weekly jobs and weekly status all honor that environment variable.
@@ -257,7 +257,8 @@ everything else with `oc process`. One image digest serves the migrate init cont
 console, the run worker and the weekly CronJob, so a rollout migrates automatically before the
 console starts. The configured SQL login must allow schema migrations. `admin-job.yaml` runs
 single commands such as `db status`, and the maintenance migration only with the console and
-scheduler stopped.
+scheduler stopped. The console is deployed without a login proxy or client allowlist: anyone
+with its Route URL may use it.
 
 ## Team registry compatibility (2026-10-18)
 
@@ -279,3 +280,14 @@ pre-migration database backup together with its matching image, manifests and re
 A database restore loses subsequent writes. Migration 017 refuses downgrade; do not manually
 revert its binary columns or use an older portal with newly encoded team links. Follow the
 migration gate (backup, sizing and maintenance window) in `deploy/openshift/README.md`.
+
+## No login and no operator names (2026-10-19)
+
+The console has no login and records no names (design "Admin console without login").
+Publications, withdrawals, decisions, runs and backfills store no person; only the weekly
+scheduler still marks its own publications `weekly-schedule`. The CLI no longer takes `--by`
+and `serve` no longer takes `--dev-user`. Operations 0.2.7 carries this change.
+
+Migration `018_erase_operator_names` blanks every name already stored. It is roll-forward only:
+an image without 018 cannot start its init container against an 018 database, and only a
+pre-018 backup holds the erased names. Follow the migration gate in `deploy/openshift/README.md`.

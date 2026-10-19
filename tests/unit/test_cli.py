@@ -1,11 +1,10 @@
-"""Preserve required scope, actor defaults and withdrawal evidence at the new CLI."""
+"""Preserve required scope and withdrawal evidence at the CLI; it records no operator names."""
 
-import argparse
 import json
 from pathlib import Path
 
 import pytest
-from src.cli import _operator, build_parser, main
+from src.cli import build_parser, main
 
 
 @pytest.mark.parametrize(
@@ -18,15 +17,23 @@ def test_operator_commands_require_their_scope_and_evidence(arguments: list[str]
     assert exc.value.code == 2
 
 
-def test_explicit_actor_is_preserved() -> None:
-    assert _operator(argparse.Namespace(by="alice")) == "alice"
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ["publish", "--run-id", "run", "--by", "alice"],
+        ["unpublish", "--run-id", "run", "--reason", "wrong week", "--by", "alice"],
+        ["serve", "--dev-user", "alice"],
+    ],
+)
+def test_operator_names_and_dev_identities_are_no_longer_accepted(arguments: list[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(arguments)
+    assert exc.value.code == 2
 
 
 def test_publication_options_are_preserved() -> None:
-    args = build_parser().parse_args(
-        ["publish", "--run-id", "run", "--by", "alice", "--replace", "--allow-gap"]
-    )
-    assert args.run_id == "run" and args.by == "alice"
+    args = build_parser().parse_args(["publish", "--run-id", "run", "--replace", "--allow-gap"])
+    assert args.run_id == "run"
     assert args.replace and args.allow_gap
 
 

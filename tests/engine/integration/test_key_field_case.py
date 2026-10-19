@@ -213,7 +213,6 @@ def test_readers_and_decisions_tell_case_variants_apart(db: Database) -> None:
             finding_id=findings_on(finding)[-1],
             state="confirmed",
             note=f"decided on {key}",
-            decided_by="key-case-test",
         )
 
     for key in KEYS:

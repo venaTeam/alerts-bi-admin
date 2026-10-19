@@ -37,9 +37,7 @@ def test_monday_dates_and_equivalent_instants_are_accepted(value: str) -> None:
 
 
 def test_form_and_json_reject_tampered_window_before_running() -> None:
-    client = TestClient(
-        build_admin(AdminSettings(load_config(), "unused", "s" * 40, dev_user="alice"))
-    )
+    client = TestClient(build_admin(AdminSettings(load_config(), "unused", "s" * 40)))
     token = client.get("/csrf").json()["token"]
     response = client.post(
         "/teams/checkout-api/trigger",

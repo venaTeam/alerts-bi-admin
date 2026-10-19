@@ -46,9 +46,7 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> AdminSettings:
 
 @pytest.fixture
 def client(settings: AdminSettings) -> Iterator[TestClient]:
-    with TestClient(
-        build_admin(settings), headers={"X-Forwarded-User": "job-tester"}, follow_redirects=False
-    ) as value:
+    with TestClient(build_admin(settings), follow_redirects=False) as value:
         yield value
 
 
@@ -300,7 +298,7 @@ def test_changed_registry_is_refused_before_execution(
     registry = tmp_path / "teams.json"
     registry.write_bytes(Path("config/teams.json").read_bytes())
     api = ApiSettings(CONFIG, database=DB, registry_path=str(registry))
-    row = jobs.submit_job(api, RunRequest.model_validate(BODY), "job-tester", uuid4().hex)
+    row = jobs.submit_job(api, RunRequest.model_validate(BODY), uuid4().hex)
     registry.write_bytes(registry.read_bytes() + b"\n")
 
     def unexpected(*args: Any, **kwargs: Any) -> Any:
@@ -427,7 +425,7 @@ def test_idle_worker_never_takes_execution_locks(
 
 def test_job_status_follows_operator_wide_access_model(client: TestClient) -> None:
     row = submit(client, "operator-access").json()
-    second = client.get(row["status_url"], headers={"X-Forwarded-User": "another-operator"})
+    second = client.get(row["status_url"])
     assert second.status_code == 200 and second.json()["team_id"] == "checkout-api"
     assert "requested_by" not in second.json() and "idempotency_key" not in second.json()
     assert client.get("/teams/payments-api?job_id=" + row["job_id"]).status_code == 404

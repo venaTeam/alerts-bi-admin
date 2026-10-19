@@ -187,7 +187,7 @@ def decision_history(
     rows = db.query(
         """
         SELECT alert_schema, application, key_field, finding_id, state, note, decided_at,
-               decided_by, run_id
+               run_id
         FROM finding_decisions d WHERE team_id = :team_id AND EXISTS (
           SELECT 1 FROM OPENJSON(:identities) WITH
           (s NVARCHAR(2) '$[0]', a NVARCHAR(256) '$[1]', k NVARCHAR(512) '$[2]') i
@@ -209,7 +209,7 @@ def run_decisions(db: Database, run_id: str, page: int = 1) -> tuple[list[dict[s
     )
     rows = db.query(
         """
-        SELECT alert_schema, application, key_field, finding_id, state, note, decided_at, decided_by
+        SELECT alert_schema, application, key_field, finding_id, state, note, decided_at
         FROM finding_decisions WHERE run_id = :run_id
         ORDER BY decided_at DESC, decision_id DESC
         OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY

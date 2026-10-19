@@ -1,9 +1,9 @@
 """The operator admin app's factory (design section 7.12).
 
-Every request needs a signed-in operator, taken from the login proxy's identity header. Every
-write is a POST that must carry the anti-forgery token and come from this site; it calls the
-same :mod:`alerts_bi_operations.review` functions the command line calls, under the operator's identity, and
-then redirects back with a message.
+The console has no login (design "Admin console without login", 2026-10-19): it needs no
+identity and records no operator names. Every write is a POST that must carry the anti-forgery
+token and come from this site; it calls the same :mod:`alerts_bi_operations.review` functions
+the command line calls, and then redirects back with a message.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from pydantic import ValidationError
 from starlette.concurrency import run_in_threadpool
 
 from . import pages, queries, summary
-from .auth import csrf_token, identity, same_site, valid_csrf
+from .auth import csrf_token, same_site, valid_csrf
 from .config import AdminSettings
 from .engine.api.backfill import (
     backfill_jobs,
@@ -127,29 +127,19 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         with pool.connect() as db:
             yield db
 
-    def user_of(request: Request) -> str:
-        user: str = request.state.user
-        return user
-
-    def token_for(request: Request) -> str:
-        return csrf_token(settings.secret, user_of(request), datetime.now(UTC).date())
+    def form_token() -> str:
+        return csrf_token(settings.secret, datetime.now(UTC).date())
 
     @app.middleware("http")
     async def guard(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
-        user = identity(request, settings)
-        if user is None:
+        if request.method not in ("GET", "HEAD", "POST"):
             response: Response = PlainTextResponse(
-                "Sign in through the operator Route.", status_code=status.HTTP_401_UNAUTHORIZED
-            )
-        elif request.method not in ("GET", "HEAD", "POST"):
-            response = PlainTextResponse(
                 "Method not allowed.", status_code=status.HTTP_405_METHOD_NOT_ALLOWED
             )
         else:
-            request.state.user = user
-            # The compatibility JSON trigger uses the same identity, CSRF and RunGate.
+            # The compatibility JSON trigger uses the same CSRF token and RunGate.
             if (
                 request.method == "POST"
                 and request.url.path.rstrip("/") in ("/runs", "/run-jobs")
@@ -157,7 +147,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     not same_site(request)
                     or not valid_csrf(
                         settings.secret,
-                        user,
                         request.headers.get("X-CSRF-Token", ""),
                         datetime.now(UTC).date(),
                     )
@@ -174,10 +163,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     async def _http_error(request: Request, exc: HTTPException) -> Response:
         if not wants_html(request):
             return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
-        user = getattr(request.state, "user", "") or ""
-        return HTMLResponse(
-            pages.error_page(exc.status_code, str(exc.detail), user), exc.status_code
-        )
+        return HTMLResponse(pages.error_page(exc.status_code, str(exc.detail)), exc.status_code)
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError) -> Response:
@@ -187,17 +173,16 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             pages.error_page(
                 422,
                 "Invalid selection or request. Return to the team and choose a valid value.",
-                user_of(request),
             ),
             422,
         )
 
     async def form(request: Request) -> dict[str, str]:
-        """Parse and authenticate a POSTed form: same site, and a valid token for this user."""
+        """Parse and check a POSTed form: same site, and a valid token."""
         return {key: values[-1] for key, values in (await form_values(request)).items()}
 
     async def form_values(request: Request) -> dict[str, list[str]]:
-        """Every value of each authenticated form field, for repeated checkboxes."""
+        """Every value of each checked form field, for repeated checkboxes."""
         if not same_site(request):
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, "Cross-site form submissions are refused."
@@ -208,7 +193,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         fields = parse_qs(body.decode("utf-8", "replace"), keep_blank_values=True)
         if not valid_csrf(
             settings.secret,
-            user_of(request),
             (fields.get("csrf") or [""])[-1],
             datetime.now(UTC).date(),
         ):
@@ -276,7 +260,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.get("/csrf")
     def csrf(request: Request) -> dict[str, str]:
-        return {"token": token_for(request)}
+        return {"token": form_token()}
 
     @app.get("/teams", response_model=TeamsOut)
     def teams_json() -> TeamsOut:
@@ -307,19 +291,13 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         teams = registry_teams()
         with database() as db:
             overview = queries.team_overview(db)
-        return HTMLResponse(
-            pages.dashboard_page(
-                user_of(request), teams, overview, error or done, bool(error), show
-            )
-        )
+        return HTMLResponse(pages.dashboard_page(teams, overview, error or done, bool(error), show))
 
     @app.get("/schedule", response_class=HTMLResponse)
     def schedule(request: Request) -> HTMLResponse:
         with database() as db:
             overview = queries.team_overview(db)
-        return HTMLResponse(
-            pages.schedule_page(user_of(request), registry_teams(), overview, datetime.now(UTC))
-        )
+        return HTMLResponse(pages.schedule_page(registry_teams(), overview, datetime.now(UTC)))
 
     @app.get("/decisions", response_class=HTMLResponse)
     def decisions(
@@ -328,9 +306,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         with database() as db:
             rows, total = queries.all_decisions(db, page, team, state)
         return HTMLResponse(
-            pages.decisions_page(
-                user_of(request), rows, total, page, registry_teams(), team=team, state=state
-            )
+            pages.decisions_page(rows, total, page, registry_teams(), team=team, state=state)
         )
 
     @app.get("/teams/{team_id}", response_class=HTMLResponse)
@@ -356,7 +332,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         names = {key: label for key, label, _ in registered}
         enrolled = {key: on for key, _, on in registered}.get(team_id, False)
         now = datetime.now(UTC)
-        user, token = user_of(request), token_for(request)
+        token = form_token()
         flash, failed = error or done, bool(error)
         with database() as db:
             jobs = team_jobs(db, team_id)
@@ -466,7 +442,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                             row, item = match
                             return HTMLResponse(
                                 pages.finding_page(
-                                    user,
                                     name,
                                     selected,
                                     row,
@@ -502,7 +477,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     else:
                         withdrawal = (
                             {
-                                "by": loaded.publication.by,
                                 "at": loaded.publication.at,
                                 "note": loaded.publication.note,
                             }
@@ -539,7 +513,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         registered_team = team_id in names
         return HTMLResponse(
             pages.team_page(
-                user,
                 team_id,
                 name,
                 enrolled,
@@ -655,7 +628,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             )
         try:
             job = await run_in_threadpool(
-                submit_job, api_settings, body, user_of(request), fields.get("submission_key", "")
+                submit_job, api_settings, body, fields.get("submission_key", "")
             )
         except HTTPException as exc:
             return back(pages.team_url(team_id), str(exc.detail), True)
@@ -663,7 +636,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             log.error(
                 "console.trigger_failed",
                 team_id=team_id,
-                operator=user_of(request),
                 error=redact_error(exc),
             )
             return back(
@@ -671,7 +643,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 "The run could not finish. Check the service logs and team history before retrying.",
                 True,
             )
-        log.info("console.submitted", job_id=job["job_id"], operator=user_of(request))
+        log.info("console.submitted", job_id=job["job_id"])
         return back(
             pages.team_url(team_id, job_id=job["job_id"]),
             "Run accepted. It starts before the next queued week. You can leave this page."
@@ -709,8 +681,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         summary="Accept a durable manual run submission",
         responses={
             400: {"description": "Invalid ASCII submission key or unknown team"},
-            401: {"description": "Operator identity required"},
-            403: {"description": "Same-site actor-bound CSRF required"},
+            403: {"description": "Same-site CSRF token required"},
             409: {"description": "Another operation is active or the key has different options"},
         },
         openapi_extra={
@@ -720,22 +691,20 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     "in": "header",
                     "required": True,
                     "schema": {"type": "string", "minLength": 1, "maxLength": 64},
-                    "description": "Exact ASCII key scoped to the authenticated operator",
+                    "description": "Exact ASCII submission key",
                 },
                 {
                     "name": "X-CSRF-Token",
                     "in": "header",
                     "required": True,
                     "schema": {"type": "string"},
-                    "description": "Actor-bound token from authenticated GET /csrf",
+                    "description": "Token from GET /csrf",
                 },
             ]
         },
     )
     def create_job(request: Request, body: RunRequest) -> JSONResponse:
-        row = submit_job(
-            api_settings, body, user_of(request), request.headers.get("Idempotency-Key", "")
-        )
+        row = submit_job(api_settings, body, request.headers.get("Idempotency-Key", ""))
         return JSONResponse(
             jsonable_encoder(job_status(row)),
             status_code=202,
@@ -745,9 +714,8 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     @app.get(
         "/run-jobs/{job_id}",
         response_model=RunJobOut,
-        summary="Read durable job state for an authenticated operator",
+        summary="Read durable job state",
         responses={
-            401: {"description": "Operator identity required"},
             404: {"description": "Unknown submission"},
         },
     )
@@ -805,7 +773,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 team_id,
                 weeks,
                 llm,  # type: ignore[arg-type]
-                user_of(request),
                 (values.get("submission_key") or [""])[-1],
             )
         except HTTPException as exc:
@@ -814,13 +781,10 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             log.error(
                 "console.backfill_failed",
                 team_id=team_id,
-                operator=user_of(request),
                 error=redact_error(exc),
             )
             return back(path, "The runs could not be saved. Check the service logs.", True)
-        log.info(
-            "console.backfill_submitted", backfill_id=row["backfill_id"], operator=user_of(request)
-        )
+        log.info("console.backfill_submitted", backfill_id=row["backfill_id"])
         count = int(row["week_count"])
         return back(
             path,
@@ -840,9 +804,8 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     @app.get(
         "/backfills/{backfill_id}",
         response_model=BackfillOut,
-        summary="Read backfill progress for an authenticated operator",
+        summary="Read backfill progress",
         responses={
-            401: {"description": "Operator identity required"},
             404: {"description": "Unknown backfill"},
         },
     )
@@ -852,24 +815,23 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             return JSONResponse(jsonable_encoder(backfill_out(row, backfill_jobs(db, backfill_id))))
 
     async def backfill_action(
-        request: Request, backfill_id: str, act: Callable[[str], tuple[dict[str, Any], str, bool]]
+        request: Request, backfill_id: str, act: Callable[[], tuple[dict[str, Any], str, bool]]
     ) -> Response:
         await form(request)
-        user = user_of(request)
         with database() as db:
             team_id = str(get_backfill(db, backfill_id)["team_id"])
         path = pages.team_url(team_id)
         try:
-            _, message, failed = await run_in_threadpool(act, user)
+            _, message, failed = await run_in_threadpool(act)
         except HTTPException as exc:
             return back(path, str(exc.detail), True)
         return back(path, message, failed, "")
 
     @app.post("/backfills/{backfill_id}/cancel")
     async def cancel_backfill_route(request: Request, backfill_id: str) -> Response:
-        def act(user: str) -> tuple[dict[str, Any], str, bool]:
+        def act() -> tuple[dict[str, Any], str, bool]:
             with database() as db:
-                row, count = cancel_backfill(db, backfill_id, user)
+                row, count = cancel_backfill(db, backfill_id)
                 running = any(
                     job["status"] in ("pending", "running")
                     for job in backfill_jobs(db, backfill_id)
@@ -884,8 +846,8 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.post("/backfills/{backfill_id}/retry")
     async def retry_backfill_route(request: Request, backfill_id: str) -> Response:
-        def act(user: str) -> tuple[dict[str, Any], str, bool]:
-            row, count = retry_backfill(api_settings, backfill_id, user)
+        def act() -> tuple[dict[str, Any], str, bool]:
+            row, count = retry_backfill(api_settings, backfill_id)
             noun = "week" if count == 1 else "weeks"
             return row, f"Retry queued for {count} failed {noun}.", False
 
@@ -893,7 +855,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.post("/backfills/{backfill_id}/dismiss")
     async def dismiss_backfill_route(request: Request, backfill_id: str) -> Response:
-        def act(user: str) -> tuple[dict[str, Any], str, bool]:
+        def act() -> tuple[dict[str, Any], str, bool]:
             with database() as db:
                 return dismiss_backfill(db, backfill_id), "Dismissed.", False
 
@@ -904,9 +866,9 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         with database() as db:
             backfill_id = job_backfill(db, job_id)
 
-        def act(user: str) -> tuple[dict[str, Any], str, bool]:
+        def act() -> tuple[dict[str, Any], str, bool]:
             with database() as db:
-                row, count = cancel_backfill(db, backfill_id, user, job_id)
+                row, count = cancel_backfill(db, backfill_id, job_id)
             if not count:
                 return row, "Only queued weeks can be removed.", True
             return row, "Week removed.", False
@@ -918,8 +880,8 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         with database() as db:
             backfill_id = job_backfill(db, job_id)
 
-        def act(user: str) -> tuple[dict[str, Any], str, bool]:
-            row, _ = retry_backfill(api_settings, backfill_id, user, job_id)
+        def act() -> tuple[dict[str, Any], str, bool]:
+            row, _ = retry_backfill(api_settings, backfill_id, job_id)
             return row, "Retry queued for this week.", False
 
         return await backfill_action(request, backfill_id, act)
@@ -927,7 +889,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     @app.post("/runs/{run_id}/publish")
     async def publish(request: Request, run_id: str) -> Response:
         fields = await form(request)
-        user = user_of(request)
 
         def act() -> RedirectResponse:
             with database() as db:
@@ -936,7 +897,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     result = publish_run(
                         db,
                         run_id,
-                        published_by=user,
                         note=fields.get("note") or None,
                         replace=fields.get("replace") == "1",
                         allow_gap=False,
@@ -948,7 +908,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     return back(
                         team_path(str(run["team_id"]), run_id), f"Not published: {detail}", True
                     )
-            log.info("admin.published", run_id=run_id, operator=user)
+            log.info("admin.published", run_id=run_id)
             message = "Published."
             if result.replaced_run_id:
                 message += (
@@ -961,18 +921,17 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     @app.post("/runs/{run_id}/withdraw")
     async def withdraw(request: Request, run_id: str) -> Response:
         fields = await form(request)
-        user = user_of(request)
 
         def act() -> RedirectResponse:
             with database() as db:
                 run = run_row(db, run_id)
                 try:
-                    unpublish_run(db, run_id, withdrawn_by=user, reason=fields.get("reason", ""))
+                    unpublish_run(db, run_id, reason=fields.get("reason", ""))
                 except PublicationRefused as exc:
                     return back(
                         team_path(str(run["team_id"]), run_id), f"Not withdrawn: {exc}", True
                     )
-            log.info("admin.withdrawn", run_id=run_id, operator=user)
+            log.info("admin.withdrawn", run_id=run_id)
             return back(
                 team_path(str(run["team_id"]), run_id),
                 "Withdrawn. Readers no longer see this week.",
@@ -983,7 +942,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     @app.post("/runs/{run_id}/delete")
     async def delete(request: Request, run_id: str) -> Response:
         fields = await form(request)
-        user = user_of(request)
         if fields.get("confirm_delete") != "1":
             raise HTTPException(400, "Confirm permanent deletion of this run.")
 
@@ -1000,7 +958,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                             team_id = delete_run(db, run_id)
                         except DeletionRefused as exc:
                             return back(team_path(str(run["team_id"]), run_id), str(exc), True)
-                    log.info("admin.deleted", run_id=run_id, team_id=team_id, operator=user)
+                    log.info("admin.deleted", run_id=run_id, team_id=team_id)
                     return back(pages.team_url(team_id), "Run permanently deleted.")
             except WeeklyBusy:
                 raise HTTPException(
@@ -1015,7 +973,6 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     @app.post("/runs/{run_id}/decide")
     async def decide(request: Request, run_id: str) -> Response:
         fields = await form(request)
-        user = user_of(request)
 
         def act() -> RedirectResponse:
             with database() as db:
@@ -1044,14 +1001,13 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                         finding_id=fields.get("finding", ""),
                         state=fields.get("state", ""),
                         note=fields.get("note", ""),
-                        decided_by=user,
                     )
                 except DecisionRefused as exc:
                     return back(path, f"Not recorded: {exc}", True)
                 except Exception as exc:  # pragma: no cover - database failure
                     log.error("admin.decision_failed", error=redact_error(exc))
                     return back(path, "Not recorded: the database refused it.", True)
-            log.info("admin.decided", run_id=run_id, operator=user)
+            log.info("admin.decided", run_id=run_id)
             return back(path, "Decision recorded.")
 
         return await run_in_threadpool(act)

@@ -186,7 +186,6 @@ def test_case_only_variants_persist_publish_and_take_decisions_separately(
             finding_id=finding_id,
             state="confirmed",
             note=f"Reviewed {application}",
-            decided_by="case-test",
         )
 
     # Readers see both spellings through every view that exposes application.

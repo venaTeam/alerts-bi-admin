@@ -202,7 +202,6 @@ NAVIGATION = (
 
 def layout(
     title: str,
-    user: str,
     body: str,
     flash: str | None = None,
     error: bool = False,
@@ -219,15 +218,12 @@ def layout(
         if flash
         else ""
     )
-    initials = h((user[:2] or "?").upper())
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<title>{h(title)} · Alerts BI</title><link rel="stylesheet" href="{STYLESHEET_PATH}"><script src="{SCRIPT_PATH}" defer></script>'
         '</head><body><div id="abi-console">'
         '<aside class="abi-side"><a class="abi-brand" href="/"><span class="abi-mark" aria-hidden="true"></span>Alerts BI</a>'
-        f'<nav class="abi-navs" aria-label="Main">{navigation}</nav>'
-        f'<div class="abi-user"><span class="abi-avatar" aria-hidden="true">{initials}</span>'
-        f'<span class="abi-user-name">Signed in as {h(user)}</span></div></aside>'
+        f'<nav class="abi-navs" aria-label="Main">{navigation}</nav></aside>'
         f'<main class="abi-main" id="abi-main"><div class="abi-page{" wide" if wide else ""}">{banner}{body}</div></main>'
         "</div></body></html>"
     )
@@ -243,10 +239,9 @@ ERROR_TITLES = {
 }
 
 
-def error_page(status: int, message: str, user: str = "") -> str:
+def error_page(status: int, message: str) -> str:
     return layout(
         str(status),
-        user,
         f'<section class="abi-panel abi-empty"><p class="abi-error-code">{status}</p>'
         f"<h1>{h(ERROR_TITLES.get(status, 'Something went wrong'))}</h1><p>{h(message)}</p>"
         '<a class="abi-btn" href="/">Back to teams</a></section>',
@@ -467,7 +462,6 @@ def _card(card: TeamCard) -> str:
 
 
 def dashboard_page(
-    user: str,
     teams: Sequence[tuple[str, str, bool]],
     overview: Mapping[str, Mapping[str, Any]],
     flash: str | None,
@@ -504,7 +498,7 @@ def dashboard_page(
         f'<div class="abi-head"><div><h1>Teams</h1><p class="abi-sub">{_plural(len(teams), "team")} · '
         f"{weekly:,} on the weekly schedule</p></div>{filters if teams else ''}</div>{content}"
     )
-    return layout("Teams", user, body, flash, error, wide=True)
+    return layout("Teams", body, flash, error, wide=True)
 
 
 # ------------------------------------------------------------------ New runs
@@ -756,8 +750,7 @@ def backfill_panel(
     else:
         message = "No week completed."
     if backfill.get("cancelled_at"):
-        who = backfill.get("cancelled_by") or "an operator"
-        message += f" Queued weeks cancelled by {who} · {_when(backfill['cancelled_at'])}."
+        message += f" Queued weeks cancelled · {_when(backfill['cancelled_at'])}."
     first_queued = next(
         (index for index, week in enumerate(weeks) if week["status"] == "queued"), None
     )
@@ -781,7 +774,7 @@ def backfill_panel(
         f"{count['completed']} of {total}</progress></div>"
         f'<ul class="abi-list">{rows}</ul>'
         f'<div class="abi-panel-foot"><div><p role="status" aria-live="polite" class="abi-small abi-muted">{h(message)}</p>'
-        f'<p class="abi-tiny abi-muted">Started by {h(backfill["requested_by"])} · {h(_when(backfill["submitted_at"]))} '
+        f'<p class="abi-tiny abi-muted">Started {h(_when(backfill["submitted_at"]))} '
         f"· Model {h(backfill['llm_mode'])}</p></div>"
         f'<span class="abi-actions">{actions}</span></div></section>'
     )
@@ -929,7 +922,6 @@ def job_panel(job: Mapping[str, Any], *, can_run: bool = True, runnable: bool = 
     facts = (
         '<dl class="abi-facts">'
         f"<div><dt>Submitted</dt><dd>{h(_when(job.get('submitted_at')))}</dd></div>"
-        f"<div><dt>Started by</dt><dd>{h(job.get('requested_by') or '—')}</dd></div>"
         f"<div><dt>Model</dt><dd>{h(str(job.get('llm_mode') or '—').capitalize())}</dd></div></dl>"
     )
     if status == "failed":
@@ -1083,7 +1075,7 @@ def review_panel(
     if withdrawal is not None:
         reason = withdrawal.get("note") or ""
         notes += (
-            f'<div class="abi-note">{icon("info")}<p>Withdrawn by {h(withdrawal.get("by") or "an operator")} '
+            f'<div class="abi-note">{icon("info")}<p>Withdrawn '
             f"on {h(_when(withdrawal.get('at')))}{': ' + h(reason) if reason else '.'} "
             "Its findings and decisions stay here. Publish it again when it is ready.</p></div>"
         )
@@ -1152,12 +1144,12 @@ def publish_panel(
 
 def published_panel(run: Mapping[str, Any], totals: str, findings: str) -> str:
     """A published week: where readers see it, and the human decisions on its findings."""
-    by = run.get("published_by") or "an operator"
-    who = "the weekly schedule" if by == "weekly-schedule" else str(by)
+    # The weekly scheduler is the only publisher still named; people are not recorded.
+    who = " by the weekly schedule" if run.get("published_by") == "weekly-schedule" else ""
     note = run.get("review_note")
     return (
         f'<div class="abi-note good">{icon("check")}<p>In the portal since {h(_when(run.get("published_at")))}. '
-        f"Published by {h(who)}{'. Note for readers: ' + h(note) if note else '.'}</p>"
+        f"Published{h(who)}{'. Note for readers: ' + h(note) if note else '.'}</p>"
         '<button type="button" class="abi-link" data-dialog="withdraw-review">Withdraw</button></div>'
         '<section class="abi-panel" aria-labelledby="findings-title"><h2 id="findings-title">Findings and decisions</h2>'
         '<p class="abi-sub">Record what you think of a finding. Your decision sits next to the automated '
@@ -1222,7 +1214,9 @@ def _activity(
         events.append(
             (
                 row["published_at"],
-                f"Published by {row['published_by']}",
+                "Published by the weekly schedule"
+                if row.get("published_by") == "weekly-schedule"
+                else "Published",
                 str(row.get("review_note") or "Visible in the reader portal."),
             )
         )
@@ -1230,7 +1224,7 @@ def _activity(
             events.append(
                 (
                     row["withdrawn_at"],
-                    f"Withdrawn by {row['withdrawn_by']}",
+                    "Withdrawn",
                     str(row.get("withdrawn_reason") or ""),
                 )
             )
@@ -1340,7 +1334,6 @@ def delete_dialog(run: Mapping[str, Any], token: str) -> str:
 
 
 def team_page(
-    user: str,
     team_id: str,
     name: str,
     enrolled: bool,
@@ -1381,11 +1374,10 @@ def team_page(
         f'<div class="abi-actions">{picker}{new_button}</div></div>'
         f"{note}{backfill}{jobs}{week_steps(selected, job, view)}{content}{details}"
     )
-    return layout(name, user, body + new_runs + dialogs, flash, error)
+    return layout(name, body + new_runs + dialogs, flash, error)
 
 
 def finding_page(
-    user: str,
     team_name: str,
     run: Mapping[str, Any],
     row: Mapping[str, Any],
@@ -1405,7 +1397,7 @@ def finding_page(
     if latest is not None:
         decision = (
             f'<div class="abi-row">{badge(str(latest["state"]))}<span class="abi-small abi-muted">'
-            f"{h(latest['decided_by'])} · {h(_when(latest['decided_at']))}</span></div>"
+            f"{h(_when(latest['decided_at']))}</span></div>"
             f'<p class="abi-small">{h(latest["note"])}</p>'
         )
     else:
@@ -1425,7 +1417,7 @@ def finding_page(
             f'<li><div class="abi-row abi-between">{badge(str(d["state"]))}'
             f'<span class="abi-tiny abi-muted">Run {h(str(d["run_id"])[:12])}</span></div>'
             f'<p class="abi-small">{h(d["note"])}</p>'
-            f'<p class="abi-tiny abi-muted">{h(d["decided_by"])} · {h(_when(d["decided_at"]))}</p></li>'
+            f'<p class="abi-tiny abi-muted">{h(_when(d["decided_at"]))}</p></li>'
             for d in shown
         )
         + "</ol>"
@@ -1460,7 +1452,7 @@ def finding_page(
         f'{decision}{history_html}<p class="abi-tiny abi-muted">Decisions are kept next to the finding. They never change it.</p></aside>'
         "</div>"
     )
-    return layout(f"{title} · {team_name}", user, body + dialogs, flash, error)
+    return layout(f"{title} · {team_name}", body + dialogs, flash, error)
 
 
 def decision_dialog(
@@ -1518,7 +1510,6 @@ def _json(value: Any) -> str:
 
 
 def decisions_page(
-    user: str,
     rows: Sequence[Mapping[str, Any]],
     total: int,
     page: int,
@@ -1562,7 +1553,7 @@ def decisions_page(
             f'<li><a class="abi-item" href="{h(url)}"><span>{badge(str(row["state"]))}</span>'
             f'<span class="abi-item-main"><span class="abi-item-title">{h(principle_title(str(row["finding_id"])))}</span>'
             f'<span class="abi-item-sub">{h(where)}</span><span class="abi-item-note">{h(row["note"])}</span></span>'
-            f'<span class="abi-item-when">{h(row["decided_by"])}<br>{h(_when(row["decided_at"]))}</span></a></li>'
+            f'<span class="abi-item-when">{h(_when(row["decided_at"]))}</span></a></li>'
         )
     if items:
         listing = (
@@ -1590,7 +1581,7 @@ def decisions_page(
         '<div class="abi-head"><div><h1>Decisions</h1><p class="abi-sub">What reviewers decided about findings. '
         f"The automated findings never change.</p></div>{filters}</div>{listing}{pagination}"
     )
-    return layout("Decisions", user, body, nav="decisions")
+    return layout("Decisions", body, nav="decisions")
 
 
 SCHEDULE_NEXT = {
@@ -1604,7 +1595,6 @@ SCHEDULE_NEXT = {
 
 
 def schedule_page(
-    user: str,
     teams: Sequence[tuple[str, str, bool]],
     overview: Mapping[str, Mapping[str, Any]],
     now: datetime,
@@ -1658,4 +1648,4 @@ def schedule_page(
         '<p class="abi-small abi-muted">A week still held after three days publishes anyway, with a note '
         "telling readers how many alerts the model could not assess.</p>"
     )
-    return layout("Schedule", user, body, nav="schedule")
+    return layout("Schedule", body, nav="schedule")

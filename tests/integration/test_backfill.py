@@ -66,7 +66,6 @@ def api(settings: AdminSettings) -> ApiSettings:
 def client(settings: AdminSettings) -> Iterator[TestClient]:
     with TestClient(
         build_admin(settings),
-        headers={"X-Forwarded-User": "backfill-tester"},
         follow_redirects=False,
     ) as value:
         yield value
@@ -115,7 +114,7 @@ def queued_weeks(api: ApiSettings, backfill_id: str) -> list[dict[str, Any]]:
 
 def test_admission_queues_weeks_oldest_first_without_reserving_the_slot(api: ApiSettings) -> None:
     weeks = [at("2026-08-24"), at("2026-08-10"), at("2026-08-17")]
-    row = backfill.submit_backfill(api, TEAM, weeks, "fake", "op", "first", now=NOW)
+    row = backfill.submit_backfill(api, TEAM, weeks, "fake", "first", now=NOW)
     assert row["week_count"] == 3 and row["llm_mode"] == "fake"
     stored = queued_weeks(api, row["backfill_id"])
     assert [job["run_at"] for job in stored] == [
@@ -127,13 +126,13 @@ def test_admission_queues_weeks_oldest_first_without_reserving_the_slot(api: Api
     assert {job["active_slot"] for job in stored} == {None}
     assert len({job["run_id"] for job in stored}) == 3
     # Retrying the same form returns the same backfill; other options are refused.
-    again = backfill.submit_backfill(api, TEAM, weeks, "fake", "op", "first", now=NOW)
+    again = backfill.submit_backfill(api, TEAM, weeks, "fake", "first", now=NOW)
     assert again["backfill_id"] == row["backfill_id"]
     with pytest.raises(HTTPException) as changed:
-        backfill.submit_backfill(api, TEAM, weeks[:1], "fake", "op", "first", now=NOW)
+        backfill.submit_backfill(api, TEAM, weeks[:1], "fake", "first", now=NOW)
     assert changed.value.status_code == 409
     with pytest.raises(HTTPException) as second:
-        backfill.submit_backfill(api, TEAM, [at("2026-09-07")], "fake", "op", "second", now=NOW)
+        backfill.submit_backfill(api, TEAM, [at("2026-09-07")], "fake", "second", now=NOW)
     assert second.value.status_code == 409 and "already in progress" in second.value.detail
     # Queued weeks reserve nothing: CLI, report and weekly writers still get the shared lock.
     with runner.schedule_lock(CONFIG, DB):
@@ -157,7 +156,7 @@ def test_admission_refuses_locked_and_unretained_weeks_storing_nothing(
         )
         publish_run(db, "c" * 64, published_by="op", allow_gap=True)
     manual = jobs.submit_job(
-        api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "op", "manual"
+        api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "manual"
     )
     assert manual["status"] == "pending"
     for weeks, status, message in (
@@ -169,13 +168,11 @@ def test_admission_refuses_locked_and_unretained_weeks_storing_nothing(
     ):
         with pytest.raises(HTTPException) as refused:
             backfill.submit_backfill(
-                api, TEAM, weeks, "fake", "op", f"refused-{status}-{len(weeks)}", now=NOW
+                api, TEAM, weeks, "fake", f"refused-{status}-{len(weeks)}", now=NOW
             )
         assert refused.value.status_code == status and message in refused.value.detail
     with pytest.raises(HTTPException) as unknown:
-        backfill.submit_backfill(
-            api, "no-such-team", [at("2026-08-10")], "fake", "op", "team", now=NOW
-        )
+        backfill.submit_backfill(api, "no-such-team", [at("2026-08-10")], "fake", "team", now=NOW)
     assert unknown.value.status_code == 400
     with connect(CONFIG.sql, DB) as db:
         assert db.query_one("SELECT COUNT(*) AS n FROM run_backfills") == {"n": 0}
@@ -189,7 +186,6 @@ def test_worker_runs_manual_work_before_the_next_week_then_oldest_first(
         TEAM,
         [at("2026-08-10"), at("2026-08-17"), at("2026-08-24")],
         "fake",
-        "op",
         "order",
         now=NOW,
     )
@@ -202,7 +198,7 @@ def test_worker_runs_manual_work_before_the_next_week_then_oldest_first(
         if body.run_at and naive(body.run_at) == datetime(2026, 8, 17) and not manual:
             # The worker holds the execution lock for this week: a New run queues ahead.
             request = RunRequest(team=TEAM, run_at=at("2026-08-03"), llm="fake")
-            manual.update(jobs.submit_job(api, request, "op", "during-week"))
+            manual.update(jobs.submit_job(api, request, "during-week"))
 
     monkeypatch.setattr(jobs, "execute_request", submit_during_week)
     while jobs.work_once(api):
@@ -223,11 +219,9 @@ def test_worker_runs_manual_work_before_the_next_week_then_oldest_first(
 
 
 def test_manual_submission_without_backfill_is_still_refused_while_busy(api: ApiSettings) -> None:
-    jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "op", "one")
+    jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "one")
     with pytest.raises(HTTPException) as busy:
-        jobs.submit_job(
-            api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "op", "two"
-        )
+        jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "two")
     assert busy.value.status_code == 409
 
 
@@ -255,7 +249,7 @@ def applock_free(resource: str) -> bool:
 def test_waiting_weekly_invocation_keeps_the_worker_off_backfill_weeks(
     api: ApiSettings, executed: list[tuple[str, datetime]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "yield", now=NOW)
+    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "yield", now=NOW)
     held = hold_applock(runner.BACKFILL_YIELD_RESOURCE)
     with monkeypatch.context() as patch:
 
@@ -271,7 +265,7 @@ def test_waiting_weekly_invocation_keeps_the_worker_off_backfill_weeks(
 
 
 def test_weekly_lock_waits_for_the_running_week_only_during_a_backfill(api: ApiSettings) -> None:
-    row = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "wait", now=NOW)
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "wait", now=NOW)
     busy = ExitStack()
     busy.enter_context(runner.schedule_lock(CONFIG, DB))
     sleeps: list[float] = []
@@ -286,7 +280,7 @@ def test_weekly_lock_waits_for_the_running_week_only_during_a_backfill(api: ApiS
     assert applock_free(runner.BACKFILL_YIELD_RESOURCE)
     # Without a backfill in progress a busy lock still refuses at once.
     with connect(CONFIG.sql, DB) as db:
-        backfill.cancel_backfill(db, row["backfill_id"], "op")
+        backfill.cancel_backfill(db, row["backfill_id"])
     with runner.schedule_lock(CONFIG, DB):
 
         def never(seconds: float) -> None:
@@ -297,7 +291,7 @@ def test_weekly_lock_waits_for_the_running_week_only_during_a_backfill(api: ApiS
 
 
 def test_weekly_lock_gives_up_after_the_wait(api: ApiSettings) -> None:
-    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "give-up", now=NOW)
+    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "give-up", now=NOW)
     clock = iter([0.0, 10.0, 7300.0, 7300.0])
     with (
         runner.schedule_lock(CONFIG, DB),
@@ -388,16 +382,16 @@ def test_console_backfill_flow_from_dialog_to_dismissal(
 def test_queued_manual_runs_keep_submission_order(
     api: ApiSettings, executed: list[tuple[str, datetime]]
 ) -> None:
-    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "manual-order", now=NOW)
+    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "manual-order", now=NOW)
     with connect(CONFIG.sql, DB) as db:
         week = jobs.claim_queued(db, datetime.now(UTC).replace(tzinfo=None))
     assert week is not None
     # Submitted first for the newer week, then for an older one: submission order wins.
     first = jobs.submit_job(
-        api, RunRequest(team=TEAM, run_at=at("2026-10-12"), llm="fake"), "op", "first-manual"
+        api, RunRequest(team=TEAM, run_at=at("2026-10-12"), llm="fake"), "first-manual"
     )
     second = jobs.submit_job(
-        api, RunRequest(team=TEAM, run_at=at("2026-08-03"), llm="fake"), "op", "second-manual"
+        api, RunRequest(team=TEAM, run_at=at("2026-08-03"), llm="fake"), "second-manual"
     )
     assert first["status"] == second["status"] == "queued"
     with connect(CONFIG.sql, DB) as db:
@@ -426,10 +420,10 @@ def test_deletion_cannot_remove_a_week_queued_while_it_runs(
     api: ApiSettings, admission: str
 ) -> None:
     # Seed a run for the week ending 10 August with the identity a new admission computes.
-    seed = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "seed", now=NOW)
+    seed = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "seed", now=NOW)
     target = queued_weeks(api, seed["backfill_id"])[0]
     with connect(CONFIG.sql, DB) as db:
-        backfill.cancel_backfill(db, seed["backfill_id"], "op")
+        backfill.cancel_backfill(db, seed["backfill_id"])
         persist_run(
             db,
             PersistencePayload(
@@ -443,7 +437,7 @@ def test_deletion_cannot_remove_a_week_queued_while_it_runs(
         )
     if admission == "manual":
         # A queued backfill week keeps a backfill in progress, so a busy manual run queues.
-        backfill.submit_backfill(api, TEAM, [at("2026-08-24")], "fake", "op", "other", now=NOW)
+        backfill.submit_backfill(api, TEAM, [at("2026-08-24")], "fake", "other", now=NOW)
     paused, release = Event(), Event()
 
     def delete() -> str:
@@ -458,11 +452,11 @@ def test_deletion_cannot_remove_a_week_queued_while_it_runs(
     def admit() -> dict[str, Any]:
         if admission == "backfill":
             row = backfill.submit_backfill(
-                api, TEAM, [at("2026-08-10")], "fake", "op", "during-delete", now=NOW
+                api, TEAM, [at("2026-08-10")], "fake", "during-delete", now=NOW
             )
             return queued_weeks(api, row["backfill_id"])[0]
         request = RunRequest(team=TEAM, run_at=at("2026-08-10"), llm="fake")
-        return jobs.submit_job(api, request, "op", "during-delete")
+        return jobs.submit_job(api, request, "during-delete")
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         deletion = pool.submit(delete)
@@ -491,7 +485,7 @@ def test_retried_backfill_stays_visible_after_dismissal_or_a_newer_backfill(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     latest = latest_week_end(datetime.now(UTC))
-    older = backfill.submit_backfill(api, TEAM, [latest - 3 * WEEK], "fake", "op", "older")
+    older = backfill.submit_backfill(api, TEAM, [latest - 3 * WEEK], "fake", "older")
     panel = f'data-backfill-url="/backfills/{older["backfill_id"]}"'
 
     def fail(*args: Any, **kwargs: Any) -> Any:
@@ -516,7 +510,7 @@ def test_retried_backfill_stays_visible_after_dismissal_or_a_newer_backfill(
     # A newer backfill finishes after the older one fails again; retrying the older one
     # must still show its progress ahead of the newer finished panel.
     run_failing_week()
-    backfill.submit_backfill(api, TEAM, [latest - 2 * WEEK], "fake", "op", "newer")
+    backfill.submit_backfill(api, TEAM, [latest - 2 * WEEK], "fake", "newer")
     assert jobs.work_once(api)
     assert executed == [(TEAM, (latest - 2 * WEEK).replace(tzinfo=None))]
     assert panel not in client.get(f"/teams/{TEAM}").text
@@ -535,7 +529,7 @@ def test_retry_still_queues_after_an_earlier_attempts_run_is_deleted(
         raise RuntimeError("Test failure")
 
     monkeypatch.setattr(jobs, "execute_request", fail)
-    row = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "retry", now=NOW)
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "retry", now=NOW)
     first = queued_weeks(api, row["backfill_id"])[0]
     with connect(CONFIG.sql, DB) as db:
         # The week already had an unpublished run with the first attempt's identity.
@@ -553,7 +547,7 @@ def test_retry_still_queues_after_an_earlier_attempts_run_is_deleted(
     assert jobs.work_once(api)
     # A registry change gives the second attempt a different run identity.
     registry.write_bytes(registry.read_bytes() + b"\n")
-    backfill.retry_backfill(api, row["backfill_id"], "op", now=NOW)
+    backfill.retry_backfill(api, row["backfill_id"], now=NOW)
     assert jobs.work_once(api)
     attempts = queued_weeks(api, row["backfill_id"])
     assert [job["status"] for job in attempts] == ["failed", "failed"]
@@ -561,7 +555,7 @@ def test_retry_still_queues_after_an_earlier_attempts_run_is_deleted(
     with connect(CONFIG.sql, DB) as db:
         # Deleting the first run also removes the first attempt's job record.
         assert delete_run(db, str(first["run_id"])) == TEAM
-    backfill.retry_backfill(api, row["backfill_id"], "op", now=NOW)
+    backfill.retry_backfill(api, row["backfill_id"], now=NOW)
     remaining = queued_weeks(api, row["backfill_id"])
     assert [job["status"] for job in remaining] == ["failed", "queued"]
     assert len({job["idempotency_key"] for job in remaining}) == 2
@@ -570,7 +564,7 @@ def test_retry_still_queues_after_an_earlier_attempts_run_is_deleted(
 def test_queued_week_blocks_deleting_the_run_it_would_recreate(
     client: TestClient, api: ApiSettings
 ) -> None:
-    row = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "delete", now=NOW)
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "delete", now=NOW)
     job = queued_weeks(api, row["backfill_id"])[0]
     with connect(CONFIG.sql, DB) as db:
         persist_run(
@@ -593,7 +587,7 @@ def test_queued_week_blocks_deleting_the_run_it_would_recreate(
 def test_queued_manual_status_is_public_and_shown_in_the_workspace(
     client: TestClient, api: ApiSettings
 ) -> None:
-    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "op", "status", now=NOW)
+    backfill.submit_backfill(api, TEAM, [at("2026-08-10")], "fake", "status", now=NOW)
     with connect(CONFIG.sql, DB) as db:
         claimed = jobs.claim_queued(db, datetime.now(UTC).replace(tzinfo=None))
     assert claimed is not None and claimed["status"] == "running"
@@ -610,7 +604,7 @@ def test_queued_manual_status_is_public_and_shown_in_the_workspace(
 
 
 def test_interrupted_week_fails_and_asks_to_retry_the_week(api: ApiSettings) -> None:
-    row = backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "op", "lost", now=NOW)
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "lost", now=NOW)
     with connect(CONFIG.sql, DB) as db:
         # A worker claimed the week, then died before committing any analysis.
         claimed = jobs.claim_queued(db, datetime.now(UTC).replace(tzinfo=None))

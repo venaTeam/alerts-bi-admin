@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import sys
 from datetime import datetime
 
@@ -23,13 +22,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
     parser.add_argument("--version", action="version", version=f"alerts-bi-admin {APP_VERSION}")
-    serve = subparsers.add_parser("serve", help="serve the loopback admin app behind a login proxy")
+    serve = subparsers.add_parser(
+        "serve",
+        help="serve the admin console; it has no login, so anyone who can reach it may use it",
+    )
     serve.add_argument("--port", type=int, help="ADMIN_PORT, else 8200")
     serve.add_argument("--database", help="ADMIN_DATABASE, else SQL_DATABASE")
     serve.add_argument("--registry", help="team registry path; default config/teams.json")
-    serve.add_argument(
-        "--dev-user", help="local development only: identity when no proxy is present"
-    )
     worker = subparsers.add_parser("run-worker", help="execute durable manual run submissions")
     worker.add_argument("--database", help="ADMIN_DATABASE, else SQL_DATABASE")
     worker.add_argument("--registry", help="ADMIN_REGISTRY_PATH, else the packaged registry")
@@ -49,13 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="publish even though the week is not adjacent to the team's published weeks",
     )
-    publish.add_argument("--by", help="operator name; defaults to the current user")
     publish.add_argument("--database", help="target database; default SQL_DATABASE")
 
     unpublish = subparsers.add_parser("unpublish", help="withdraw a published weekly review")
     unpublish.add_argument("--run-id", required=True)
     unpublish.add_argument("--reason", required=True, help="why it is withdrawn; kept for audit")
-    unpublish.add_argument("--by", help="operator name; defaults to the current user")
     unpublish.add_argument("--database", help="target database; default SQL_DATABASE")
 
     publications = subparsers.add_parser(
@@ -76,7 +73,6 @@ def build_parser() -> argparse.ArgumentParser:
     decide.add_argument("--finding", required=True, help="finding id, e.g. R1, R9, P2, OTHER")
     decide.add_argument("--state", required=True, choices=("pending", "confirmed", "dismissed"))
     decide.add_argument("--note", required=True, help="why; readers see it")
-    decide.add_argument("--by", help="operator name; defaults to the current user")
     decide.add_argument("--database", help="target database; default SQL_DATABASE")
 
     decisions = subparsers.add_parser("decisions", help="list a team's decision history")
@@ -98,10 +94,6 @@ def _target_database(args: argparse.Namespace, config: AdminConfig) -> str:
     return str(args.database or config.sql.database)
 
 
-def _operator(args: argparse.Namespace) -> str:
-    return str(args.by or getpass.getuser())
-
-
 def _instant(value: object) -> str:
     return iso_instant(value)[:16].replace("T", " ") + " UTC" if isinstance(value, datetime) else ""
 
@@ -114,7 +106,6 @@ def _command_publish(args: argparse.Namespace, config: AdminConfig) -> int:
             result = publish_run(
                 db,
                 args.run_id,
-                published_by=_operator(args),
                 note=args.note,
                 replace=args.replace,
                 allow_gap=args.allow_gap,
@@ -136,7 +127,7 @@ def _command_unpublish(args: argparse.Namespace, config: AdminConfig) -> int:
 
     with connect(config.sql, _target_database(args, config)) as db:
         try:
-            unpublish_run(db, args.run_id, withdrawn_by=_operator(args), reason=args.reason)
+            unpublish_run(db, args.run_id, reason=args.reason)
         except PublicationRefused as exc:
             sys.stderr.write(f"not withdrawn: {exc}\n")
             return 1
@@ -156,13 +147,13 @@ def _command_publications(args: argparse.Namespace, config: AdminConfig) -> int:
         state = (
             "published"
             if row["withdrawn_at"] is None
-            else f"withdrawn {_instant(row['withdrawn_at'])} by {row['withdrawn_by']}: "
-            f"{row['withdrawn_reason']}"
+            else f"withdrawn {_instant(row['withdrawn_at'])}: {row['withdrawn_reason']}"
         )
+        scheduled = " by the weekly schedule" if row["published_by"] == "weekly-schedule" else ""
         sys.stdout.write(
             f"{_instant(row['window_start'])} to {_instant(row['window_end'])}  "
-            f"run {str(row['run_id'])[:16]}  published {_instant(row['published_at'])} by "
-            f"{row['published_by']}  [{state}]\n"
+            f"run {str(row['run_id'])[:16]}  published {_instant(row['published_at'])}"
+            f"{scheduled}  [{state}]\n"
         )
     return 0
 
@@ -188,7 +179,6 @@ def _command_decide(args: argparse.Namespace, config: AdminConfig) -> int:
                 finding_id=args.finding,
                 state=args.state,
                 note=args.note,
-                decided_by=_operator(args),
             )
         except DecisionRefused as exc:
             sys.stderr.write(f"not recorded: {exc}\n")
@@ -209,7 +199,7 @@ def _command_decisions(args: argparse.Namespace, config: AdminConfig) -> int:
         sys.stdout.write(
             f"{_instant(row['decided_at'])}  {row['state']:<9} {row['finding_id']:<5} "
             f"{row['alert_schema']} {row['application']} / {row['key_field']}  "
-            f"by {row['decided_by']}: {row['note']}\n"
+            f"{row['note']}\n"
         )
     return 0
 
@@ -245,17 +235,11 @@ def _command_admin(args: argparse.Namespace, config: AdminConfig) -> int:
         config,
         port=args.port,
         database=args.database,
-        dev_user=args.dev_user,
         registry_path=args.registry,
     )
-    if settings.dev_user:
-        sys.stderr.write(
-            f"warning: --dev-user acts as {settings.dev_user!r} for any request without a login "
-            "header; never use it behind a shared proxy\n"
-        )
     sys.stdout.write(
-        f"alerts-bi-admin on http://{settings.host}:{settings.port} (loopback only; put the "
-        f"login proxy in front), writing {settings.database}\n"
+        f"alerts-bi-admin on http://{settings.host}:{settings.port} (no login: anyone who can "
+        f"reach this address may use it), writing {settings.database}\n"
     )
     uvicorn.run(
         build_admin(settings),

@@ -131,7 +131,6 @@ class Publication:
     """The selected run's publication: currently published, withdrawn, or never published."""
 
     state: Literal["published", "withdrawn", "never"]
-    by: str | None = None
     at: datetime | None = None
     note: str | None = None
     """The review note when published, the withdrawal reason when withdrawn."""
@@ -448,20 +447,16 @@ def _worklist(
 
 def _publication(db: Database, run_id: str) -> Publication:
     row = db.query_one(
-        "SELECT TOP 1 published_at, published_by, review_note, withdrawn_at, withdrawn_by, "
-        "withdrawn_reason FROM review_publications WHERE run_id = :run_id "
+        "SELECT TOP 1 published_at, review_note, withdrawn_at, withdrawn_reason "
+        "FROM review_publications WHERE run_id = :run_id "
         "ORDER BY CASE WHEN withdrawn_at IS NULL THEN 0 ELSE 1 END, publication_id DESC",
         {"run_id": run_id},
     )
     if row is None:
         return Publication("never")
     if row["withdrawn_at"] is None:
-        return Publication(
-            "published", row["published_by"], row["published_at"], row["review_note"]
-        )
-    return Publication(
-        "withdrawn", row["withdrawn_by"], row["withdrawn_at"], row["withdrawn_reason"]
-    )
+        return Publication("published", row["published_at"], row["review_note"])
+    return Publication("withdrawn", row["withdrawn_at"], row["withdrawn_reason"])
 
 
 def _published_history(db: Database, team_id: str, until: datetime) -> tuple[WeekRules, ...]:
@@ -768,16 +763,12 @@ def _when(value: Any) -> str:
 
 def _publication_html(publication: Publication) -> str:
     if publication.state == "published":
-        return (
-            f'<span class="state published">published</span> {h(_when(publication.at))} '
-            f"by {h(publication.by)}"
-            + (f'<div class="sub">{h(publication.note)}</div>' if publication.note else "")
+        return f'<span class="state published">published</span> {h(_when(publication.at))}' + (
+            f'<div class="sub">{h(publication.note)}</div>' if publication.note else ""
         )
     if publication.state == "withdrawn":
-        return (
-            f'<span class="state held">withdrawn</span> {h(_when(publication.at))} '
-            f"by {h(publication.by)}"
-            + (f'<div class="sub">{h(publication.note)}</div>' if publication.note else "")
+        return f'<span class="state held">withdrawn</span> {h(_when(publication.at))}' + (
+            f'<div class="sub">{h(publication.note)}</div>' if publication.note else ""
         )
     return '<span class="state none">never published</span>'
 
@@ -921,7 +912,7 @@ def _worklist_html(summary: AdminSummary) -> str:
     )
 
 
-def summary_page(user: str, summary: AdminSummary, *, shared: str) -> str:
+def summary_page(summary: AdminSummary, *, shared: str) -> str:
     """The whole page. ``shared`` is the shared summary widgets' HTML."""
     inputs, run, entry = summary.inputs, summary.run, summary.entry
     team_id, run_id = inputs.team_id, str(run["run_id"])
@@ -956,7 +947,7 @@ def summary_page(user: str, summary: AdminSummary, *, shared: str) -> str:
         f"{_panels(summary)}</section>"
         f"{_worklist_html(summary)}"
     )
-    return pages.layout(f"Summary · {inputs.display_name}", user, body)
+    return pages.layout(f"Summary · {inputs.display_name}", body)
 
 
 def detailed_content(summary: AdminSummary) -> str:

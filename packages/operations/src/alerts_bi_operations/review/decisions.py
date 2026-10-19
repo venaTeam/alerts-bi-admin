@@ -90,10 +90,13 @@ def record_decision(
     finding_id: str,
     state: str,
     note: str,
-    decided_by: str,
     now: datetime | None = None,
 ) -> int:
-    """Append one decision on one finding of an alert in a published week."""
+    """Append one decision on one finding of an alert in a published week.
+
+    Who decided is not recorded (design "Admin console without login", 2026-10-19); the
+    NOT NULL ``decided_by`` column stores "".
+    """
     if state not in DECISION_STATES:
         raise DecisionRefused(f"state must be one of {', '.join(DECISION_STATES)}; got {state!r}")
     cleaned = (note or "").strip()
@@ -101,9 +104,6 @@ def record_decision(
         raise DecisionRefused("a note is required: say why")
     if len(cleaned) > NOTE_LIMIT:
         raise DecisionRefused(f"the note is {len(cleaned)} characters; the limit is {NOTE_LIMIT}")
-    by = (decided_by or "").strip()
-    if not by:
-        raise DecisionRefused("an operator name is required")
     moment = now or datetime.now(UTC)
     # Naive values are UTC throughout the pipeline, as the SQL Server driver hands them back.
     at = moment.astimezone(UTC).replace(tzinfo=None) if moment.tzinfo else moment
@@ -149,7 +149,7 @@ def record_decision(
                  note, decided_at, decided_by)
             OUTPUT INSERTED.decision_id
             VALUES (:team_id, :run_id, :alert_schema, :application, :key_field, :finding_id,
-                    :state, :note, :at, :by)
+                    :state, :note, :at, N'')
             """,
             {
                 "team_id": published["team_id"],
@@ -161,7 +161,6 @@ def record_decision(
                 "state": state,
                 "note": cleaned,
                 "at": at,
-                "by": by,
             },
         )
         assert inserted is not None
@@ -173,7 +172,7 @@ def list_decisions(db: Database, team_id: str) -> list[dict[str, Any]]:
     return db.query(
         """
         SELECT decision_id, run_id, alert_schema, application, key_field, finding_id, state,
-               note, decided_at, decided_by
+               note, decided_at
         FROM finding_decisions
         WHERE team_id = :team_id
         ORDER BY decided_at ASC, decision_id ASC

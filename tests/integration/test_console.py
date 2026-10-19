@@ -38,7 +38,6 @@ TEAM = "checkout-api"
 RUN = "1" * 64
 OTHER = "2" * 64
 END = datetime(2026, 8, 24)
-USER = {"X-Forwarded-User": "alice"}
 
 
 @pytest.fixture(scope="module")
@@ -90,7 +89,7 @@ def client(tmp_path_factory: pytest.TempPathFactory) -> Iterator[TestClient]:
             "s" * 40,
         )
     )
-    with TestClient(app, headers=USER, follow_redirects=False) as test_client:
+    with TestClient(app, follow_redirects=False) as test_client:
         yield test_client
 
 
@@ -356,7 +355,7 @@ def test_permanent_deletion_removes_all_run_records(
         if state in ("published", "withdrawn"):
             publish_run(db, run_id, published_by="alice")
         if state == "withdrawn":
-            unpublish_run(db, run_id, withdrawn_by="alice", reason="correction")
+            unpublish_run(db, run_id, reason="correction")
         with db.transaction():
             db.execute(
                 "INSERT INTO finding_decisions (team_id,run_id,alert_schema,application,key_field,finding_id,state,note,decided_at,decided_by) VALUES ('payments-core',:id,'v1','checkout-api','key','R1','confirmed','test decision',SYSUTCDATETIME(),'alice')",
@@ -464,7 +463,7 @@ def test_admin_ignores_forged_gap_override(client: TestClient) -> None:
             )
     finally:
         with connect(CONFIG.sql, DB) as db:
-            unpublish_run(db, RUN, withdrawn_by="alice", reason="test cleanup")
+            unpublish_run(db, RUN, reason="test cleanup")
 
 
 def test_decisions_remain_append_only_with_existing_parent(client: TestClient) -> None:

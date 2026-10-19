@@ -66,9 +66,7 @@ def test_init_applies_missing_revision_once_to_admin_database(
         )
         db.commit()
     settings = AdminSettings(AdminConfig(CONFIG.sql), DB, "m" * 40)
-    with TestClient(
-        build_admin(settings), headers={"X-Forwarded-User": "migration-test"}
-    ) as client:
+    with TestClient(build_admin(settings)) as client:
         before = client.get("/healthz")
     assert before.status_code == 503, before.text
     assert before.json()["checks"]["operator_schema"]["ok"] is False
@@ -80,14 +78,12 @@ def test_init_applies_missing_revision_once_to_admin_database(
     second = init_command(tmp_path, {"ADMIN_DATABASE": "", "SQL_DATABASE": DB})
     assert second.returncode == 0, second.stderr
     assert "database is up to date" in second.stdout
-    with TestClient(
-        build_admin(settings), headers={"X-Forwarded-User": "migration-test"}
-    ) as client:
+    with TestClient(build_admin(settings)) as client:
         after = client.get("/healthz")
     assert after.status_code == 200, after.text
     assert after.json()["ok"] is True
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "017_case_sensitive_teams"
+        assert migrations.current_revision(db) == "018_erase_operator_names"
         assert db.query_one(
             "SELECT COUNT(*) AS n FROM schema_migrations WHERE version='011_run_job_keys'"
         ) == {"n": 1}
