@@ -15,8 +15,12 @@ from alerts_bi_shared.db.connection import Database
 __all__ = [
     "PAGE_SIZE",
     "alerts_with_findings",
+    "all_decisions",
     "backfill_calendar",
     "decision_history",
+    "first_run_end",
+    "other_publication",
+    "run_publications",
     "team_log",
     "team_overview",
     "team_runs",
@@ -26,7 +30,8 @@ PAGE_SIZE = 50
 
 
 def team_overview(db: Database) -> dict[str, dict[str, Any]]:
-    """Per team: latest published week, weeks published, and the schedule's last outcome."""
+    """Per team: latest published week, the schedule's last outcome, the newest run with its
+    publication state, and active (pending, queued or running) submissions."""
     published = db.query(
         """
         SELECT team_id, MAX(window_end) AS latest, COUNT(*) AS weeks
@@ -54,12 +59,23 @@ def team_overview(db: Database) -> dict[str, dict[str, Any]]:
     """):
         overview.setdefault(str(row["team_id"]), {}).update(row)
     for row in db.query("""
-        SELECT r.*, (SELECT COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v1.states.unassessed') AS BIGINT),0)+COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v2.states.unassessed') AS BIGINT),0) FROM run_summaries s WHERE s.run_id=r.run_id AND s.scope_kind='team') AS unassessed
+        SELECT r.*, (SELECT COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v1.states.unassessed') AS BIGINT),0)+COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v2.states.unassessed') AS BIGINT),0) FROM run_summaries s WHERE s.run_id=r.run_id AND s.scope_kind='team') AS unassessed,
+               (SELECT TOP 1 p.publication_id FROM review_publications p
+                 WHERE p.run_id=r.run_id AND p.withdrawn_at IS NULL) AS publication_id,
+               (SELECT COUNT(*) FROM review_publications w
+                 WHERE w.run_id=r.run_id AND w.withdrawn_at IS NOT NULL) AS withdrawn,
+               (SELECT TOP 1 l.outcome FROM weekly_review_log l
+                 WHERE l.run_id=r.run_id ORDER BY l.log_id DESC) AS schedule_outcome
         FROM (SELECT *, ROW_NUMBER() OVER
           (PARTITION BY team_id ORDER BY run_at DESC, completed_at DESC, run_id DESC) AS rn
           FROM runs) r WHERE r.rn=1
     """):
         overview.setdefault(str(row["team_id"]), {})["run"] = row
+    for row in db.query(
+        "SELECT job_id, team_id, run_at, status, started_at, submitted_at FROM run_jobs "
+        "WHERE status IN ('pending','queued','running') ORDER BY run_at DESC"
+    ):
+        overview.setdefault(str(row["team_id"]), {}).setdefault("active", []).append(row)
     return overview
 
 
@@ -203,18 +219,58 @@ def run_decisions(db: Database, run_id: str, page: int = 1) -> tuple[list[dict[s
     return rows, int(total["n"]) if total else 0
 
 
-def all_decisions(db: Database, page: int = 1) -> tuple[list[dict[str, Any]], int]:
-    total = db.query_one("SELECT COUNT(*) AS n FROM finding_decisions")
+def all_decisions(
+    db: Database, page: int = 1, team: str = "", state: str = ""
+) -> tuple[list[dict[str, Any]], int]:
+    """Decisions across teams and runs, newest first, optionally for one team or state."""
+    where: list[str] = []
+    params: dict[str, Any] = {"offset": (page - 1) * PAGE_SIZE, "size": PAGE_SIZE}
+    if team:
+        where.append("d.team_id = :team")
+        params["team"] = team
+    if state:
+        where.append("d.state = :state")
+        params["state"] = state
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    total = db.query_one(f"SELECT COUNT(*) AS n FROM finding_decisions d {clause}", params)
     rows = db.query(
-        """
+        f"""
         SELECT d.*, r.team_display_name, r.window_start, r.window_end
-        FROM finding_decisions d JOIN runs r ON r.run_id=d.run_id
+        FROM finding_decisions d JOIN runs r ON r.run_id=d.run_id {clause}
         ORDER BY d.decided_at DESC, d.decision_id DESC
         OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY
     """,
-        {"offset": (page - 1) * PAGE_SIZE, "size": PAGE_SIZE},
+        params,
     )
     return rows, int(total["n"]) if total else 0
+
+
+def first_run_end(db: Database, team_id: str) -> datetime | None:
+    """When the team's earliest stored run window ended, if it has any run."""
+    row = db.query_one(
+        "SELECT MIN(window_end) AS ended FROM runs WHERE team_id=:team_id", {"team_id": team_id}
+    )
+    return row["ended"] if row and row["ended"] is not None else None
+
+
+def run_publications(db: Database, run_id: str) -> list[dict[str, Any]]:
+    """Every publication of a run, current and withdrawn, newest first."""
+    return db.query(
+        "SELECT * FROM review_publications WHERE run_id=:run_id ORDER BY publication_id DESC",
+        {"run_id": run_id},
+    )
+
+
+def other_publication(db: Database, team_id: str, window_end: datetime, run_id: str) -> bool:
+    """Whether another run of the same team and week is currently published."""
+    return (
+        db.query_one(
+            "SELECT TOP 1 run_id FROM review_publications WHERE team_id=:team_id "
+            "AND window_end=:window_end AND run_id<>:run_id AND withdrawn_at IS NULL",
+            {"team_id": team_id, "window_end": window_end, "run_id": run_id},
+        )
+        is not None
+    )
 
 
 def finding_page(db: Database, run_id: str, key: str) -> int:

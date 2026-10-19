@@ -41,8 +41,25 @@
     "overview",
     "findings",
     "decisions",
-    "activity"
+    "activity",
+    "publish"
   ],
+  "console_redesign": {
+    "approved": "2026-10-19",
+    "decision": "../decisions/006-console-redesign.md",
+    "team_view": "One week at a time with Run, Review and Publish steps; tab=publish shows the publish step; tab=findings with finding=<key> shows one finding; overview, findings without a finding, decisions and activity show the week's current step",
+    "new_runs": "POST /teams/{team_id}/trigger accepts 1-12 repeated week dates (Monday 00:00 UTC) or the former run_at, with llm and submission_key; one week submits a manual run job, two to twelve submit a backfill; POST /teams/{team_id}/backfill is kept for compatibility",
+    "query_parameters": {
+      "/": [
+        "show"
+      ],
+      "/decisions": [
+        "page",
+        "team",
+        "state"
+      ]
+    }
+  },
   "run_scope": "An explicitly selected run must belong to the selected team",
   "payload_baseline": "console-openapi.json",
   "schema_head": "017_case_sensitive_teams",

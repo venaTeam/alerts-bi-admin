@@ -101,6 +101,17 @@
               ],
               "title": "Error"
             }
+          },
+          {
+            "name": "show",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(all|attention)$",
+              "default": "all",
+              "title": "Show"
+            }
           }
         ],
         "responses": {
@@ -161,6 +172,28 @@
               "default": 1,
               "title": "Page"
             }
+          },
+          {
+            "name": "team",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128,
+              "default": "",
+              "title": "Team"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(|pending|confirmed|dismissed)$",
+              "default": "",
+              "title": "State"
+            }
           }
         ],
         "responses": {
@@ -190,6 +223,7 @@
     "/teams/{team_id}": {
       "get": {
         "summary": "Team",
+        "description": "One week of a team: a submission, a failed run, or a completed run's current step.",
         "operationId": "team_teams__team_id__get",
         "parameters": [
           {
@@ -276,7 +310,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "pattern": "^(overview|findings|decisions|activity)$",
+              "pattern": "^(overview|findings|decisions|activity|publish)$",
               "default": "overview",
               "title": "Tab"
             }
@@ -598,6 +632,7 @@
     "/teams/{team_id}/trigger": {
       "post": {
         "summary": "Trigger",
+        "description": "The New runs dialog: one week is a manual run, two to twelve weeks a backfill.",
         "operationId": "trigger_teams__team_id__trigger_post",
         "parameters": [
           {
@@ -752,6 +787,7 @@
     "/teams/{team_id}/backfill": {
       "post": {
         "summary": "Backfill",
+        "description": "The former Backfill weeks form, kept for compatibility (2026-10-19).",
         "operationId": "backfill_teams__team_id__backfill_post",
         "parameters": [
           {

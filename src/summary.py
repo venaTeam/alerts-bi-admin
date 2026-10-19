@@ -982,49 +982,41 @@ def detailed_content(summary: AdminSummary) -> str:
     )
 
 
-def overview_content(summary: AdminSummary) -> str:
-    """Compact approved overview; retain advanced reports beneath a disclosure."""
-    cards = []
-    for schema, label in (("v1", "Original schema"), ("v2", "New schema")):
-        totals = summary.inputs.schemas[schema]
-        measures = "".join(
-            f'<div class="abi-measure"><span>{text}</span><strong>{totals.states.get(state, 0):,}</strong></div>'
-            for state, text in (
-                ("rule_flagged", "Rule flagged"),
-                ("llm_flagged", "Model advisory"),
-                ("needs_review", "Needs review"),
-                ("assessed_good", "Assessed good"),
-                ("unassessed", "Unassessed"),
-            )
-        )
-        if schema == "v2":
-            measures += f'<div class="abi-small abi-muted abi-mt">Readiness gaps: {totals.readiness_gaps:,} · tracked separately from quality</div>'
-        cards.append(
-            f'<section class="abi-panel abi-panel-pad abi-schema {schema}"><div class="abi-row abi-between"><h2>{schema}</h2>{pages.badge(label, schema)}</div><div class="abi-metrics"><div><div class="abi-big">{totals.distinct_alerts:,}</div><div class="abi-small abi-muted">distinct alerts this week</div></div><div><div class="abi-big">{totals.events:,}</div><div class="abi-small abi-muted">events this week</div></div></div>{measures}</section>'
-        )
-    findings = summarize(summary.inputs).key_findings[:3]
-    focus = "".join(f"<li><strong>{h(f.title)}</strong> {h(f.body)}</li>" for f in findings)
-    if not focus:
-        focus = "<li>No review focus identified from the stored analysis.</li>"
-    run = summary.run
-    versions = "".join(
-        f"<div><dt>{label}</dt><dd>{h(value or '—')}</dd></div>"
-        for label, value in (
-            ("Run ID", run["run_id"]),
-            ("Ruleset", run.get("ruleset_version")),
-            ("Prompt", run.get("prompt_version")),
-            ("Model", run.get("model_version")),
-            ("Window start", format_instant(run["window_start"])),
-            ("Window end", format_instant(run["window_end"])),
-        )
-    )
-    filtered = (
-        replace(summary.filters, cursor=None, next_cursor=None, previous_cursor=None)
-        != WorklistFilter()
-    )
+def is_filtered(summary: AdminSummary) -> bool:
+    """A work-list filter is in the URL, so the detailed analysis opens to show it."""
+    plain = replace(summary.filters, cursor=None, next_cursor=None, previous_cursor=None)
+    return plain != WorklistFilter()
+
+
+def week_counts(summary: AdminSummary) -> tuple[int, int]:
+    """Distinct alerts and model-unassessed alerts across v1 and v2."""
+    schemas = [summary.inputs.schemas[schema] for schema in ("v1", "v2")]
     return (
-        '<div class="abi-small abi-muted">Weekly totals · v1 and v2 shown separately</div>'
-        f'<div class="abi-overview">{"".join(cards)}</div><section class="abi-panel abi-panel-pad"><h3>Review focus</h3><ul class="abi-review-list">{focus}</ul><a class="abi-btn" href="{h(pages.team_url(summary.inputs.team_id, str(run["run_id"]), "findings"))}#selected-run">Inspect findings {pages.icon("arrow")}</a></section>'
-        f'<details class="abi-panel abi-panel-pad"{" open" if filtered else ""}><summary>Run details and versions</summary><dl class="abi-dl">{versions}</dl>'
-        f'<details class="abi-mt"{" open" if filtered else ""}><summary>Detailed analysis, charts and exports</summary><div class="abi-legacy">{detailed_content(summary)}</div></details></details>'
+        sum(totals.distinct_alerts for totals in schemas),
+        sum(int(totals.states.get("unassessed", 0)) for totals in schemas),
     )
+
+
+def totals_html(summary: AdminSummary) -> str:
+    """The week's v1 and v2 totals, always shown separately."""
+    boxes = []
+    for schema, label in (("v1", "original schema"), ("v2", "new schema")):
+        totals = summary.inputs.schemas[schema]
+        if not totals.events and not totals.distinct_alerts:
+            line = "No alerts this week"
+        else:
+            line = (
+                f"<strong>{totals.distinct_alerts:,}</strong> alerts · "
+                f"<strong>{totals.events:,}</strong> events"
+            )
+        gaps = (
+            f'<div class="abi-tiny abi-muted">Readiness gaps: {totals.readiness_gaps:,} · '
+            "tracked separately from quality</div>"
+            if schema == "v2" and totals.readiness_gaps
+            else ""
+        )
+        boxes.append(
+            f'<div class="abi-total"><div class="abi-total-name">{schema} · {label}</div>'
+            f'<div class="abi-total-line">{line}</div>{gaps}</div>'
+        )
+    return f'<div class="abi-totals">{"".join(boxes)}</div>'

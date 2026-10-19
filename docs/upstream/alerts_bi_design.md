@@ -1,5 +1,75 @@
 # Alerts BI — Design Document
 
+## Operator console redesign — accepted 2026-10-19
+
+The user reviewed three console mocks on 2026-10-18 and chose the guided-steps layout. On
+2026-10-19 they asked to merge New run and Backfill weeks into one New runs dialog, then to
+implement the result (design canvas "Admin UI redesign options", page "C · Full design"). This
+supersedes the 2026-10-08 visual clarification below: the run history table, the
+Overview/Findings/Decisions/Activity tabs, the split findings panel, the publish dialog and the
+global New run with a team selector. Where they conflict, it also supersedes the Selection and
+Display sections of [the backfill contract](backfill.md). Run execution, the job and backfill
+queues, publication, withdrawal, deletion and decision rules are unchanged. So are migrations,
+scoring, prompt text, CSV outputs, portal views and the shared/operations libraries.
+
+* **Navigation.** A left sidebar holds Teams, Schedule, Decisions and the signed-in operator;
+  there is no top bar. On narrow screens the sidebar stacks above the page.
+* **Teams.** One card per registered team shows the team's newest week as Run, Review and
+  Publish progress with a one-line status: running or waiting, failed, held, ready to review,
+  published, withdrawn or no runs. Teams off the weekly schedule carry a Manual label. Teams
+  whose newest run failed or completed unpublished come first; `?show=attention` lists only
+  them.
+* **A team's week.** The team page shows one week at a time. It opens on the newest run, or
+  on a pending, queued or running manual submission for a newer week. A week picker lists the
+  team's runs, newest first, twenty per page. A three-step progress shows Run, Review and Publish, and
+  one panel below it shows the current step:
+  * a pending, queued or running submission, polled as before;
+  * a failed run: its error and New runs with that week checked;
+  * Review: the held or withdrawn note, v1 and v2 totals shown separately, the paginated
+    findings list and Continue to publish;
+  * Publish (`tab=publish`): a summary, the optional review note, Replace only when another run
+    of the same week is published, and Publish week;
+  * a published week: the portal note, Withdraw, and the findings with their latest decision.
+
+  Reviewing is not recorded; Publish is a second view of the same unpublished run. Run details
+  and activity stay collapsed at the bottom of every week: versions, run and publication
+  activity, the team's schedule log, the detailed analysis (charts, day by day, panel SQL and
+  the filtered work list), the three CSV downloads and Delete run. A work-list filter in the URL
+  opens that section.
+* **Finding.** `tab=findings&finding=<key>` shows one finding full width with its evidence, the
+  human decision and the decision history. Record decision is offered only for a published run.
+  Decision links still open the exact finding across pages. `tab=overview`, `tab=findings`
+  without a finding, `tab=decisions` and `tab=activity` remain valid URLs and show the week's
+  current step.
+* **New runs.** One dialog replaces New run and Backfill weeks. It lists the team's retained,
+  completed weeks that can run: weeks without a completed run, and weeks with an unpublished run
+  (which runs again). Weeks are newest first. The newest week is checked, or the selected week
+  when it failed, or the week a retention note warns about when the dialog opens from that note,
+  and a week that leaves retention within seven days is marked. Published,
+  queued or running, expired and incomplete weeks are not listed, so the console runs a
+  published week again only after it is withdrawn. Live, fake or off applies to every week,
+  live by default. One selected week is submitted exactly as the former New run: a manual job
+  with the same submission key, busy refusal and queuing during a backfill. Two to twelve weeks
+  are submitted exactly as the former backfill: one team, one active backfill, oldest first,
+  completed unpublished. `POST /teams/{team_id}/trigger` accepts repeated `week` dates (or the
+  former `run_at`) and dispatches on their count; `POST /teams/{team_id}/backfill` remains for
+  compatibility. The JSON trigger, CLI and API still run any Monday week, including a published
+  one.
+* **Several weeks running.** The former backfill panel appears above the week as "Running N
+  weeks" with the same counts, progress, per-week actions, cancel, retry, dismiss and polling.
+  The retained-gap banner is replaced by a note shown only when a week without a run, later
+  than the team's first run, leaves retention within seven days; weeks before a team's first
+  run are not a gap.
+* **Schedule and Decisions.** Schedule shows the next week to be reviewed, each team's latest
+  outcome and what happens next. Decisions adds team and decision filters. Neither page starts
+  runs; runs start from a team's page.
+
+The pages stay server-rendered with the content-addressed stylesheet and same-origin script,
+use no inline styles, keep dialogs keyboard-accessible and cover empty, running, failed, held,
+withdrawn and narrow-viewport states. `contracts/console-http.json` and
+`contracts/console-openapi.json` record the new query parameters. No deployment is authorized
+by this amendment.
+
 ## Exact key_field identity in SQL — accepted 2026-10-18
 
 The exact-application amendment below left `key_field` on the database's case-insensitive
@@ -220,7 +290,7 @@ Applied SQL and revision modules 001–008, schema head `008_measurement_basis`,
 analysis versions, deterministic identities, registry content and the hand-authored oracle
 remain unchanged. The migration-only `src.db.ledger` bridge is retained. Shared/operations
 0.1.3 records the producer relocation while preserving their public namespaces and behavior.
-Admin uses its local uv workspace packages; portal pins an immutable shared wheel. The legacy
+Admin uses its local path packages; portal pins an immutable shared wheel. The legacy
 API factory is a wire-contract test harness only, with no standalone server entry point.
 
 This change prepares source, artifacts and deployment examples. PR delivery does not deploy,
@@ -231,7 +301,7 @@ to transfer the migration job and exactly one weekly scheduler before retiring o
 
 The user approved implementing the team-centered unified operator mock and, on 2026-10-08, explicitly requested delivery in `alerts-bi-admin`. This amendment supersedes the separate unauthenticated trigger and admin web-service boundaries in sections 7.9, 7.12 and 7.16, the original repository-separation decision, and the earlier placement of the console in the runs repository. `alerts-bi-admin serve` owns the authenticated operator console and its run API. Its editable UI source lives in the admin repository. A pinned, immutable `alerts-bi-runs-runtime` wheel supplies existing analysis/API/config adapters in-process; no sibling checkout or separate trigger listener is required. The engine code is exported from a recorded runs Git revision without scoring, prompt or migration changes. Admin may import these packaged adapters, superseding its earlier no-runs-import boundary. The runtime and full runs distributions share a Python namespace and must use separate environments. Runs retains engine, migration, registry and weekly-job ownership. Portal remains a separate read-only service.
 
-The approved mock has three workspace navigation items: Teams, Schedule and Decisions; there is no separate Runs item. Opening a team shows its run history above a selected run with Overview, Findings, Decisions and Activity tabs. Overview uses compact, separate v1/v2 cards and a review-focus panel. Run details and versions expand to retain the detailed summary, complete-day charts, filtered SQL work list, panel SQL and four approved exports. Findings uses a selectable list beside one evidence and human-decision panel. The global Decisions page spans teams and runs; its links open the exact finding, including across pages. The run Decisions tab stays scoped to that run. Schedule shows real weekly review outcomes with links to team runs. Activity shows run/publication history and the team's schedule log. New run, Publish review, Withdraw review and Record decision use accessible modal dialogs. Analysis completion and publication state are separate. This visual clarification, accepted 2026-10-08, corrects the implementation to match the user's mock rather than replacing its navigation or exposing all features on one page.
+The approved mock has three workspace navigation items: Teams, Schedule and Decisions; there is no separate Runs item. Opening a team shows its run history above a selected run with Overview, Findings, Decisions and Activity tabs. Overview uses compact, separate v1/v2 cards and a review-focus panel. Run details and versions expand to retain the detailed summary, complete-day charts, filtered SQL work list, panel SQL and four approved exports. Findings uses a selectable list beside one evidence and human-decision panel. The global Decisions page spans teams and runs; its links open the exact finding, including across pages. The run Decisions tab stays scoped to that run. Schedule shows real weekly review outcomes with links to team runs. Activity shows run/publication history and the team's schedule log. New run, Publish review, Withdraw review and Record decision use accessible modal dialogs. Analysis completion and publication state are separate. This visual clarification, accepted 2026-10-08, corrects the implementation to match the user's mock rather than replacing its navigation or exposing all features on one page. **Superseded 2026-10-19:** see "Operator console redesign" at the top of this document.
 
 New run is scoped to the selected registered team, takes a UTC window end and live/fake/off model mode, and invokes the existing synchronous execution/persistence/reporting path under the existing process gate. Its window is exactly the preceding 168 hours. UI and JSON triggers share the gate. Manual completion does not publish. Existing publish/replace/gap, withdraw-with-reason and published-run decision rules remain authoritative. Actions return to the selected team/run; an explicit cross-team run selection is refused. No migration, scoring, prompt, deterministic identifier or output-content changes are authorized by this consolidation.
 

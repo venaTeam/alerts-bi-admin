@@ -15,7 +15,12 @@ from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode
 
 from alerts_bi_operations.registry import RegistryError, load_registry
-from alerts_bi_operations.review.decisions import DecisionRefused, record_decision
+from alerts_bi_operations.review.decisions import (
+    DECISION_STATES,
+    DecisionRefused,
+    findings_on,
+    record_decision,
+)
 from alerts_bi_operations.review.publication import PublicationRefused, publish_run, unpublish_run
 from alerts_bi_shared.db.connection import Database, WebDatabasePool
 from alerts_bi_shared.logging_setup import log, redact_error
@@ -81,7 +86,10 @@ StateFilter = Annotated[str, Query(pattern="^(" + "|".join(summary.STATES) + ")$
 SchemaFilter = Annotated[str, Query(pattern="^(all|v1|v2)$")]
 RuleFilter = Annotated[str, Query(pattern=summary.RULE_PATTERN)]
 SortOrder = Annotated[str, Query(pattern="^(" + "|".join(summary.SORTS) + ")$")]
-Tab = Annotated[str, Query(pattern="^(overview|findings|decisions|activity)$")]
+Tab = Annotated[str, Query(pattern="^(overview|findings|decisions|activity|publish)$")]
+Show = Annotated[str, Query(pattern="^(all|attention)$")]
+DecisionState = Annotated[str, Query(pattern="^(|" + "|".join(DECISION_STATES) + ")$")]
+TeamFilter = Annotated[str, Query(max_length=128)]
 
 
 def _team_id_from_path(value: str) -> str:
@@ -209,9 +217,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             )
         return fields
 
-    def back(
-        path: str, message: str, error: bool = False, anchor: str = "selected-run"
-    ) -> RedirectResponse:
+    def back(path: str, message: str, error: bool = False, anchor: str = "") -> RedirectResponse:
         key = "error" if error else "done"
         separator = "&" if "?" in path else "?"
         fragment = f"#{anchor}" if anchor else ""
@@ -231,7 +237,10 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             "CASE WHEN COALESCE(f.readiness_rule_ids,'')='' THEN 0 ELSE LEN(f.readiness_rule_ids)-LEN(REPLACE(f.readiness_rule_ids,',',''))+1 END + "
             "CASE WHEN f.quality_state IN ('llm_flagged','needs_review') AND COALESCE(f.llm_principle_id,'')<>'' THEN 1 ELSE 0 END),0) FROM alert_findings f WHERE f.run_id=r.run_id) AS findings_count, "
             "(SELECT COUNT(*) FROM finding_decisions d WHERE d.run_id=r.run_id) AS decisions_count, "
-            "(SELECT COUNT(*) FROM review_publications w WHERE w.run_id=r.run_id AND w.withdrawn_at IS NOT NULL) AS withdrawn "
+            "(SELECT COUNT(*) FROM review_publications w WHERE w.run_id=r.run_id AND w.withdrawn_at IS NOT NULL) AS withdrawn, "
+            "(SELECT COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v1.states.unassessed') AS BIGINT),0)+"
+            "COALESCE(CAST(JSON_VALUE(s.payload,'$.schemas.v2.states.unassessed') AS BIGINT),0) "
+            "FROM run_summaries s WHERE s.run_id=r.run_id AND s.scope_kind='team') AS unassessed "
             "FROM runs r LEFT JOIN review_publications p ON p.run_id=r.run_id AND p.withdrawn_at IS NULL "
             "WHERE r.run_id = :run_id",
             {"run_id": run_id},
@@ -292,12 +301,16 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         return HealthOut(ok=healthy, version=APP_VERSION, checks=checks)
 
     @app.get("/", response_class=HTMLResponse)
-    def dashboard(request: Request, done: Message = None, error: Message = None) -> HTMLResponse:
+    def dashboard(
+        request: Request, done: Message = None, error: Message = None, show: Show = "all"
+    ) -> HTMLResponse:
         teams = registry_teams()
         with database() as db:
             overview = queries.team_overview(db)
         return HTMLResponse(
-            pages.dashboard_page(user_of(request), teams, overview, error or done, bool(error))
+            pages.dashboard_page(
+                user_of(request), teams, overview, error or done, bool(error), show
+            )
         )
 
     @app.get("/schedule", response_class=HTMLResponse)
@@ -305,16 +318,18 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         with database() as db:
             overview = queries.team_overview(db)
         return HTMLResponse(
-            pages.schedule_page(user_of(request), registry_teams(), overview, token_for(request))
+            pages.schedule_page(user_of(request), registry_teams(), overview, datetime.now(UTC))
         )
 
     @app.get("/decisions", response_class=HTMLResponse)
-    def decisions(request: Request, page: Page = 1) -> HTMLResponse:
+    def decisions(
+        request: Request, page: Page = 1, team: TeamFilter = "", state: DecisionState = ""
+    ) -> HTMLResponse:
         with database() as db:
-            rows, total = queries.all_decisions(db, page)
+            rows, total = queries.all_decisions(db, page, team, state)
         return HTMLResponse(
             pages.decisions_page(
-                user_of(request), rows, total, page, registry_teams(), token_for(request)
+                user_of(request), rows, total, page, registry_teams(), team=team, state=state
             )
         )
 
@@ -335,10 +350,14 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         page: Page = 1,
         finding: Annotated[str, Query(max_length=24, pattern=r"^[a-f0-9]*$")] = "",
     ) -> HTMLResponse:
+        """One week of a team: a submission, a failed run, or a completed run's current step."""
         team_id = _team_id_from_path(team_id)
-        names = {team_id_: name for team_id_, name, _ in registry_teams()}
-        enrollment = {t: e for t, _, e in registry_teams()}
+        registered = registry_teams()
+        names = {key: label for key, label, _ in registered}
+        enrolled = {key: on for key, _, on in registered}.get(team_id, False)
         now = datetime.now(UTC)
+        user, token = user_of(request), token_for(request)
+        flash, failed = error or done, bool(error)
         with database() as db:
             jobs = team_jobs(db, team_id)
             backfill_row = latest_backfill(db, team_id)
@@ -348,12 +367,15 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 else []
             )
             calendar = queries.backfill_calendar(db, team_id, selectable_weeks(now)[0])
+            selected_job: dict[str, Any] | None = None
             if job_id:
                 submitted = get_job(db, job_id)
                 if submitted["team_id"] != team_id:
                     raise HTTPException(404, "No such submission for this team.")
                 if submitted["status"] == "completed" and not run_id:
                     run_id = str(submitted["run_id"])
+                elif submitted["status"] not in ("completed", "cancelled") and not run_id:
+                    selected_job = submitted
             count = db.query_one(
                 "SELECT COUNT(*) AS n FROM runs WHERE team_id=:team_id", {"team_id": team_id}
             )
@@ -362,24 +384,45 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             runs = queries.team_runs(db, team_id, page=run_page)
             if team_id not in names and not runs:
                 raise HTTPException(404, "No such team.")
-            selected = (
-                run_row(db, run_id)
-                if run_id
-                else run_row(db, str(runs[0]["run_id"]))
-                if runs
-                else None
-            )
-            if selected and selected["team_id"] != team_id:
-                raise HTTPException(404, "No such run for this team.")
-            content = (
-                pages.activity_content(queries.team_log(db, team_id), []) if not selected else ""
-            )
-            if selected:
+            if selected_job is None and not run_id:
+                newest = max(
+                    (job for job in jobs if job["status"] in pages.ACTIVE_JOB),
+                    key=lambda job: job["run_at"],
+                    default=None,
+                )
+                if newest is not None and (not runs or newest["run_at"] > runs[0]["run_at"]):
+                    selected_job = newest
+            selected = None
+            if selected_job is None and (run_id or runs):
+                selected = run_row(db, run_id or str(runs[0]["run_id"]))
+                if selected["team_id"] != team_id:
+                    raise HTTPException(404, "No such run for this team.")
+            name = names.get(team_id) or str(runs[0]["team_display_name"])
+            logs = queries.team_log(db, team_id)
+            first_end = queries.first_run_end(db, team_id) if runs else None
+            view, content, details, dialogs = "review", "", "", ""
+            preselect: datetime | None = None
+            runnable = set(pages.runnable_weeks(calendar, now))
+            if selected_job is not None:
+                view = "job"
+                content = pages.job_panel(
+                    selected_job,
+                    can_run=team_id in names,
+                    runnable=pages.as_utc(selected_job["run_at"]) in runnable,
+                )
+                if selected_job["status"] == "failed":
+                    preselect = pages.as_utc(selected_job["run_at"])
+            elif selected is None:
+                view = "empty"
+                content = pages.empty_team_panel(
+                    enrolled, bool(pages.runnable_weeks(calendar, now))
+                ) + pages.log_section(logs)
+            else:
                 selected_id = str(selected["run_id"])
                 snapshot = summary.read_snapshot(selected.get("registry_entry_snapshot"))
                 sources = [
-                    name
-                    for name, enabled in (
+                    source
+                    for source, enabled in (
                         ("v1", bool(snapshot.v1_operators)),
                         ("v2", bool(snapshot.v2_operator)),
                     )
@@ -388,81 +431,147 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 selected["sources_label"] = (
                     " + ".join(sources) + " sources" if sources else "Team sources"
                 )
-                if tab == "overview" and selected["status"] == "completed":
+                analysis, open_analysis = "", False
+                if selected["status"] == "completed":
+                    worklist_tab = tab == "overview"
                     filters = summary.WorklistFilter(
                         state=state,
                         schema=schema,
                         rule=rule,
                         sort=sort,
-                        page=page,
-                        cursor=request.query_params.get("cursor"),
+                        page=page if worklist_tab else 1,
+                        cursor=request.query_params.get("cursor") if worklist_tab else None,
                     )
                     loaded = summary.load_admin_summary(db, team_id, selected_id, filters)
-                    content = summary.overview_content(loaded)
-                elif tab == "overview":
-                    from alerts_bi_shared.ui.html import h
-
-                    content = f'<section class="abi-panel abi-panel-pad"><h3>Analysis {h(selected["status"])}</h3><p class="abi-small abi-mt">{h(selected.get("error_summary") or "No completed analysis is available.")}</p><p class="abi-small abi-muted abi-mt">Only completed runs can be published.</p></section>'
-                elif tab == "findings":
-                    rows, finding_total = queries.alerts_with_findings(db, selected_id, page)
+                    analysis = summary.detailed_content(loaded)
+                    open_analysis = summary.is_filtered(loaded)
+                    findings_page = page if tab == "findings" else 1
+                    rows, finding_total = queries.alerts_with_findings(
+                        db, selected_id, findings_page
+                    )
                     history = queries.decision_history(
-                        db,
-                        [
+                        db, [pages.identity(row) for row in rows], team_id
+                    )
+                    if tab == "findings" and finding:
+                        match = next(
                             (
-                                str(row["alert_schema"]),
-                                str(row["application"]),
-                                str(row["key_field"]),
+                                (row, item)
+                                for row in rows
+                                for item in findings_on(dict(row))
+                                if pages.finding_key(row, item) == finding
+                            ),
+                            None,
+                        )
+                        if match is not None:
+                            row, item = match
+                            return HTMLResponse(
+                                pages.finding_page(
+                                    user,
+                                    name,
+                                    selected,
+                                    row,
+                                    item,
+                                    history.get(pages.identity(row), []),
+                                    token,
+                                    findings_page,
+                                    flash,
+                                    failed,
+                                )
                             )
-                            for row in rows
-                        ],
-                        team_id,
+                    totals = summary.totals_html(loaded)
+                    if selected.get("publication_id"):
+                        view = "published"
+                        listing = pages.findings_list(
+                            selected, rows, finding_total, findings_page, history, decisions=True
+                        )
+                        content = pages.published_panel(selected, totals, listing)
+                        dialogs += pages.withdraw_dialog(selected, token)
+                    elif tab == "publish":
+                        view = "publish"
+                        alerts, unassessed = summary.week_counts(loaded)
+                        content = pages.publish_panel(
+                            selected,
+                            token,
+                            alerts=alerts,
+                            flagged=finding_total,
+                            unassessed=unassessed,
+                            replace=queries.other_publication(
+                                db, team_id, selected["window_end"], selected_id
+                            ),
+                        )
+                    else:
+                        withdrawal = (
+                            {
+                                "by": loaded.publication.by,
+                                "at": loaded.publication.at,
+                                "note": loaded.publication.note,
+                            }
+                            if loaded.publication.state == "withdrawn"
+                            else None
+                        )
+                        listing = pages.findings_list(
+                            selected, rows, finding_total, findings_page, history, decisions=False
+                        )
+                        content = pages.review_panel(
+                            selected, totals, listing, finding_total, withdrawal=withdrawal
+                        )
+                elif selected["status"] == "failed":
+                    view = "failed"
+                    content = pages.failed_panel(
+                        selected,
+                        can_run=team_id in names,
+                        runnable=pages.as_utc(selected["window_end"]) in runnable,
                     )
-                    content = pages.findings_content(
-                        selected, rows, finding_total, page, token_for(request), history, finding
-                    )
-                elif tab == "decisions":
-                    decisions, decision_total = queries.run_decisions(db, selected_id, page)
-                    content = pages.decisions_content(selected, decisions, decision_total, page)
+                    preselect = pages.as_utc(selected["window_end"])
                 else:
-                    pubs = db.query(
-                        "SELECT * FROM review_publications WHERE run_id=:run_id ORDER BY publication_id DESC",
-                        {"run_id": selected_id},
-                    )
-                    content = pages.activity_content(queries.team_log(db, team_id), pubs, selected)
-        name = names.get(team_id) or str(runs[0]["team_display_name"])
+                    view, content = "other", pages.other_status_panel(selected)
+                details = pages.details_section(
+                    selected,
+                    queries.run_publications(db, selected_id),
+                    logs,
+                    analysis,
+                    open_analysis=open_analysis,
+                )
+                dialogs += pages.delete_dialog(selected, token)
         backfill_active = any(
             week["status"] in ("queued", "pending", "running") for week in backfill_weeks
         )
-        backfill_html = (
-            pages.backfill_panel(team_id, backfill_row, backfill_weeks, token_for(request))
-            if backfill_row
-            else ""
-        )
-        if not backfill_active and team_id in names:
-            backfill_html = pages.gap_banner(calendar, now) + backfill_html
+        registered_team = team_id in names
         return HTMLResponse(
             pages.team_page(
-                user_of(request),
+                user,
                 team_id,
                 name,
-                enrollment.get(team_id, False),
+                enrolled,
                 runs,
                 total,
                 run_page,
                 selected,
-                tab,
                 content,
-                token_for(request),
-                error or done,
-                bool(error),
-                jobs=jobs,
-                backfill=backfill_html,
-                backfill_dialog=pages.backfill_form(
-                    team_id, token_for(request), name, calendar, now
-                )
-                if team_id in names
+                flash,
+                failed,
+                view=view,
+                job=selected_job,
+                jobs=pages.jobs_panel(
+                    jobs, shown=str(selected_job["job_id"]) if selected_job else None
+                ),
+                backfill=pages.backfill_panel(team_id, backfill_row, backfill_weeks, token)
+                if backfill_row
                 else "",
-                backfill_active=backfill_active,
+                new_runs=pages.new_runs_dialog(
+                    team_id,
+                    token,
+                    name,
+                    calendar,
+                    now,
+                    preselect=preselect,
+                    backfill_active=backfill_active,
+                )
+                if registered_team
+                else "",
+                note=pages.retention_note(calendar, now, first_end) if registered_team else "",
+                details=details,
+                dialogs=dialogs,
             )
         )
 
@@ -518,14 +627,25 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.post("/teams/{team_id}/trigger")
     async def trigger(request: Request, team_id: str) -> Response:
+        """The New runs dialog: one week is a manual run, two to twelve weeks a backfill."""
         team_id = _team_id_from_path(team_id)
-        fields = await form(request)
+        values = await form_values(request)
+        fields = {key: items[-1] for key, items in values.items()}
         if team_id not in {t for t, _, _ in registry_teams()}:
             raise HTTPException(404, "No such registered team.")
+        weeks = [week for week in values.get("week", []) if week]
+        if not weeks and fields.get("weeks_form"):
+            return back(pages.team_url(team_id), "Pick at least one week to run.", True)
+        if len(weeks) > 1:
+            return await start_backfill(request, team_id, values)
         try:
             # A date is midnight UTC; RunRequest also rejects forged non-Monday times.
             body = RunRequest.model_validate(
-                {"team": team_id, "run_at": fields.get("run_at"), "llm": fields.get("llm")}
+                {
+                    "team": team_id,
+                    "run_at": weeks[0] if weeks else fields.get("run_at"),
+                    "llm": fields.get("llm"),
+                }
             )
         except ValidationError:
             return back(
@@ -554,7 +674,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         log.info("console.submitted", job_id=job["job_id"], operator=user_of(request))
         return back(
             pages.team_url(team_id, job_id=job["job_id"]),
-            "Run accepted. It starts before the next backfill week. You can leave this page."
+            "Run accepted. It starts before the next queued week. You can leave this page."
             if job["status"] == "queued"
             else "Run accepted. You can leave this page and return later.",
         )
@@ -669,16 +789,14 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             ],
         }
 
-    @app.post("/teams/{team_id}/backfill")
-    async def backfill(request: Request, team_id: str) -> Response:
-        team_id = _team_id_from_path(team_id)
-        values = await form_values(request)
-        if team_id not in {t for t, _, _ in registry_teams()}:
-            raise HTTPException(404, "No such registered team.")
+    async def start_backfill(
+        request: Request, team_id: str, values: dict[str, list[str]]
+    ) -> Response:
+        """Queue one run per picked week, oldest first (docs/backfill.md)."""
         path = pages.team_url(team_id)
         llm = (values.get("llm") or ["live"])[-1]
         if llm not in ("live", "fake", "off"):
-            return back(path, "Choose a valid model mode.", True, "")
+            return back(path, "Choose a valid model mode.", True)
         try:
             weeks = parse_weeks(values.get("week", []))
             row = await run_in_threadpool(
@@ -691,7 +809,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 (values.get("submission_key") or [""])[-1],
             )
         except HTTPException as exc:
-            return back(path, str(exc.detail), True, "")
+            return back(path, str(exc.detail), True)
         except Exception as exc:
             log.error(
                 "console.backfill_failed",
@@ -699,17 +817,25 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 operator=user_of(request),
                 error=redact_error(exc),
             )
-            return back(path, "The backfill could not be saved. Check the service logs.", True, "")
+            return back(path, "The runs could not be saved. Check the service logs.", True)
         log.info(
             "console.backfill_submitted", backfill_id=row["backfill_id"], operator=user_of(request)
         )
         count = int(row["week_count"])
         return back(
             path,
-            f"Backfill accepted. {count} {'run' if count == 1 else 'runs'} queued, oldest first. "
-            "You can leave this page and return later.",
-            anchor="",
+            f"{count} {'run' if count == 1 else 'runs'} accepted. They run one at a time, "
+            "oldest first. You can leave this page and return later.",
         )
+
+    @app.post("/teams/{team_id}/backfill")
+    async def backfill(request: Request, team_id: str) -> Response:
+        """The former Backfill weeks form, kept for compatibility (2026-10-19)."""
+        team_id = _team_id_from_path(team_id)
+        values = await form_values(request)
+        if team_id not in {t for t, _, _ in registry_teams()}:
+            raise HTTPException(404, "No such registered team.")
+        return await start_backfill(request, team_id, values)
 
     @app.get(
         "/backfills/{backfill_id}",
@@ -736,7 +862,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         try:
             _, message, failed = await run_in_threadpool(act, user)
         except HTTPException as exc:
-            return back(path, str(exc.detail), True, "")
+            return back(path, str(exc.detail), True)
         return back(path, message, failed, "")
 
     @app.post("/backfills/{backfill_id}/cancel")
@@ -769,7 +895,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     async def dismiss_backfill_route(request: Request, backfill_id: str) -> Response:
         def act(user: str) -> tuple[dict[str, Any], str, bool]:
             with database() as db:
-                return dismiss_backfill(db, backfill_id), "Backfill dismissed.", False
+                return dismiss_backfill(db, backfill_id), "Dismissed.", False
 
         return await backfill_action(request, backfill_id, act)
 
@@ -783,7 +909,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 row, count = cancel_backfill(db, backfill_id, user, job_id)
             if not count:
                 return row, "Only queued weeks can be removed.", True
-            return row, "Week removed from the backfill.", False
+            return row, "Week removed.", False
 
         return await backfill_action(request, backfill_id, act)
 

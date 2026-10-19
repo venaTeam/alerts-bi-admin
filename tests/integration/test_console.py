@@ -101,10 +101,12 @@ def token(client: TestClient) -> str:
 def test_team_directory_and_selected_run_are_scoped(client: TestClient) -> None:
     home = client.get("/")
     assert home.status_code == 200
-    assert "Checkout API" in home.text and "Latest run" in home.text
+    assert "Checkout API" in home.text and 'class="abi-card"' in home.text
+    assert client.get("/?show=attention").status_code == 200
     page = client.get(f"/teams/{TEAM}?run_id={RUN}")
     assert page.status_code == 200
-    assert page.text.index("Team runs") < page.text.index('id="selected-run"')
+    assert page.text.index('class="abi-picker"') < page.text.index("Steps for this week")
+    assert "Review findings" in page.text and 'id="new-runs"' in page.text
     assert RUN in page.text and OTHER not in page.text
     assert "Day by day" in page.text and "Panel SQL" in page.text and "Work list" in page.text
     assert 'value="fake"' in page.text and 'value="off"' in page.text
@@ -112,16 +114,26 @@ def test_team_directory_and_selected_run_are_scoped(client: TestClient) -> None:
     assert client.get(f"/teams/{TEAM}?run_id=missing").status_code == 404
     assert client.get(f"/teams/{TEAM}?tab=unknown").status_code == 422
     schedule = client.get("/schedule")
-    assert schedule.status_code == 200 and "Weekly schedule" in schedule.text
-    assert "data-team-selector" in schedule.text
+    assert schedule.status_code == 200 and "Latest outcome by team" in schedule.text
+    assert "data-team-selector" not in schedule.text and 'id="new-runs"' not in schedule.text
     assert client.get("/decisions").status_code == 200
+    assert client.get(f"/decisions?team={TEAM}&state=confirmed").status_code == 200
+    publish_step = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=publish")
+    assert publish_step.status_code == 200 and f'action="/runs/{RUN}/publish"' in publish_step.text
     assert (
         client.get(f"/teams/{TEAM}/summary?run_id={RUN}", follow_redirects=True).status_code == 200
     )
 
 
+FINDING = finding_key(
+    {"alert_schema": "v1", "application": TEAM, "key_field": "checkout-api:cart:node-1"}, "R1"
+)
+
+
 def test_findings_escape_evidence_and_gate_decisions_before_publication(client: TestClient) -> None:
-    page = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=findings")
+    listing = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=findings")
+    assert listing.status_code == 200 and f"finding={FINDING}" in listing.text
+    page = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=findings&finding={FINDING}")
     assert page.status_code == 200
     assert "matched_rows" in page.text
     assert "&lt;script&gt;" in page.text and "<script>unsafe" not in page.text
@@ -147,8 +159,11 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
     publish = client.post(f"/runs/{RUN}/publish", data={"csrf": csrf, "note": "Reviewed"})
     assert publish.status_code == 303 and "done=" in publish.headers["location"]
     assert f"run_id={RUN}" in publish.headers["location"]
-    page = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=findings")
+    page = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=findings&finding={FINDING}")
     assert 'action="/runs/' + RUN + '/decide"' in page.text
+    published = client.get(f"/teams/{TEAM}?run_id={RUN}")
+    assert "Findings and decisions" in published.text and "In the portal since" in published.text
+    assert 'action="/runs/' + RUN + '/withdraw"' in published.text
     decision = client.post(
         f"/runs/{RUN}/decide",
         data={

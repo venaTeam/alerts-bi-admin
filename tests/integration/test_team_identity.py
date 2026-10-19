@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -130,11 +130,11 @@ def test_slash_ids_reach_workspace_summary_trigger_and_backfill(tmp_path: Path) 
             workspace = client.get(path)
             assert workspace.status_code == 200, workspace.text
             assert f'action="{path}/trigger"' in workspace.text
-            assert f'action="{path}/backfill"' in workspace.text
             response = client.get(path + "/summary", follow_redirects=True)
             assert response.status_code == 200 and team in response.text
         csrf = client.get("/csrf").json()["token"]
-        now = datetime.now()
+        # Weeks end on Monday 00:00 UTC; local time can already be Monday before then.
+        now = datetime.now(UTC)
         monday = (now - timedelta(days=now.weekday())).date()
         path = "/teams/" + encode_team_id(teams[0])
         trigger = client.post(
