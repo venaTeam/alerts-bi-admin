@@ -70,7 +70,7 @@ Runs and weekly jobs write no files: the three CSV downloads render from SQL on 
 `report` exports a stored run's CSVs to `--out` (default `out/<run id prefix>`), and
 `run --out` and `weekly --out` also export. The OpenShift templates in `deploy/openshift/`
 have no ADMIN_OUT_DIR, output mounts or weekly `--out`. Restoring older manifests and images is
-subject to the database recovery requirements for migrations 015–017 in
+subject to the database recovery requirements for migrations 015–018 in
 `deploy/openshift/README.md`; image-only rollback is insufficient once an
 unknown revision has been applied. An explicit `--registry` takes precedence over
 `ADMIN_REGISTRY_PATH`.
@@ -278,4 +278,14 @@ forward-compatible image that knows 017, or an explicitly authorized restore of 
 pre-migration database backup together with its matching image, manifests and registry.
 A database restore loses subsequent writes. Migration 017 refuses downgrade; do not manually
 revert its binary columns or use an older portal with newly encoded team links. Follow the
+migration gate (backup, sizing and maintenance window) in `deploy/openshift/README.md`.
+
+## Long alert identities (2026-10-19)
+
+Apply migration `018_alert_identity_hash` through `db setup`. Before it, a run fails with SQL
+error 1946 (`pk_alert_findings` exceeds 900 bytes) when an identity's `application` and
+`key_field` together exceed 384 characters, and persists nothing. The migration keys
+`alert_findings` and `llm_verdicts` by a computed SHA-256 `identity_hash`; identity comparison
+is unchanged, and admin readiness refuses an older schema. It refuses downgrade, and an image
+without 018 cannot start its migration init container against a migrated database. Follow the
 migration gate (backup, sizing and maintenance window) in `deploy/openshift/README.md`.

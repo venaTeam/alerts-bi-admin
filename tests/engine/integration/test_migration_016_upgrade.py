@@ -15,7 +15,12 @@ from src.engine.db.repositories import (
 )
 from src.readiness import check_schema
 
-from tests.engine.helpers.sql import sample_finding, sample_run, sample_verdict
+from tests.engine.helpers.sql import (
+    insert_verdict_row,
+    sample_finding,
+    sample_run,
+    sample_verdict,
+)
 
 _DAILY = {
     "alert_schema": "v1",
@@ -90,12 +95,13 @@ def test_016_upgrades_a_populated_database_and_readiness_requires_it(
             PersistencePayload(
                 run=run,
                 findings=findings,
-                verdicts=[sample_verdict(key_field=KEY)],
                 application_daily=[
                     {"run_id": run["run_id"], "application": "checkout-api", **_DAILY}
                 ],
             ),
         )
+        # Plain SQL: the engine's verdict writes need migration 018.
+        insert_verdict_row(db, sample_verdict(key_field=KEY))
         publish_run(db, str(run["run_id"]), published_by="upgrade-test", allow_gap=True)
         db.execute(
             "INSERT INTO finding_decisions (team_id, run_id, alert_schema, application, "
@@ -111,10 +117,14 @@ def test_016_upgrades_a_populated_database_and_readiness_requires_it(
             check_schema(db)
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["016_case_sensitive_key_fields", "017_case_sensitive_teams"]
+    assert applied == [
+        "016_case_sensitive_key_fields",
+        "017_case_sensitive_teams",
+        "018_alert_identity_hash",
+    ]
 
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "017_case_sensitive_teams"
+        assert migrations.current_revision(db) == "018_alert_identity_hash"
         assert _counts(db) == before
         check_schema(db)
         stored = db.query(
@@ -149,12 +159,8 @@ def test_a_failed_016_rolls_back_completely_and_a_retry_applies_it(
 ) -> None:
     _reset_to_previous_head(monkeypatch)
     with connect(CONFIG.sql, DB) as db:
-        persist_run(
-            db,
-            PersistencePayload(
-                run=sample_run(), findings=[sample_finding()], verdicts=[sample_verdict()]
-            ),
-        )
+        persist_run(db, PersistencePayload(run=sample_run(), findings=[sample_finding()]))
+        insert_verdict_row(db, sample_verdict())
         # A schema-bound reference blocks the column change after the keys were dropped.
         db.execute(
             "CREATE VIEW dbo.blocks_016 WITH SCHEMABINDING AS "
@@ -194,7 +200,11 @@ def test_a_failed_016_rolls_back_completely_and_a_retry_applies_it(
             db.commit()
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["016_case_sensitive_key_fields", "017_case_sensitive_teams"]
+    assert applied == [
+        "016_case_sensitive_key_fields",
+        "017_case_sensitive_teams",
+        "018_alert_identity_hash",
+    ]
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "017_case_sensitive_teams"
+        assert migrations.current_revision(db) == "018_alert_identity_hash"
         assert _counts(db) == before

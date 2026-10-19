@@ -25,6 +25,7 @@ from ..domain.normalize import AlertRecord, normalize_row
 from .client import ElasticsearchError, EsClient
 
 __all__ = [
+    "OPERATOR_FIELD",
     "ReadResult",
     "build_query",
     "read_schema",
@@ -36,6 +37,11 @@ __all__ = [
 # Transport failures (no HTTP status) and server-side statuses that are worth another try.
 # Anything else (a bad query, a missing or expired point-in-time) cannot succeed on retry.
 _RETRYABLE_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+# The v1/v2 indices map ``operator`` as analyzed ``text`` with a ``keyword`` subfield. A
+# ``terms`` query on the analyzed field compares registry values with lowercased tokens, so
+# ``893_Lannister`` would silently match nothing; only the subfield holds the exact value.
+OPERATOR_FIELD = "operator.keyword"
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,14 +58,14 @@ def build_query(operators: Sequence[str], window: RunWindow) -> dict[str, Any]:
     The window is the exact half-open range: ``gte`` window_start, ``lt`` window_end.
     Using ``lte`` would double-count the boundary instant across two adjacent runs.
 
-    ``operator`` is a keyword field, so ``terms`` matches the exact, case-sensitive values
+    ``terms`` on the ``operator.keyword`` subfield matches the exact, case-sensitive values
     from the registry - which is what makes ``Checkout-API`` and ``checkout`` two distinct
     entries a team must list separately.
     """
     return {
         "bool": {
             "filter": [
-                {"terms": {"operator": list(operators)}},
+                {"terms": {OPERATOR_FIELD: list(operators)}},
                 {
                     "range": {
                         "@timestamp": {

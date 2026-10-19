@@ -264,7 +264,7 @@ def main() -> None:
                                 "label": "Operator",
                                 "dataType": "string",
                                 "operationType": "terms",
-                                "sourceField": "operator",
+                                "sourceField": "operator.keyword",
                                 "isBucketed": True,
                                 "scale": "ordinal",
                                 "params": {
