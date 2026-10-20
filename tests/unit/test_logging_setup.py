@@ -73,18 +73,62 @@ def test_console_line_puts_the_message_before_the_context(
 def test_json_keeps_full_identifiers_and_every_field(capsys: pytest.CaptureFixture[str]) -> None:
     configure_logging("weekly", fmt="json", capture_libraries=False)
     with log_context(team_id="t1", run_id=RUN_ID):
-        log.warn("weekly.outcome", "Held the week ending {week}", week="2026-10-19", msg="x")
+        log.warn("weekly.outcome", "Held the week ending {week}", week="2026-10-19", message="x")
 
     (record,) = _json_lines(capsys)
+    assert record["@timestamp"].endswith("Z") and "T" in record["@timestamp"]
     assert record["level"] == "warn"
     assert record["proc"] == "weekly"
+    assert record["stream"] == "runs"
     assert record["event"] == "weekly.outcome"
-    assert record["msg"] == "Held the week ending 2026-10-19"
+    assert record["message"] == "Held the week ending 2026-10-19"
     assert record["run_id"] == RUN_ID
     assert record["team_id"] == "t1"
-    assert record["week"] == "2026-10-19"
-    assert record["field_msg"] == "x"
-    assert record["ts"].endswith("Z") and "T" in record["ts"]
+    # The event's own fields sit under data.<event>; a field named like a fixed one is safe.
+    assert record["data"] == {"weekly_outcome": {"week": "2026-10-19", "message": "x"}}
+    assert record["line"].endswith(
+        "Held the week ending 2026-10-19  message=x  [team=t1 run=3f9a1c2b4d5e6f70]"
+    )
+    assert record["pod"] and record["version"]
+
+
+def test_the_same_field_never_changes_type_across_events(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    configure_logging("ui", fmt="json", capture_libraries=False)
+    log.info("http.request", "refused", status=405)
+    log.info("run.job_finished", "done", status="completed")
+
+    first, second = _json_lines(capsys)
+    assert first["data"]["http_request"]["status"] == 405
+    assert second["data"]["run_job_finished"]["status"] == "completed"
+    assert "status" not in first and "status" not in second
+
+
+def test_each_process_writes_to_its_index_and_a_run_routes_to_runs(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    streams = {}
+    for proc in ("ui", "worker", "weekly", "migrate", "cli", "portal"):
+        configure_logging(proc, fmt="json", capture_libraries=False)
+        log.info("x.y", "where")
+        streams[proc] = _json_lines(capsys)[0]["stream"]
+    assert streams == {
+        "ui": "admin",
+        "worker": "runs",
+        "weekly": "runs",
+        "migrate": "admin",
+        "cli": "admin",
+        "portal": "portal",
+    }
+    configure_logging("ui", fmt="json", capture_libraries=False)
+    with log_context(run_id=RUN_ID):
+        bind_log_context(stream="runs")
+        log.info("run.started", "a synchronous run inside the console")
+    log.info("console.submitted", "a console action")
+    inside, outside = _json_lines(capsys)
+    assert (inside["stream"], outside["stream"]) == ("runs", "admin")
+    assert "stream" not in inside["line"]
 
 
 def test_identifier_fields_join_the_context(capsys: pytest.CaptureFixture[str]) -> None:
@@ -116,8 +160,8 @@ def test_secrets_are_redacted(capsys: pytest.CaptureFixture[str]) -> None:
     configure_logging("cli", fmt="json", capture_libraries=False)
     log.info("x.y", "connect", password="hunter2", api_key="k", note="https://u:p@es:9200/i")
     (record,) = _json_lines(capsys)
-    assert record["password"] == "[redacted]"
-    assert record["api_key"] == "[redacted]"
+    assert record["data"]["x_y"]["password"] == "[redacted]"
+    assert record["data"]["x_y"]["api_key"] == "[redacted]"
     assert "hunter2" not in json.dumps(record)
 
     error = ValueError("cannot reach https://elastic:s3cret@es.internal:9200/appchi-v1")
@@ -170,8 +214,8 @@ def test_json_error_carries_a_structured_exception(capsys: pytest.CaptureFixture
         log.error("run.job_failed", "failed", exc=exc)
 
     (record,) = _json_lines(capsys)
-    assert record["error"] == "RuntimeError: analysis failed"
-    exception = record["exception"]
+    assert record["data"]["run_job_failed"]["error"] == "RuntimeError: analysis failed"
+    exception = record["error"]
     assert exception["type"] == "RuntimeError"
     assert exception["frames"][0].endswith(" in _outer")
     assert exception["caused_by"][0].startswith("KeyError: 'missing field' (at ")
@@ -281,3 +325,17 @@ def test_debug_shows_successful_reads(capsys: pytest.CaptureFixture[str]) -> Non
     assert any(
         " DEBUG portal http.request       GET /teams?page=2 → 200 in " in line for line in lines
     )
+
+
+def test_only_a_list_of_alerts_is_lifted_to_the_document(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    # Elasticsearch fixes a field's type on first sight: a count named "alerts" must never
+    # land where a group's list of alerts goes.
+    configure_logging("worker", fmt="json", capture_libraries=False)
+    log.warn("llm.batch_exhausted", "count", alerts=3)
+    log.info("llm.group", "list", alerts=[{"application": "a", "key_field": "k"}])
+
+    count, group = _json_lines(capsys)
+    assert "alerts" not in count and count["data"]["llm_batch_exhausted"]["alerts"] == 3
+    assert group["alerts"] == [{"application": "a", "key_field": "k"}]
