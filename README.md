@@ -316,6 +316,19 @@ error, its causes and the frames where it began. `LOG_LEVEL` (debug, info, warn,
 colour off on a terminal. Shared 0.1.9 holds the format and request logging, and operations
 0.2.8 pins it. Stdout carries only command output, such as the `weekly` table.
 
+## Logs in Elasticsearch (2026-10-20)
+
+With `LOG_FORWARD_URL` set, every record at `LOG_FORWARD_LEVEL` (default info) or above is
+also sent, as one JSON document, to the optional in-namespace Fluent Bit (`deploy/openshift/
+logging.yaml`, `fluent-bit.conf`), which writes the daily indices `<prefix>-runs-*` (everything a
+run does), `<prefix>-admin-*` (the console and commands) and `<prefix>-portal-*`. Each model
+group writes one `llm.group` record listing its alerts with their outcome, so a run, a team or
+an alert (`alerts.application`, `alerts.key_field`) can be searched; those records reach the
+console only at `LOG_LEVEL=debug`. The sender never blocks: it buffers up to 16 MB, sends every
+second, drops records when the collector is unreachable and says so once a minute
+(`log.forward_failed`). Shared 0.1.10 adds it, and operations 0.2.9 pins it. Deploying the
+collector is `deploy/openshift/README.md` section 15 (design "Log shipping to Elasticsearch").
+
 Migration `019_erase_operator_names` blanks every name already stored. It is roll-forward only:
 an image without 019 cannot start its init container against an 019 database, and only a
 pre-019 backup holds the erased names. Follow the migration gate in `deploy/openshift/README.md`.

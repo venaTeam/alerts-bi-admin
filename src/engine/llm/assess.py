@@ -204,12 +204,12 @@ def _assess_alerts(
     progress = _Progress(len(batches))
     log.info(
         "llm.started",
-        "Assessing {alerts:,} alerts in {batches} {batch_word}; {reused:,} verdicts reused "
+        "Assessing {alert_count:,} alerts in {batches} {batch_word}; {reused:,} verdicts reused "
         "from earlier runs"
         if batches
         else "Nothing to send to the model; {reused:,} verdicts reused from earlier runs",
         batch_word="batch" if len(batches) == 1 else "batches",
-        alerts=len(to_request),
+        alert_count=len(to_request),
         batches=len(batches),
         reused=result.reused_verdicts,
         model=model_version,
@@ -245,6 +245,9 @@ def _assess_alerts(
                 clock=clock,
                 sleep=sleep,
                 position=(position, len(batches)),
+            )
+            _log_group(
+                batch, (position, len(batches)), result.batch_attempts[first_attempt:], verdicts
             )
         progress.record(result.batch_attempts[first_attempt:], succeeded=verdicts is not None)
 
@@ -296,6 +299,81 @@ def _assess_alerts(
 
     progress.finish()
     return result
+
+
+def _log_group(
+    batch: Batch,
+    position: tuple[int, int],
+    attempts: Sequence[Mapping[str, Any]],
+    verdicts: Sequence[Verdict] | None,
+) -> None:
+    """One record per model group, with its alerts, for the runs log index.
+
+    Each alert carries its identity and the outcome of this group: the state and, when the
+    model answered, its assessment, principle and confidence. Never the alert document or
+    the model's justification (design "Log shipping to Elasticsearch").
+    """
+    if not log.enabled("info", console=False):
+        return
+    alerts: list[dict[str, Any]] = []
+    for index, alert in enumerate(batch.alerts):
+        entry: dict[str, Any] = {
+            "schema": alert.schema,
+            "application": alert.application,
+            "key_field": alert.key_field,
+            "alert_id": batch.alert_ids[index],
+        }
+        if verdicts is None:
+            entry["state"] = "unassessed"
+        else:
+            verdict = verdicts[index]
+            entry["state"] = state_for_verdict(verdict)
+            entry["assessment"] = verdict.assessment
+            entry["principle_id"] = verdict.principle_id
+            entry["confidence"] = verdict.confidence
+        alerts.append(entry)
+    states = dict.fromkeys(("llm_flagged", "needs_review", "assessed_good", "unassessed"), 0)
+    for entry in alerts:
+        states[entry["state"]] = states.get(entry["state"], 0) + 1
+    tokens: dict[str, Any] = {}
+    for key in ("input_tokens", "cached_tokens", "output_tokens"):
+        values = [attempt.get("metadata", {}).get(key) for attempt in attempts]
+        if values and all(isinstance(value, int) for value in values):
+            tokens[f"tokens_{key.removesuffix('_tokens')}"] = sum(values)
+    part = (
+        f", part {batch.partition_index + 1} of {batch.partition_count}"
+        if batch.partition_count > 1
+        else ""
+    )
+    log.info(
+        "llm.group",
+        "Group {group} of {groups} ({group_type} {group_value}{part}): {alert_count} "
+        "alert{alert_count:plural} "
+        + (
+            "assessed on attempt {attempts} in {duration_ms:ms}: {flagged} flagged, "
+            "{needs_review} need review, {good} good"
+            if verdicts is not None
+            else "failed all {attempts} attempts in {duration_ms:ms}; they stay unassessed"
+        ),
+        console=False,
+        group=position[0],
+        groups=position[1],
+        group_type=batch.group_type,
+        group_value=batch.group_value,
+        part=part,
+        partition=batch.partition_index + 1,
+        partitions=batch.partition_count,
+        alert_count=len(alerts),
+        attempts=len(attempts),
+        status="succeeded" if verdicts is not None else "exhausted",
+        duration_ms=sum(int(attempt.get("duration_ms") or 0) for attempt in attempts),
+        flagged=states["llm_flagged"],
+        needs_review=states["needs_review"],
+        good=states["assessed_good"],
+        unassessed=states["unassessed"],
+        **tokens,
+        alerts=alerts,
+    )
 
 
 class _Progress:
@@ -501,24 +579,8 @@ def _attempt_batch(
             }
         )
 
-        usage: dict[str, Any] = {
-            f"tokens_{key.removesuffix('_tokens')}": metadata[key]
-            for key in ("input_tokens", "cached_tokens", "output_tokens")
-            if isinstance(metadata.get(key), int)
-        }
         if verdicts is not None:
-            log.debug(
-                "llm.batch_succeeded",
-                "Batch {batch} of {batches} succeeded on attempt {attempt} in {duration_ms:ms}"
-                if saved is None
-                else "Batch {batch} of {batches} reused the stored response of attempt {attempt}",
-                batch=position[0],
-                batches=position[1],
-                attempt=attempt,
-                duration_ms=duration,
-                alerts=len(batch.alerts),
-                **usage,
-            )
+            # The group record written by the caller says how this batch ended.
             if journal is not None:
                 journal.complete_batch(cycle, succeeded=True)
             return verdicts, "", completed_at
@@ -540,7 +602,7 @@ def _attempt_batch(
             else "replayed from the audit journal"
             if saved is not None
             else "no attempts left",
-            alerts=len(batch.alerts),
+            alert_count=len(batch.alerts),
             error=reason,
         )
         if retrying:
@@ -548,12 +610,12 @@ def _attempt_batch(
 
     log.warn(
         "llm.batch_exhausted",
-        "Batch {batch} of {batches} failed all {attempts} attempts; its {alerts} alerts stay "
+        "Batch {batch} of {batches} failed all {attempts} attempts; its {alert_count} alerts stay "
         "unassessed and the run continues",
         batch=position[0],
         batches=position[1],
         attempts=MAX_ATTEMPTS,
-        alerts=len(batch.alerts),
+        alert_count=len(batch.alerts),
         error=failure_reason,
     )
     if journal is not None:

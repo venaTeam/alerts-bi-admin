@@ -211,7 +211,8 @@ def scan_schema(
                 reported_total = int(total["value"])
                 log.info(
                     "es.read_started",
-                    "Reading {schema} from {index}: {total:,} matching rows for {operators} "
+                    "Reading {schema} from {index}: {total:,} matching row{total:plural} for "
+                    "{operators} "
                     "operator{operators:plural}",
                     schema=schema,
                     index=index,
