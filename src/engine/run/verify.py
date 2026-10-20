@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from alerts_bi_shared.db.connection import connect
+from alerts_bi_shared.logging_setup import bind_log_context
 from alerts_bi_shared.timefmt import iso_instant
 
 from ..config import AppConfig
@@ -450,6 +451,8 @@ def verify_acceptance(
         closing(EsClient(config.es)) as es_client,
     ):
         for team_id, expected in manifest["teams"].items():
+            # Each team's records carry only its own run and stage.
+            bind_log_context(team_id=team_id, run_id=None, stage=None)
             payload, summary = execute_run(
                 team_id=team_id,
                 run_at=run_at,

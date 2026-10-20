@@ -85,7 +85,9 @@ def _iso(value: datetime) -> str:
     return iso_instant(value)
 
 
-def _search_with_retry(client: EsClient, body: dict[str, Any], index: str) -> dict[str, Any]:
+def _search_with_retry(
+    client: EsClient, body: dict[str, Any], index: str, page: int = 1
+) -> dict[str, Any]:
     """Run one page search, retrying transient failures with exponential backoff.
 
     Re-sending the identical body is safe: the PIT pins one view of the index and
@@ -106,7 +108,11 @@ def _search_with_retry(client: EsClient, body: dict[str, Any], index: str) -> di
             attempt += 1
             log.warn(
                 "es.search_retry",
+                "Search for page {page} of {index} failed{status_text}; retry {attempt} of "
+                "{max_retries} in {delay_seconds:dur}",
+                page=page,
                 index=index,
+                status_text=f" with HTTP {exc.status}" if exc.status is not None else "",
                 attempt=attempt,
                 max_retries=config.search_retries,
                 status=exc.status,
@@ -156,7 +162,12 @@ def scan_schema(
         # Not an error: a migrated team has no v1 operators, and a pre-migration team has
         # no v2 operator. Querying with an empty terms list would match nothing anyway,
         # but skipping makes the intent explicit in the logs.
-        log.info("es.skip_schema", schema=schema, reason="no configured operators")
+        log.info(
+            "es.skip_schema",
+            "No {schema} operators are configured for this team; skipping {schema}",
+            schema=schema,
+            reason="no configured operators",
+        )
         return 0, 0
 
     query = build_query(operators, window)
@@ -186,7 +197,7 @@ def scan_schema(
                 body["search_after"] = search_after
 
             before = perf_counter()
-            response = _search_with_retry(client, body, index)
+            response = _search_with_retry(client, body, index, pages + 1)
             search_seconds += perf_counter() - before
             cluster_ms += int(response.get("took", 0))
             pit_id = response.get("pit_id", pit_id)
@@ -198,6 +209,16 @@ def scan_schema(
                 if total.get("relation") != "eq" or "value" not in total:
                     raise ElasticsearchError(f"{index}: first page has no exact total")
                 reported_total = int(total["value"])
+                log.info(
+                    "es.read_started",
+                    "Reading {schema} from {index}: {total:,} matching rows for {operators} "
+                    "operator{operators:plural}",
+                    schema=schema,
+                    index=index,
+                    total=reported_total,
+                    operators=len(operators),
+                    page_size=size,
+                )
             pages += 1
 
             for hit in hits:
@@ -213,9 +234,12 @@ def scan_schema(
             if now - last_progress >= 30:
                 log.info(
                     "es.read_progress",
+                    "{schema} {rows:,} of {total:,} rows ({percent}%), {pages} page{pages:plural}, "
+                    "{elapsed_seconds:dur}",
                     schema=schema,
                     rows=row_count,
                     total=reported_total,
+                    percent=round(100 * row_count / reported_total) if reported_total else 100,
                     pages=pages,
                     elapsed_seconds=round(now - started, 3),
                 )
@@ -242,6 +266,8 @@ def scan_schema(
 
     log.info(
         "es.read_schema",
+        "Read {rows:,} {schema} rows in {pages} page{pages:plural}, {elapsed_seconds:dur} (Elasticsearch "
+        "{cluster_seconds:dur})",
         schema=schema,
         index=index,
         operators=len(operators),

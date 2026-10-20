@@ -105,7 +105,7 @@ def migrate_database(config: SqlConfig, database: str) -> tuple[list[str], list[
         )
         if exists is None:
             master.execute(f"CREATE DATABASE {quoted}")
-            log.info("db.database_created", database=database)
+            log.info("db.database_created", "Created database {database}", database=database)
 
     return migrate(config, database)
 
@@ -117,7 +117,12 @@ def stamp(config: SqlConfig, database: str, revision: str = "head") -> None:
     are already correct, and only ``alembic_version`` is missing.
     """
     command.stamp(alembic_config(config, database), revision)
-    log.info("db.stamped", database=database, revision=revision)
+    log.info(
+        "db.stamped",
+        "Recorded revision {revision} of {database} as applied without running it",
+        database=database,
+        revision=revision,
+    )
 
 
 def reset_test_database(config: SqlConfig, database: str) -> None:
@@ -151,6 +156,10 @@ def reset_test_database(config: SqlConfig, database: str) -> None:
             """
         )
         master.execute(f"CREATE DATABASE {quoted}")
-        log.info("db.test_database_recreated", database=database)
+        log.info(
+            "db.test_database_recreated",
+            "Dropped and recreated the disposable test database {database}",
+            database=database,
+        )
 
     migrate(config, database)

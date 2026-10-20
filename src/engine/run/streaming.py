@@ -15,6 +15,7 @@ from typing import Any
 from alerts_bi_operations.registry import Panel, TeamEntry
 from alerts_bi_shared.catalogs import CORE_RULE_IDS, V2_READINESS_RULE_IDS
 from alerts_bi_shared.hashing import sha256_of
+from alerts_bi_shared.logging_setup import bind_log_context
 from alerts_bi_shared.window import RunWindow
 
 from ..domain.metrics import DailyVolume, ratio_or_none
@@ -327,7 +328,9 @@ def analyze_team(
         ("v2", [] if team.v2_operator is None else [team.v2_operator]),
     ):
         analysis = SchemaAccumulator(schema, window, team.panels_for(schema))
+        bind_log_context(stage=f"es:{schema}")
         scan_schema(client, schema, operators, window, analysis.add, hash_documents=False)
+        bind_log_context(stage=f"analysis:{schema}")
         analysis.finish()
         result[schema] = analysis
     return result

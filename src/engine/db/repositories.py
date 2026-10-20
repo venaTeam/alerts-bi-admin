@@ -12,6 +12,7 @@ Two write scopes exist and they are deliberately different:
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -26,6 +27,7 @@ from alerts_bi_operations.db.reports import (
     get_run_panels,
 )
 from alerts_bi_shared.db.connection import Database
+from alerts_bi_shared.logging_setup import bind_log_context, log
 
 from .bulk import insert_rows
 
@@ -279,6 +281,8 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
     prevent.
     """
     run_id = payload.run["run_id"]
+    bind_log_context(run_id=run_id, stage="persist")
+    clock = time.monotonic()
 
     with db.transaction():
         # A published week is what readers are looking at; replacing its rows underneath
@@ -355,6 +359,17 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
             row.get("quality_state") == "unassessed" for row in payload.findings
         ):
             db.execute("DELETE FROM run_analysis_checkpoints WHERE run_id=:run", {"run": run_id})
+    bind_log_context(stage=None)
+    log.info(
+        "run.persisted",
+        "Stored the run in {elapsed_seconds:dur}: {findings:,} alert findings, {days:,} daily "
+        "rows, {verdicts:,} new model verdicts",
+        elapsed_seconds=round(time.monotonic() - clock, 3),
+        findings=len(payload.findings),
+        days=len(payload.daily_metrics),
+        verdicts=len(payload.verdicts),
+        batch_attempts=len(payload.batch_attempts),
+    )
 
 
 def insert_verdict_if_absent(db: Database, verdict: dict[str, Any]) -> None:

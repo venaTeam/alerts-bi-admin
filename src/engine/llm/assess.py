@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Any, Final
 
 from alerts_bi_shared.hashing import compact_json
-from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.logging_setup import log, log_context, redact_error
 from alerts_bi_shared.versions import RULESET_VERSION
 
 from ..db.llm_audit import SqlLlmJournal
@@ -201,8 +201,22 @@ def _assess_alerts(
             for batch in batches
         ]
     result.requested_batches = len(batches)
+    progress = _Progress(len(batches))
+    log.info(
+        "llm.started",
+        "Assessing {alerts:,} alerts in {batches} {batch_word}; {reused:,} verdicts reused "
+        "from earlier runs"
+        if batches
+        else "Nothing to send to the model; {reused:,} verdicts reused from earlier runs",
+        batch_word="batch" if len(batches) == 1 else "batches",
+        alerts=len(to_request),
+        batches=len(batches),
+        reused=result.reused_verdicts,
+        model=model_version,
+        max_batch_size=max_batch_size or 200,
+    )
 
-    for batch in batches:
+    for position, batch in enumerate(batches, start=1):
         request = build_request(batch, RULESET_VERSION, prompt_version)
         if not factored:
             # Evaluation-only representation trial. Every source field is retained.
@@ -216,19 +230,23 @@ def _assess_alerts(
         # Serialized ONCE and reused byte-for-byte on every retry.
         request_text, request_hash = serialize_request(request)
 
-        verdicts, failure_reason, classified_at = _attempt_batch(
-            batch=batch,
-            request_text=request_text,
-            request_hash=request_hash,
-            client=client,
-            system_prompt=system_prompt,
-            run_id=run_id,
-            now=now,
-            batch_attempts=result.batch_attempts,
-            journal=journal,
-            clock=clock,
-            sleep=sleep,
-        )
+        with log_context(batch_id=batch.batch_id):
+            first_attempt = len(result.batch_attempts)
+            verdicts, failure_reason, classified_at = _attempt_batch(
+                batch=batch,
+                request_text=request_text,
+                request_hash=request_hash,
+                client=client,
+                system_prompt=system_prompt,
+                run_id=run_id,
+                now=now,
+                batch_attempts=result.batch_attempts,
+                journal=journal,
+                clock=clock,
+                sleep=sleep,
+                position=(position, len(batches)),
+            )
+        progress.record(result.batch_attempts[first_attempt:], succeeded=verdicts is not None)
 
         if verdicts is not None:
             for index, verdict in enumerate(verdicts):
@@ -276,7 +294,72 @@ def _assess_alerts(
                     alert=alert,
                 )
 
+    progress.finish()
     return result
+
+
+class _Progress:
+    """Batch counts for a progress record every 30 seconds and a closing summary."""
+
+    INTERVAL_SECONDS: Final = 30.0
+
+    def __init__(self, total: int) -> None:
+        self.total = total
+        self.done = 0
+        self.retried = 0
+        self.exhausted = 0
+        self.tokens: dict[str, int | None] = {
+            "input_tokens": 0,
+            "cached_tokens": 0,
+            "output_tokens": 0,
+        }
+        self.started = self.last = time.monotonic()
+
+    def record(self, attempts: Sequence[Mapping[str, Any]], *, succeeded: bool) -> None:
+        self.done += 1
+        self.retried += len(attempts) > 1
+        self.exhausted += not succeeded
+        for attempt in attempts:
+            metadata = attempt.get("metadata") or {}
+            for key, total in self.tokens.items():
+                value = metadata.get(key) if isinstance(metadata, Mapping) else None
+                # Usage the endpoint did not report stays unknown, never zero.
+                self.tokens[key] = (
+                    None if total is None or not isinstance(value, int) else total + value
+                )
+        now = time.monotonic()
+        if now - self.last >= self.INTERVAL_SECONDS and self.done < self.total:
+            self.last = now
+            log.info(
+                "llm.progress",
+                "{done} of {total} batches done ({percent}%), {retried} retried, {exhausted} "
+                "exhausted, {elapsed_seconds:dur}",
+                done=self.done,
+                total=self.total,
+                percent=round(100 * self.done / self.total),
+                retried=self.retried,
+                exhausted=self.exhausted,
+                elapsed_seconds=round(now - self.started, 3),
+            )
+
+    def finish(self) -> None:
+        if not self.total:
+            return
+        usage: dict[str, Any] = {
+            f"tokens_{key.removesuffix('_tokens')}": value
+            for key, value in self.tokens.items()
+            if value is not None
+        }
+        log.info(
+            "llm.done",
+            "{total} batches in {elapsed_seconds:dur}: {retried} needed a retry, {exhausted} "
+            "exhausted",
+            total=self.total,
+            retried=self.retried,
+            exhausted=self.exhausted,
+            elapsed_seconds=round(time.monotonic() - self.started, 3),
+            **usage,
+        )
 
 
 def _attempt_batch(
@@ -292,6 +375,7 @@ def _attempt_batch(
     journal: SqlLlmJournal | None,
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
+    position: tuple[int, int] = (1, 1),
 ) -> tuple[list[Verdict] | None, str, datetime]:
     """Run one batch through at most three attempts.
 
@@ -417,35 +501,60 @@ def _attempt_batch(
             }
         )
 
+        usage: dict[str, Any] = {
+            f"tokens_{key.removesuffix('_tokens')}": metadata[key]
+            for key in ("input_tokens", "cached_tokens", "output_tokens")
+            if isinstance(metadata.get(key), int)
+        }
         if verdicts is not None:
-            log.info(
+            log.debug(
                 "llm.batch_succeeded",
-                batch_id=batch.batch_id,
+                "Batch {batch} of {batches} succeeded on attempt {attempt} in {duration_ms:ms}"
+                if saved is None
+                else "Batch {batch} of {batches} reused the stored response of attempt {attempt}",
+                batch=position[0],
+                batches=position[1],
                 attempt=attempt,
+                duration_ms=duration,
                 alerts=len(batch.alerts),
+                **usage,
             )
             if journal is not None:
                 journal.complete_batch(cycle, succeeded=True)
             return verdicts, "", completed_at
 
+        retrying = saved is None and attempt < MAX_ATTEMPTS
+        delay = _retry_delay(attempt, retry_after) if retrying else 0.0
         log.warn(
-            "llm.batch_attempt_failed", batch_id=batch.batch_id, attempt=attempt, status=status
+            "llm.batch_attempt_failed",
+            "Batch {batch} of {batches}, attempt {attempt} of {max_attempts}: {status} after "
+            "{duration_ms:ms}; {next_step}",
+            batch=position[0],
+            batches=position[1],
+            attempt=attempt,
+            max_attempts=MAX_ATTEMPTS,
+            status=status,
+            duration_ms=duration,
+            next_step=f"retrying in {delay:.1f}s"
+            if retrying
+            else "replayed from the audit journal"
+            if saved is not None
+            else "no attempts left",
+            alerts=len(batch.alerts),
+            error=reason,
         )
-        if saved is None and attempt < MAX_ATTEMPTS:
-            delay = _retry_delay(attempt, retry_after)
-            log.info(
-                "llm.batch_retry_wait",
-                batch_id=batch.batch_id,
-                attempt=attempt,
-                delay_seconds=round(delay, 2),
-            )
+        if retrying:
             sleep(delay)
 
-    log.error(
+    log.warn(
         "llm.batch_exhausted",
-        batch_id=batch.batch_id,
+        "Batch {batch} of {batches} failed all {attempts} attempts; its {alerts} alerts stay "
+        "unassessed and the run continues",
+        batch=position[0],
+        batches=position[1],
         attempts=MAX_ATTEMPTS,
         alerts=len(batch.alerts),
+        error=failure_reason,
     )
     if journal is not None:
         journal.complete_batch(cycle, succeeded=False)

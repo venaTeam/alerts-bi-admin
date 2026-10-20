@@ -17,6 +17,7 @@ their file; the schema is the file.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -135,6 +136,7 @@ def apply_sql(version: str, connection: Connection | None = None) -> None:
 
         connection = op.get_bind()
 
+    started = time.monotonic()
     migration = migration_named(version)
     for batch in _GO.split(migration.sql_text):
         if batch.strip():
@@ -152,4 +154,10 @@ def apply_sql(version: str, connection: Connection | None = None) -> None:
             "applied_at": datetime.now(UTC).replace(tzinfo=None),
         },
     )
-    log.info("db.migration_applied", version=migration.version, checksum=migration.checksum)
+    log.info(
+        "db.migration_applied",
+        "Applied migration {version} in {elapsed_seconds:dur}",
+        version=migration.version,
+        elapsed_seconds=round(time.monotonic() - started, 3),
+        checksum=migration.checksum,
+    )

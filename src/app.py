@@ -23,7 +23,8 @@ from alerts_bi_operations.review.decisions import (
 )
 from alerts_bi_operations.review.publication import PublicationRefused, publish_run, unpublish_run
 from alerts_bi_shared.db.connection import Database, WebDatabasePool
-from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.logging_setup import log
+from alerts_bi_shared.request_logging import RequestLogMiddleware
 from alerts_bi_shared.team_urls import decode_team_id
 from alerts_bi_shared.timefmt import iso_instant
 from alerts_bi_shared.versions import APP_VERSION
@@ -202,6 +203,9 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         return fields
 
     def back(path: str, message: str, error: bool = False, anchor: str = "") -> RedirectResponse:
+        if error:
+            # Refusals return a redirect, so without this they would leave no trace.
+            log.info("console.refused", "Refused: {message}", message=message, page=path)
         key = "error" if error else "done"
         separator = "&" if "?" in path else "?"
         fragment = f"#{anchor}" if anchor else ""
@@ -273,7 +277,11 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             with database() as db:
                 check_schema(db)
         except Exception as exc:
-            log.error("admin.database_unavailable", error=redact_error(exc))
+            log.error(
+                "admin.database_unavailable",
+                "Health check: the operator schema cannot be read",
+                exc=exc,
+            )
             from .engine.api.schemas import CheckOut
 
             checks["operator_schema"] = CheckOut(
@@ -635,15 +643,23 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         except Exception as exc:
             log.error(
                 "console.trigger_failed",
+                "The run submission could not be saved",
                 team_id=team_id,
-                error=redact_error(exc),
+                exc=exc,
             )
             return back(
                 pages.team_url(team_id),
                 "The run could not finish. Check the service logs and team history before retrying.",
                 True,
             )
-        log.info("console.submitted", job_id=job["job_id"])
+        log.info(
+            "console.submitted",
+            "Run submitted from the console; job is {status}",
+            status=job["status"],
+            team_id=team_id,
+            run_id=job.get("run_id"),
+            job_id=job["job_id"],
+        )
         return back(
             pages.team_url(team_id, job_id=job["job_id"]),
             "Run accepted. It starts before the next queued week. You can leave this page."
@@ -780,11 +796,18 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         except Exception as exc:
             log.error(
                 "console.backfill_failed",
+                "The backfill submission could not be saved",
                 team_id=team_id,
-                error=redact_error(exc),
+                exc=exc,
             )
             return back(path, "The runs could not be saved. Check the service logs.", True)
-        log.info("console.backfill_submitted", backfill_id=row["backfill_id"])
+        log.info(
+            "console.backfill_submitted",
+            "Backfill of {weeks} weeks submitted from the console",
+            weeks=row["week_count"],
+            team_id=team_id,
+            backfill_id=row["backfill_id"],
+        )
         count = int(row["week_count"])
         return back(
             path,
@@ -908,7 +931,16 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     return back(
                         team_path(str(run["team_id"]), run_id), f"Not published: {detail}", True
                     )
-            log.info("admin.published", run_id=run_id)
+            log.info(
+                "admin.published",
+                "Published the run as the week ending {week}{replaced}",
+                week=f"{result.window_end:%Y-%m-%d}",
+                replaced=f"; withdrew run {result.replaced_run_id[:16]}"
+                if result.replaced_run_id
+                else "",
+                team_id=result.team_id,
+                run_id=run_id,
+            )
             message = "Published."
             if result.replaced_run_id:
                 message += (
@@ -931,7 +963,12 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     return back(
                         team_path(str(run["team_id"]), run_id), f"Not withdrawn: {exc}", True
                     )
-            log.info("admin.withdrawn", run_id=run_id)
+            log.info(
+                "admin.withdrawn",
+                "Withdrew the published week; readers no longer see it",
+                team_id=run["team_id"],
+                run_id=run_id,
+            )
             return back(
                 team_path(str(run["team_id"]), run_id),
                 "Withdrawn. Readers no longer see this week.",
@@ -968,7 +1005,12 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                             team_id = delete_run(db, run_id, shared_lock=shared_lock)
                         except DeletionRefused as exc:
                             return back(team_path(str(run["team_id"]), run_id), str(exc), True)
-                    log.info("admin.deleted", run_id=run_id, team_id=team_id)
+                    log.info(
+                        "admin.deleted",
+                        "Permanently deleted the run and its stored results",
+                        run_id=run_id,
+                        team_id=team_id,
+                    )
                     return back(pages.team_url(team_id), "Run permanently deleted.")
             except WeeklyBusy:
                 raise HTTPException(
@@ -1015,12 +1057,25 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 except DecisionRefused as exc:
                     return back(path, f"Not recorded: {exc}", True)
                 except Exception as exc:  # pragma: no cover - database failure
-                    log.error("admin.decision_failed", error=redact_error(exc))
+                    log.error(
+                        "admin.decision_failed",
+                        "The decision could not be recorded",
+                        run_id=run_id,
+                        exc=exc,
+                    )
                     return back(path, "Not recorded: the database refused it.", True)
-            log.info("admin.decided", run_id=run_id)
+            log.info(
+                "admin.decided",
+                "Recorded decision {state} on finding {finding}",
+                state=fields.get("state", ""),
+                finding=fields.get("finding", ""),
+                run_id=run_id,
+            )
             return back(path, "Decision recorded.")
 
         return await run_in_threadpool(act)
 
     app.include_router(runs_router)
+    # Added last, so it is outermost: it also sees the guard's own refusals.
+    app.add_middleware(RequestLogMiddleware)
     return app

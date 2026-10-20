@@ -300,6 +300,22 @@ Publications, withdrawals, decisions, runs and backfills store no person; only t
 scheduler still marks its own publications `weekly-schedule`. The CLI no longer takes `--by`
 and `serve` no longer takes `--dev-user`. Operations 0.2.7 carries this change.
 
+## Console logs (2026-10-20)
+
+Every process writes one readable line per record to stderr (design "Console log format"):
+
+```text
+2026-10-20 14:30:20.606Z INFO  worker es.read_schema     Read 5,867 v1 rows in 6 pages, 1.0s (Elasticsearch 320ms)  index=scl-appchi-v1  [team=legacy-batch-jobs run=57c964e4a11fc015 job=e9501a71]
+```
+
+The process is `ui`, `worker`, `weekly`, `migrate`, `cli` or `portal`. The bracketed context
+ends every line of a job, run or request, so `grep <run id>` returns the whole story of a run.
+A failure is an `ERROR` line naming the stage that broke, followed by indented lines with the
+error, its causes and the frames where it began. `LOG_LEVEL` (debug, info, warn, error) and
+`LOG_FORMAT` (`console`, or `json` for a log collector) are read at startup; `NO_COLOR` turns
+colour off on a terminal. Shared 0.1.9 holds the format and request logging, and operations
+0.2.8 pins it. Stdout carries only command output, such as the `weekly` table.
+
 Migration `019_erase_operator_names` blanks every name already stored. It is roll-forward only:
 an image without 019 cannot start its init container against an 019 database, and only a
 pre-019 backup holds the erased names. Follow the migration gate in `deploy/openshift/README.md`.
