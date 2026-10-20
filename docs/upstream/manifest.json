@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "69dc93f2c4efbf938b72982e8a109728c55c3496",
+  "revision": "72c54f549c5bb39186514a0331bde08af0f38e9d",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
-    "docs/upstream/alerts_bi_design.md": "12461c21ead5f0c636ebdde3a6823aa49959982e4fae8146a618042ee3fb80ee",
+    "docs/upstream/alerts_bi_design.md": "579f3ed5ba0b3b2e3e016ad854fa906aaef67a93fb45579b142a1e0c601aad4a",
     "docs/upstream/alerts_bi_flow.md": "e3d5276f89fe44b6dc431f17c759a278cdf0d914cdcd6c41963791bee08d6d4d",
     "docs/upstream/alerts_bi_implementation_plan.md": "933214da9cbcd5001fb60a4af30c41b7e039cf0aec0be2eb87ea07e4732afdb6",
     "docs/upstream/async-runs.md": "50088b8281df59e51128442b4930219d3ad6e352b0eac8535cf5e0b9ebc348c0",
@@ -11,7 +11,7 @@
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",
     "docs/upstream/manual-worker-runbook.md": "7ce0162babb06c0508c6b21d28bdfa8aaa2c7c16fb7f1ad88ec3055d4e313e24",
-    "docs/upstream/openshift-deployment.md": "b3919cb43b9f5a620c9077d4fde4687fa69bce222d78c9f62e0a917435ceba68",
+    "docs/upstream/openshift-deployment.md": "3312e9162f75b8987a8751f40b912babae0678d707975fa5e047806557166246",
     "docs/upstream/outputs.md": "7e32b3238eb1a2cbf572183c65350918b447a25c48f5cf03f842492360cf0589",
     "docs/upstream/read-path-performance.md": "6db0e7bf73a2eb57c4706f6597634d8a36ed3b1d841ca8ac38e7a7ebbc4c7e2d",
     "docs/upstream/repository-separation-plan.md": "fe214a73e2e619b6525f36c7c3bce50ebd5a784c41add6c266936e8bcde5bf5c",
@@ -36,6 +36,7 @@
     "docs/decisions/004-admin-run-lifecycle.md": "bd87594ee44166948457ac0cfb8b279c1f249c4adbf57bf5ef1dff58d3fd79c4",
     "docs/decisions/005-operator-backfill.md": "e3902ffb8f994916cf90e13f243538c477eba481ab26300278c665702dce1d50",
     "docs/decisions/006-console-redesign.md": "7da58c1c69238b99b624d052932d1b68ce0855a084f62421b6c43f9b06402030",
-    "docs/decisions/007-admin-console-without-login.md": "aa7886d9a43ec1c14d61f3c1a9d366b3bfc54029e399a619f6177f6516afc943"
+    "docs/decisions/007-admin-console-without-login.md": "aa7886d9a43ec1c14d61f3c1a9d366b3bfc54029e399a619f6177f6516afc943",
+    "docs/decisions/008-console-log-format.md": "77a19df9646fa10bb69cd4cf286e47df532cdc9d8fc8e6ee12af864b49469597"
   }
 }
