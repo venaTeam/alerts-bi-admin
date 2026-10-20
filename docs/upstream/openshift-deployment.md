@@ -17,6 +17,7 @@ deploying agent works from the release checkouts and supplies only the listed va
 | admin | `deploy/openshift/admin.yaml` | OpenShift Template: ServiceAccount, Deployment (migrate init container, admin, run-worker), Service, Route, CronJob `alerts-bi-weekly` |
 | admin | `deploy/openshift/admin-job.yaml` | OpenShift Template: one `alerts-bi-admin` command as a Job (`db status`, `registry check`, the maintenance `db setup`) |
 | admin | `deploy/openshift/{values,config,secrets}.env.example` | Template values, the `alerts-bi-config` ConfigMap keys and the `alerts-bi-secrets` keys |
+| admin | `deploy/openshift/logging.yaml`, `fluent-bit.conf`, `logging-values.env.example`, `logs-es.env.example` | Optional log collector (runbook section 15): Template, its configuration, its values and the `alerts-bi-logs-es` keys |
 | portal | `deploy/openshift/README.md`, `portal.yaml`, `values.env.example` | The portal runbook and Template: ServiceAccount, Deployment, Service, Route |
 
 This document keeps the requirements those files implement. The templates are rendered with
@@ -38,6 +39,9 @@ that were in this document are replaced. Deploy admin first, then the portal.
 | `alerts-bi-admin-secrets` | Secret: ADMIN_SECRET | operator, generated | admin container |
 | `alerts-bi-ca-bundle` | optional ConfigMap with `ca-bundle.crt` | operator, for a private CA | admin, its jobs, portal (mounted at `/etc/alerts-bi-ca`) |
 | `alerts-bi-portal` | Deployment, Service, Route, ServiceAccount | `portal.yaml` | readers |
+| `alerts-bi-logs` | optional Deployment, Service, ServiceAccount: the log collector | `logging.yaml` (admin) | admin, its jobs and the portal send records to it |
+| `alerts-bi-logs-config` | optional ConfigMap with `fluent-bit.conf` | operator, from admin's `fluent-bit.conf` | log collector |
+| `alerts-bi-logs-es` | optional Secret: LOGS_ES_HOST, LOGS_ES_PORT, LOGS_ES_USER, LOGS_ES_PASSWORD | operator, from `logs-es.env` | log collector only |
 | `alerts-bi-portal-sql` | optional Secret: SQL_USER, SQL_PASSWORD | operator, for a reader-only login | portal |
 
 Preserve the current namespace, SQL database/login and registry. Build immutable admin and
@@ -53,6 +57,8 @@ on the retired runs package/image/repository. Apply migrations before consumers.
 | SSL_CERT_FILE | Optional; set to the mounted CA bundle when the model endpoint uses a private CA (the model client honours it). Never set but empty |
 | LOG_LEVEL | debug, info, warn or error; default info |
 | LOG_FORMAT | console (default) for people reading `oc logs`, or json for a log collector that parses each line (design "Console log format", 2026-10-20) |
+| LOG_FORWARD_URL | Optional; unset sends nothing. `http://alerts-bi-logs:9880` once the log collector is deployed (design "Log shipping to Elasticsearch", 2026-10-20) |
+| LOG_FORWARD_LEVEL | Lowest level sent to the log collector: debug, info, warn or error; default info |
 | ADMIN_HOST=0.0.0.0, ADMIN_PORT=8200 | Set by the template on the admin container (amended 2026-10-19: no login, so the console listens on the pod address) |
 | ADMIN_SECRET | Private random value of at least 32 characters, signs the CSRF tokens (bound to the day only since 2026-10-19) |
 | ADMIN_REGISTRY_PATH=/etc/alerts-bi/teams.json | Set by the templates on every admin container and job, so commands without `--registry` read the mounted registry, never the packaged mock one |
