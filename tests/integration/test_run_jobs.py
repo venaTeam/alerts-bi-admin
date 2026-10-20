@@ -230,6 +230,67 @@ def test_pending_jobs_prevent_deletion_and_terminal_jobs_are_removed_with_run(
     assert client.get(row["status_url"]).status_code == 404
 
 
+def delete(client: TestClient, run_id: str) -> Any:
+    token = client.get("/csrf").json()["token"]
+    return client.post(f"/runs/{run_id}/delete", data={"csrf": token, "confirm_delete": "1"})
+
+
+def present(run_id: str) -> bool:
+    with connect(CONFIG.sql, DB) as db:
+        return (
+            db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id})
+            is not None
+        )
+
+
+def test_pending_job_does_not_block_deleting_another_run(client: TestClient) -> None:
+    row = submit(client, "pending-other").json()
+    other = "d" * 64
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(db, PersistencePayload(run=sample_run(run_id=other)))
+    response = delete(client, other)
+    assert response.status_code == 303 and "done=" in response.headers["location"]
+    assert not present(other)
+    assert client.get(row["status_url"]).json()["status"] == "pending"
+
+
+def test_running_job_does_not_block_deleting_another_run(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker holds the shared execution lock for the whole job; only its own run waits."""
+    row = submit(client, "running-other").json()
+    other = "d" * 64
+    with connect(CONFIG.sql, DB) as db:
+        # The older result this rerun replaces, and an unrelated stored run.
+        persist_run(db, PersistencePayload(run=sample_run(run_id=row["run_id"])))
+        persist_run(db, PersistencePayload(run=sample_run(run_id=other)))
+    entered, release = Event(), Event()
+    actual = service.execute_request
+
+    def delayed(*args: Any, **kwargs: Any) -> Any:
+        entered.set()
+        assert release.wait(30), "The test must release the deliberately delayed worker"
+        return actual(*args, **kwargs)
+
+    monkeypatch.setattr(jobs, "execute_request", delayed)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(jobs.work_once, ApiSettings(CONFIG, database=DB))
+        try:
+            assert entered.wait(10)
+            assert client.get(row["status_url"]).json()["status"] == "running"
+            own = delete(client, row["run_id"])
+            assert own.status_code == 303 and "error=" in own.headers["location"]
+            assert present(row["run_id"])
+            deleted = delete(client, other)
+            assert deleted.status_code == 303 and "done=" in deleted.headers["location"]
+            assert not present(other)
+        finally:
+            release.set()
+        assert future.result(timeout=120)
+    assert client.get(row["status_url"]).json()["status"] == "completed"
+    assert present(row["run_id"])
+
+
 @pytest.mark.parametrize("state", ["pending", "running"])
 @pytest.mark.parametrize("command", ["run", "weekly", "verify-acceptance", "report"])
 def test_orphan_blocks_installed_writers_until_recovery(

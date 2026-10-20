@@ -1209,7 +1209,7 @@ remain append-only while their parent run exists. Migration `009_run_deletion` p
 decision cleanup only in the owning connection's explicit whole-run deletion scope;
 a checked parent foreign key rejects orphan inserts, and updates remain forbidden. Deletion
 uses the manual gate, scheduler lock, model-review lock and run-row lock; active work is
-refused. The run id is logged without alert content (the actor was dropped on 2026-10-19).
+refused (narrowed to the run's own work on 2026-10-20, below). The run id is logged without alert content (the actor was dropped on 2026-10-19).
 
 **Concurrency clarified 2026-10-13:** manual HTTP/API runs, manual CLI runs and reports, the weekly
 schedule and deletion share the database's existing `alerts-bi-weekly` SQL session lock.
@@ -1228,6 +1228,20 @@ tracked; deleting the run leaves them, including `alert_worklist.csv`, until rem
 remain because other runs can use them. Deleting a published run removes it from the portal
 and all its download routes. The weekly schedule may recreate a deleted due week; deletion
 does not disable enrollment. No stored run is deleted as part of installing this change.
+
+**Amended 2026-10-20 (product owner): a running job no longer blocks deleting other runs.**
+The worker holds the shared `alerts-bi-weekly` lock for a whole job, so an operator could not
+delete any run while one job (or a long backfill) ran. Deletion now refuses only work on the
+run itself: that run's own pending, running or queued job, its active model review, or a
+publication change holding its row. When the shared lock is free, deletion takes it as
+before. When it is taken and a job holds the active slot for another run, deletion goes
+ahead without it: while a job holds the slot, CLI runs and reports, the weekly schedule,
+acceptance verification and synchronous HTTP runs refuse to start, so the lock's holder can
+only be the worker, and deletion locks that job's row so the worker cannot finish and hand
+the lock on until the deletion commits. When the lock is taken and no job holds the slot,
+something without a job record (a CLI run or report, the weekly schedule) holds it, and
+deletion still returns 409, so a CLI rerun or report of the same run keeps blocking its
+deletion as the 2026-10-13 clarification requires.
 
 ### 7.13 LLM review quality, evaluation and durable audit
 

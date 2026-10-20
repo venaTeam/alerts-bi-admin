@@ -73,6 +73,10 @@ Standalone CLI `report` must acquire the same lock before run-id/team lookup and
 through all file writes. Pause after SQL rendering but before writing to the configured
 output root: deletion must return 409, then succeed after reporting finishes without
 leaving recreated files. Verify both selection modes and lock release on write failure.
+Since 2026-10-20 deletion beside a worker job for another run goes ahead without the shared
+lock, locking that job's row (design section 7.12). Verify that a pending job and a paused
+running job leave another run deletable, still refuse their own run, and that the job then
+completes.
 
 ## Source ownership amendment — 2026-10-12
 

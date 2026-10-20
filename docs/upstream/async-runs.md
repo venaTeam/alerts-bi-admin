@@ -59,7 +59,7 @@ Submission deliberately refuses active manual/CLI/report/weekly operations with 
 does not create a queue behind them. Removing admission locks would violate this contract. The process-local
 gate remains a compatibility guard. The existing alerts-bi-weekly SQL session lock on its
 own connection protects the entire worker lifecycle from manual CLI runs, standalone reports,
-weekly scheduling and permanent deletion. Admission also refuses a busy scheduler lock.
+weekly scheduling and permanent deletion of the job's own run. Admission also refuses a busy scheduler lock.
 The durable pending/running slot reserves execution even after a worker's SQL sessions
 close: CLI runs, weekly runs, reports and acceptance verification check the slot while
 holding the shared lock and refuse until the worker completes or reconciles it. The
@@ -86,8 +86,10 @@ re-execution of interrupted analysis occurs. Pending jobs survive restart and ex
 normally. Infrastructure failures exit the worker for its supervisor to restart. A failure
 after SQL persistence still reports the committed analysis as completed.
 
-Permanent deletion refuses pending/running manual jobs and removes related terminal submission
-records in the same SQL transaction as the run. Their status URLs then return 404. Idempotency
+Permanent deletion refuses the run's own pending/running manual job and removes related terminal
+submission records in the same SQL transaction as the run. Since 2026-10-20 a job for another
+run no longer blocks it: deletion goes ahead beside the worker, locking the active job's row
+(design section 7.12). Their status URLs then return 404. Idempotency
 records live until explicit deletion of their parent run.
 
 ## Outputs and rollout

@@ -7,18 +7,24 @@ import re
 from alerts_bi_shared.db.connection import Database
 
 from .engine.api.jobs import lock_team_queue
+from .engine.api.service import WeeklyBusy
 
 
 class DeletionRefused(ValueError):
     """The run is missing or currently in use."""
 
 
-def delete_run(db: Database, run_id: str) -> str:
+def delete_run(db: Database, run_id: str, *, shared_lock: bool = True) -> str:
     """Delete in one SQL transaction; return the team for the post-delete redirect.
 
-    The caller holds the HTTP run gate and weekly schedule lock. The audit lock also
-    excludes an active model review from a separate CLI process. Run-row locks serialize
-    publication and deletion. Shared prompt artifacts, verdicts and panel parses survive.
+    The caller holds the HTTP run gate and normally the weekly schedule lock. The job worker
+    holds that lock for a whole run, so without it (``shared_lock=False``) deletion goes
+    ahead only beside a job holding the active slot for another run: while a job holds the
+    slot, CLI runs and reports, the weekly schedule and synchronous HTTP runs refuse to
+    start, so the lock's holder is the worker, and locking the job's row keeps it there
+    until this transaction ends. The audit lock also excludes an active model review from a
+    separate CLI process. Run-row locks serialize publication and deletion. Shared prompt
+    artifacts, verdicts and panel parses survive.
     """
     if re.fullmatch(r"[a-f0-9]{64}", run_id) is None:
         raise DeletionRefused("Invalid run id.")
@@ -31,8 +37,13 @@ def delete_run(db: Database, run_id: str) -> str:
             is None
         ):
             raise DeletionRefused("Apply database migration 009_run_deletion before deleting runs.")
-        if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1"):
-            raise DeletionRefused("A run is pending or active. Try deleting after it finishes.")
+        active = db.query(
+            "SELECT run_id FROM run_jobs WITH (UPDLOCK, HOLDLOCK) WHERE active_slot=1"
+        )
+        if not shared_lock and not active:
+            raise WeeklyBusy("another run, report, weekly schedule or deletion is in progress")
+        if any(row["run_id"] == run_id for row in active):
+            raise DeletionRefused("This run is pending or active. Try deleting after it finishes.")
         locked = db.query_one(
             "DECLARE @result INT; EXEC @result = sys.sp_getapplock "
             "@Resource=:resource, @LockMode='Exclusive', @LockOwner='Transaction', @LockTimeout=0; "
