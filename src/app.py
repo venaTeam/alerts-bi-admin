@@ -9,7 +9,7 @@ the command line calls, and then redirects back with a message.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import ExitStack, asynccontextmanager, contextmanager
 from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode
@@ -949,13 +949,23 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             if not gate.acquire():
                 raise HTTPException(409, "A run is active. Try deleting after it finishes.")
             try:
-                # delete_run checks the active slot inside its own transaction;
-                # retain its browser refusal message while holding the shared lock.
-                with schedule_lock(api_settings.config, settings.database, allow_manual_job=True):
+                # delete_run checks the active slot inside its own transaction; retain its
+                # browser refusal message. The worker holds the shared lock for a whole job,
+                # so without it delete_run still deletes another run beside that job.
+                with ExitStack() as stack:
+                    try:
+                        stack.enter_context(
+                            schedule_lock(
+                                api_settings.config, settings.database, allow_manual_job=True
+                            )
+                        )
+                        shared_lock = True
+                    except WeeklyBusy:
+                        shared_lock = False
                     with database() as db:
                         run = run_row(db, run_id)
                         try:
-                            team_id = delete_run(db, run_id)
+                            team_id = delete_run(db, run_id, shared_lock=shared_lock)
                         except DeletionRefused as exc:
                             return back(team_path(str(run["team_id"]), run_id), str(exc), True)
                     log.info("admin.deleted", run_id=run_id, team_id=team_id)

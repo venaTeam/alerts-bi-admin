@@ -80,8 +80,10 @@ confirmation. It removes the run's SQL results, publications, decisions, schedul
 model audit transactionally. It retains shared caches and prompt artifacts. Runs write no
 report files. CLI exports are not tracked: CSVs written by `report` (default
 `out/<run id prefix>`) or any `--out`, including `alert_worklist.csv`, stay on that disk after
-deletion until removed by hand. Active
-manual/model/weekly work blocks deletion. Manual HTTP and CLI runs take the same SQL
+deletion until removed by hand. The run's own pending, running or queued job and its model
+review block deletion, as do CLI runs and reports and the weekly schedule. A worker job for
+another run does not: deletion then proceeds beside it and locks that job's row until it
+commits. Manual HTTP and CLI runs take the same SQL
 execution lock as scheduling and deletion, covering scanning, persistence and report
 writing even with assessment off. Roll out the updated manual CLI alongside the app;
 older CLI versions do not take this lock. The scheduler can recreate a deleted due week.
