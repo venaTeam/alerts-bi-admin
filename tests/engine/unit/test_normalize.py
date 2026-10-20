@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from src.engine.domain.normalize import (
     group_by_identity,
@@ -96,7 +98,27 @@ def test_snapshot_date_is_the_utc_date_of_the_timestamp() -> None:
     assert v1_row(**{"@timestamp": "2026-08-21T00:00:00.000Z"}).snapshot_date == "2026-08-21"
 
 
-@pytest.mark.parametrize("value", ["nope", None, 12345])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-10-20T09:46:42.622Z",
+        "2026-10-20T09:46:42.622+00:00",
+        "2026-10-20T09:46:42.622+00:00Z",
+        "2026-10-20T09:46:42.622-00:00Z",
+        "2026-10-20T09:46:42.622+0000Z",
+    ],
+)
+def test_utc_timestamps_parse_with_or_without_a_redundant_z_after_the_offset(
+    value: str,
+) -> None:
+    row = v1_row(**{"@timestamp": value})
+    assert row.timestamp == datetime(2026, 10, 20, 9, 46, 42, 622000, tzinfo=UTC)
+    assert row.source["@timestamp"] == value
+
+
+@pytest.mark.parametrize(
+    "value", ["nope", None, 12345, "2026-10-20T09:46:42.622+02:00Z", "2026-10-20T09:46:42ZZ"]
+)
 def test_an_unusable_timestamp_is_rejected(value: object) -> None:
     with pytest.raises(TypeError, match="unusable @timestamp"):
         normalize_row("v1", {"application": "a", "key_field": "k", "@timestamp": value})

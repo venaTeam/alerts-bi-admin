@@ -8,6 +8,7 @@ because source documents expire after three months.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -97,10 +98,16 @@ def _str_or_none(value: Any) -> str | None:
     return value if isinstance(value, str) else str(value)
 
 
+_UTC_OFFSET_THEN_Z = re.compile(r"[+-]00:?00Z\Z")
+
+
 def _parse_timestamp(value: Any) -> datetime:
     if not isinstance(value, str):
         raise TypeError(f"row has an unusable @timestamp: {value!r}")
-    text = value.replace("Z", "+00:00")
+    # Some producers append "Z" after an explicit UTC offset ("...+00:00Z"); the suffix
+    # is redundant there. Any other offset followed by "Z" is contradictory and stays
+    # unusable.
+    text = value[:-1] if _UTC_OFFSET_THEN_Z.search(value) else value.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(text)
     except ValueError as exc:
