@@ -46,7 +46,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.pool import NullPool
 
 from alerts_bi_shared.config.sql import SqlConfig
-from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.logging_setup import log
 
 __all__ = [
     "Database",
@@ -102,9 +102,9 @@ def _warn_unencrypted(config: SqlConfig) -> None:
         _unencrypted_warned.add(server)
     log.warn(
         "sql.unencrypted",
+        "Connections to SQL Server {host}:{port} are not encrypted (SQL_ENCRYPT=false)",
         host=config.host,
         port=config.port,
-        detail="SQL_ENCRYPT=false: SQL Server traffic is not encrypted",
     )
 
 
@@ -245,7 +245,11 @@ class Database:
             try:
                 self.rollback()
             except Exception as rollback_error:
-                log.error("sql.rollback_failed", error=redact_error(rollback_error))
+                log.error(
+                    "sql.rollback_failed",
+                    "Rolling back a failed transaction also failed",
+                    exc=rollback_error,
+                )
             raise
 
 

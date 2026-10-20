@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 import sqlalchemy
 from alembic import command
+from alerts_bi_shared import logging_setup
 from alerts_bi_shared.config.sql import SqlConfig
 from alerts_bi_shared.db import connection
 from alerts_bi_shared.db.connection import WebDatabasePool, connect, encryption_connect_args
@@ -31,6 +32,9 @@ ENCRYPTED = dataclasses.replace(CONFIG, encrypt=True)
 @pytest.fixture(autouse=True)
 def fresh_warning_state(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(connection, "_unencrypted_warned", set())
+    # Parse the machine format; the monkeypatch restores the process's own settings after.
+    monkeypatch.setattr(logging_setup, "_settings", None)
+    logging_setup.configure_logging("test", fmt="json", capture_libraries=False)
 
 
 def _unencrypted_warnings(stderr: str) -> list[dict[str, Any]]:

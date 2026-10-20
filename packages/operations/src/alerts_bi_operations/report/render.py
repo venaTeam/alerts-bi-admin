@@ -74,5 +74,11 @@ def render_run_report(db: Database, run_id: str, out_dir: Path | str) -> list[Pa
         path.write_text(outputs[name], encoding="utf-8", newline="")
         written.append(path)
 
-    log.info("report.rendered", run_id=run_id, out_dir=str(directory), files=len(written))
+    log.info(
+        "report.rendered",
+        "Wrote {files} report files to {out_dir}",
+        run_id=run_id,
+        out_dir=str(directory),
+        files=len(written),
+    )
     return written
