@@ -1,12 +1,12 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "b4698de71e7c4353782cfc2c4dc52443235d72fe",
+  "revision": "69dc93f2c4efbf938b72982e8a109728c55c3496",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
-    "docs/upstream/alerts_bi_design.md": "36dfea3fee5a390e564f19d277a96741e56d129d30e221667f12ea6f637db617",
-    "docs/upstream/alerts_bi_flow.md": "59389d560aeee77bb8cc11087c5265d9eca49434d0c32707267061cd2808caa6",
-    "docs/upstream/alerts_bi_implementation_plan.md": "bf1f9c864fd546cb30076943b9facccbb240083e308ce2c345566a0ed4c864b3",
-    "docs/upstream/async-runs.md": "179e91d592b4bcd762d151b5bc0662b67adfd30264b7b739a9608ed09a3946ff",
+    "docs/upstream/alerts_bi_design.md": "12461c21ead5f0c636ebdde3a6823aa49959982e4fae8146a618042ee3fb80ee",
+    "docs/upstream/alerts_bi_flow.md": "e3d5276f89fe44b6dc431f17c759a278cdf0d914cdcd6c41963791bee08d6d4d",
+    "docs/upstream/alerts_bi_implementation_plan.md": "933214da9cbcd5001fb60a4af30c41b7e039cf0aec0be2eb87ea07e4732afdb6",
+    "docs/upstream/async-runs.md": "50088b8281df59e51128442b4930219d3ad6e352b0eac8535cf5e0b9ebc348c0",
     "docs/upstream/backfill.md": "2c368d5b9db58506e9e65058585b5c7b0d1cdc60ec7775e73abdb0d624e76958",
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",

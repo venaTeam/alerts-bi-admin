@@ -60,8 +60,9 @@ latest completed Monday. The start is the previous Monday at 00:00 UTC, inclusiv
 end is exclusive. Historical arbitrary-window analysis remains renderable. Admin removes
 the publication gap override and rejects forged overrides. Permanent run deletion removes
 SQL run-owned rows transactionally (including decisions in a scoped deletion allowance, with
-migration 009 and a checked parent foreign key). Since 2026-10-17 runs write no report files to clean. Shared caches remain. Active work is
-refused; scheduler enrollment remains. See design section 7.12 and decision 004 for scope,
+migration 009 and a checked parent foreign key). Since 2026-10-17 runs write no report files to clean. Shared caches remain. Active work on
+the run itself is refused; since 2026-10-20 a worker job for another run does not block it.
+Scheduler enrollment remains. See design section 7.12 and decision 004 for scope,
 failure handling and the explicit exception to retained audit history.
 
 Manual HTTP/API and CLI runs share the existing SQL session execution lock with weekly
