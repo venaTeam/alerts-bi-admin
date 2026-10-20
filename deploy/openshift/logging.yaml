@@ -1,0 +1,141 @@
+# OpenShift Template for the Alerts BI log collector (design "Log shipping to Elasticsearch").
+#
+# Optional. Do not edit values here. Fill a copy of logging-values.env.example and render with:
+#   oc process --local -f logging.yaml --param-file <logging-values.env> -o yaml | oc apply -n <NAMESPACE> -f -
+# README.md "15. Ship logs to Elasticsearch" is the complete procedure, including the ConfigMap
+# alerts-bi-logs-config (made from fluent-bit.conf) and the Secret alerts-bi-logs-es (made from
+# logs-es.env.example) that this Template reads but does not create.
+#
+# One Fluent Bit pod. The admin console, run worker, weekly CronJob, one-off jobs and the portal
+# POST their log records to http://alerts-bi-logs:9880/<runs|admin|portal> once LOG_FORWARD_URL
+# is set in alerts-bi-config, and it writes them to Elasticsearch as daily indices
+# <LOGS_INDEX_PREFIX>-runs-*, -admin-* and -portal-*. While Elasticsearch is slow or down it
+# keeps the records on its buffer volume; the applications never wait for it.
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: alerts-bi-logs
+  annotations:
+    description: Alerts BI log collector (Fluent Bit) that writes the runs, admin and portal logs to Elasticsearch.
+objects:
+  - apiVersion: v1
+    kind: ServiceAccount
+    metadata:
+      name: alerts-bi-logs
+      labels: {app: alerts-bi-logs, app.kubernetes.io/part-of: alerts-bi}
+
+  - apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: alerts-bi-logs
+      labels: {app: alerts-bi-logs, app.kubernetes.io/part-of: alerts-bi}
+    spec:
+      # One collector with its own buffer. Recreate, so two pods never write the same records.
+      replicas: 1
+      strategy: {type: Recreate}
+      selector: {matchLabels: {app: alerts-bi-logs}}
+      template:
+        metadata:
+          labels: {app: alerts-bi-logs, app.kubernetes.io/part-of: alerts-bi}
+        spec:
+          serviceAccountName: alerts-bi-logs
+          # Nothing in the pod calls the OpenShift API.
+          automountServiceAccountToken: false
+          imagePullSecrets: [{name: "${IMAGE_PULL_SECRET}"}]
+          # The image's user is root; the restricted SCC runs it as the namespace's own UID,
+          # which works because the buffer is a writable volume and the config is read-only.
+          securityContext: {runAsNonRoot: true, seccompProfile: {type: RuntimeDefault}}
+          containers:
+            - name: fluent-bit
+              image: "${LOGS_IMAGE}"
+              command: ["/fluent-bit/bin/fluent-bit"]
+              args: ["-c", "/etc/alerts-bi-logs/fluent-bit.conf"]
+              env:
+                - {name: LOGS_ES_TLS, value: "${LOGS_ES_TLS}"}
+                - {name: LOGS_ES_TLS_VERIFY, value: "${LOGS_ES_TLS_VERIFY}"}
+                - {name: LOGS_ES_CA_FILE, value: "${LOGS_ES_CA_FILE}"}
+                - {name: LOGS_INDEX_PREFIX, value: "${LOGS_INDEX_PREFIX}"}
+                - {name: LOGS_BUFFER_LIMIT, value: "${LOGS_BUFFER_LIMIT}"}
+                - {name: LOGS_RETRY_LIMIT, value: "${LOGS_RETRY_LIMIT}"}
+              # LOGS_ES_HOST, LOGS_ES_PORT, LOGS_ES_USER and LOGS_ES_PASSWORD.
+              envFrom:
+                - secretRef: {name: alerts-bi-logs-es}
+              ports:
+                - {containerPort: 9880, name: http}
+                - {containerPort: 2020, name: metrics}
+              volumeMounts:
+                - {name: config, mountPath: /etc/alerts-bi-logs, readOnly: true}
+                - {name: buffer, mountPath: /var/lib/fluent-bit}
+                - {name: ca-bundle, mountPath: /etc/alerts-bi-ca, readOnly: true}
+              readinessProbe:
+                tcpSocket: {port: 9880}
+                initialDelaySeconds: 5
+                periodSeconds: 10
+              # Uptime, not /api/v1/health: an Elasticsearch outage must not restart the
+              # collector, whose buffer is what carries the records through it.
+              livenessProbe:
+                httpGet: {path: /api/v1/uptime, port: 2020}
+                initialDelaySeconds: 30
+                periodSeconds: 20
+              resources:
+                requests: {cpu: "${LOGS_CPU_REQUEST}", memory: "${LOGS_MEMORY_REQUEST}"}
+                limits: {memory: "${LOGS_MEMORY_LIMIT}"}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities: {drop: [ALL]}
+          volumes:
+            - {name: config, configMap: {name: alerts-bi-logs-config}}
+            # Lost when the pod is deleted; the applications' own oc logs keep every record.
+            - name: buffer
+              emptyDir: {sizeLimit: "${LOGS_BUFFER_VOLUME}"}
+            # Optional private CA bundle for LOGS_ES_CA_FILE; absent means an empty directory.
+            - {name: ca-bundle, configMap: {name: alerts-bi-ca-bundle, optional: true}}
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: alerts-bi-logs
+      labels: {app: alerts-bi-logs, app.kubernetes.io/part-of: alerts-bi}
+    spec:
+      selector: {app: alerts-bi-logs}
+      ports:
+        - {name: http, port: 9880, targetPort: 9880}
+        - {name: metrics, port: 2020, targetPort: 2020}
+
+parameters:
+  - name: LOGS_IMAGE
+    description: Fluent Bit 5.1.2 image by digest, <registry>/<repository>@sha256:<64 hex>, mirrored from docker.io/fluent/fluent-bit:5.1.2 (README.md section 15).
+    required: true
+  - name: LOGS_ES_TLS
+    description: On when Elasticsearch is reached over HTTPS, Off for plain HTTP.
+    value: "On"
+  - name: LOGS_ES_TLS_VERIFY
+    description: On checks the Elasticsearch certificate against LOGS_ES_CA_FILE. Keep On.
+    value: "On"
+  - name: LOGS_ES_CA_FILE
+    description: CA bundle that signed the Elasticsearch certificate. The image's public bundle by default; /etc/alerts-bi-ca/ca-bundle.crt for a private CA.
+    value: /etc/ssl/certs/ca-certificates.crt
+  - name: LOGS_INDEX_PREFIX
+    description: Index names start with this, then -runs-, -admin- or -portal- and the UTC date.
+    value: alerts-bi
+  - name: LOGS_BUFFER_LIMIT
+    description: Most each of the three indices may hold on the buffer volume while Elasticsearch is unreachable; older records are dropped beyond it.
+    value: 512M
+  - name: LOGS_RETRY_LIMIT
+    description: Tries per chunk before it is dropped; retries back off to 15 minutes apart, so 60 spans roughly eight hours of Elasticsearch outage.
+    value: "60"
+  - name: LOGS_BUFFER_VOLUME
+    description: Size of the buffer volume; at least three times LOGS_BUFFER_LIMIT.
+    value: 2Gi
+  - name: IMAGE_PULL_SECRET
+    description: Pull secret for LOGS_IMAGE. If no such Secret exists, the pod pulls without credentials.
+    value: alerts-bi-pull
+  - name: LOGS_CPU_REQUEST
+    description: CPU request of the collector.
+    value: 50m
+  - name: LOGS_MEMORY_REQUEST
+    description: Memory request of the collector.
+    value: 64Mi
+  - name: LOGS_MEMORY_LIMIT
+    description: Memory limit of the collector.
+    value: 256Mi
