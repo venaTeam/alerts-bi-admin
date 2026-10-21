@@ -9,7 +9,10 @@ Teams shows one card per team. A team's page shows one week at a time in Run, Re
 Publish steps, with a week picker and one New runs dialog for one or several weeks; run details,
 the detailed analysis and CSV downloads sit collapsed below. Schedule and Decisions have
 workspace-wide pages. Trigger, inspect, publish, withdraw, delete runs and record human decisions
-in the same application (design section "Operator console redesign", 2026-10-19).
+in the same application (design section "Operator console redesign", 2026-10-19). Decisions
+opens on every finding of a published week that has no decision yet, across teams, and also
+lists the recorded decisions (design "Decisions page lists findings that need a decision",
+2026-10-20).
 
 ## Install and start
 

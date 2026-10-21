@@ -71,3 +71,7 @@ The 2026-10-19 no-login amendment appends migration 019_erase_operator_names wit
 001–018. It blanks every stored operator name (the scheduler's `weekly-schedule` marker stays)
 and keeps submission keys that several people had used apart as `#<row id>`. No column, view,
 type or CSV output changes.
+
+The 2026-10-20 needs-a-decision amendment adds the `view` query parameter (`needed` or
+`recorded`) to `GET /decisions`; console-http.json and console-openapi.json record it. No
+migration, view, column, CSV output or shared/operations interface changes.

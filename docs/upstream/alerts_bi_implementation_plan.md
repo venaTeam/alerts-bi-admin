@@ -1,5 +1,13 @@
 # Alerts BI — Implementation Blueprint
 
+## Decisions page needs-a-decision view — accepted 2026-10-20
+
+Admin `queries.undecided_findings` splits each published finding's core rule ids, readiness
+gaps and raised model principle with `STRING_SPLIT` and keeps those with no `finding_decisions`
+row on that run; `GET /decisions` takes `view=needed|recorded` and renders both views with their
+counts. No migration, library or portal change. See design section "Decisions page lists
+findings that need a decision".
+
 ## Operator console redesign — accepted 2026-10-19
 
 The admin console shows one week of a team at a time: a week picker replaces the run history

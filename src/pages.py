@@ -1517,7 +1517,14 @@ def decisions_page(
     *,
     team: str = "",
     state: str = "",
+    view: str = "recorded",
+    counts: tuple[int, int] = (0, 0),
 ) -> str:
+    """Findings of published weeks that need a decision, or the decisions recorded so far.
+
+    ``counts`` is (findings needing a decision, recorded decisions) for the selected team.
+    """
+    needed = view == "needed"
     team_options = '<option value="">All teams</option>' + "".join(
         f'<option value="{h(key)}"{" selected" if key == team else ""}>{h(label)}</option>'
         for key, label, _ in teams
@@ -1528,9 +1535,22 @@ def decisions_page(
     )
     filters = (
         '<form class="abi-filters" method="get" action="/decisions">'
-        f'<div class="abi-field"><label for="filter-team">Team</label><select id="filter-team" name="team">{team_options}</select></div>'
-        f'<div class="abi-field"><label for="filter-state">Decision</label><select id="filter-state" name="state">{state_options}</select></div>'
-        '<button type="submit" class="abi-btn">Show</button></form>'
+        + ("" if needed else '<input type="hidden" name="view" value="recorded">')
+        + f'<div class="abi-field"><label for="filter-team">Team</label><select id="filter-team" name="team">{team_options}</select></div>'
+        + (
+            ""
+            if needed
+            else f'<div class="abi-field"><label for="filter-state">Decision</label><select id="filter-state" name="state">{state_options}</select></div>'
+        )
+        + '<button type="submit" class="abi-btn">Show</button></form>'
+    )
+    by_team = {"team": team} if team else {}
+    switch = (
+        '<nav class="abi-filter" aria-label="Show decisions">'
+        f'<a href="/decisions{h("?" + urlencode(by_team)) if team else ""}"{" aria-current=page" if needed else ""}>'
+        f"Needs a decision · {counts[0]:,}</a>"
+        f'<a href="/decisions?{h(urlencode({**by_team, "view": "recorded"}))}"{"" if needed else " aria-current=page"}>'
+        f"Recorded · {counts[1]:,}</a></nav>"
     )
     items = []
     for row in rows:
@@ -1549,15 +1569,31 @@ def decisions_page(
             )
             if part
         )
-        items.append(
-            f'<li><a class="abi-item" href="{h(url)}"><span>{badge(str(row["state"]))}</span>'
-            f'<span class="abi-item-main"><span class="abi-item-title">{h(principle_title(str(row["finding_id"])))}</span>'
-            f'<span class="abi-item-sub">{h(where)}</span><span class="abi-item-note">{h(row["note"])}</span></span>'
-            f'<span class="abi-item-when">{h(_when(row["decided_at"]))}</span></a></li>'
-        )
+        if needed:
+            title, _, _, kind, _ = _finding_text(row, str(row["finding_id"]))
+            detail = f"{kind} · {row['alert_schema']} · {_plural(int(row['row_count']), 'event')}"
+            items.append(
+                f'<li><a class="abi-item" href="{h(url)}"><span>{chip("No decision", "none")}</span>'
+                f'<span class="abi-item-main"><span class="abi-item-title">{h(title)}</span>'
+                f'<span class="abi-item-sub">{h(where)}</span><span class="abi-item-note">{h(detail)}</span></span>'
+                f'<span class="abi-item-when">Published {h(_when(row["published_at"]))}</span></a></li>'
+            )
+        else:
+            items.append(
+                f'<li><a class="abi-item" href="{h(url)}"><span>{badge(str(row["state"]))}</span>'
+                f'<span class="abi-item-main"><span class="abi-item-title">{h(principle_title(str(row["finding_id"])))}</span>'
+                f'<span class="abi-item-sub">{h(where)}</span><span class="abi-item-note">{h(row["note"])}</span></span>'
+                f'<span class="abi-item-when">{h(_when(row["decided_at"]))}</span></a></li>'
+            )
     if items:
         listing = (
             f'<section class="abi-panel flush"><ul class="abi-list">{"".join(items)}</ul></section>'
+        )
+    elif needed:
+        message = "Nothing needs a decision for this team." if team else "Nothing needs a decision."
+        listing = (
+            f'<section class="abi-panel abi-empty"><h2>{message}</h2>'
+            "<p>Every finding of a published week has a decision.</p></section>"
         )
     else:
         message = "No decisions match these filters." if team or state else "No decisions yet."
@@ -1565,7 +1601,9 @@ def decisions_page(
             f'<section class="abi-panel abi-empty"><h2>{message}</h2>'
             "<p>Decisions are recorded on the findings of published weeks.</p></section>"
         )
-    query = {key: value for key, value in (("team", team), ("state", state)) if value}
+    query = {**by_team, **({} if needed else {"state": state, "view": "recorded"})}
+    query = {key: value for key, value in query.items() if value}
+    noun = "finding" if needed else "decision"
     pages = max(1, (total + 49) // 50)
     links = "".join(
         f'<a href="/decisions?{h(urlencode({**query, "page": target}))}">{label}</a>'
@@ -1573,13 +1611,19 @@ def decisions_page(
         if 1 <= target <= pages
     )
     pagination = (
-        f'<div class="abi-pager"><span>Page {page} of {pages} · {_plural(total, "decision")}</span><span>{links}</span></div>'
+        f'<div class="abi-pager"><span>Page {page} of {pages} · {_plural(total, noun)}</span><span>{links}</span></div>'
         if total > 50
-        else f'<p class="abi-small abi-muted">{_plural(total, "decision")}</p>'
+        else f'<p class="abi-small abi-muted">{_plural(total, noun)}</p>'
+    )
+    sub = (
+        "Findings of published weeks with no decision yet, newest week first. "
+        "Open one to record a decision."
+        if needed
+        else "What reviewers decided about findings. The automated findings never change."
     )
     body = (
-        '<div class="abi-head"><div><h1>Decisions</h1><p class="abi-sub">What reviewers decided about findings. '
-        f"The automated findings never change.</p></div>{filters}</div>{listing}{pagination}"
+        f'<div class="abi-head"><div><h1>Decisions</h1><p class="abi-sub">{sub}</p></div>{filters}</div>'
+        f"{switch}{listing}{pagination}"
     )
     return layout("Decisions", body, nav="decisions")
 
