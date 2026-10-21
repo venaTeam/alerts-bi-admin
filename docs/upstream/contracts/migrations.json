@@ -1,6 +1,6 @@
 {
-  "source_commit": "a0405ec0a835f65e5236c74d4adde65d44dddd43",
-  "schema_head": "019_erase_operator_names",
+  "source_commit": "dd6dac56a8394a79598e779aae9ecc58b40f3d5d",
+  "schema_head": "020_portal_review_operators",
   "files": {
     "001_initial_schema.sql": "7c4f43ce0aa698bcf82b1694143fe9dd5f68a35430c1a8461c7296f958dde41a",
     "002_review_portal.sql": "593539fb7f5e3b458f107b79e348ee62a5d74841a220be97e0bd01fcbae012c6",
@@ -39,7 +39,9 @@
     "018_alert_identity_hash.sql": "91950832786ffc1ca21d9711c40a934d368c44185f7bb49bce2a5a2290c311ff",
     "versions/018_alert_identity_hash.py": "0c53a72ec9ca74314fdf7b9ea7867538af88c08455efff44b8ee67537df0de39",
     "019_erase_operator_names.sql": "f8aa002e807a5f53ae4481719c13af2c6576f79cc3585939ec2f87b95c7dc72b",
-    "versions/019_erase_operator_names.py": "80f42190fc4f1bb9edf914c797697ddd24a546a1ac4d4c2177c301bc38308515"
+    "versions/019_erase_operator_names.py": "80f42190fc4f1bb9edf914c797697ddd24a546a1ac4d4c2177c301bc38308515",
+    "020_portal_review_operators.sql": "e94f16d06bd9949326291d99809f5f727dffe7228aa0aab75064b6d5733adb5f",
+    "versions/020_portal_review_operators.py": "f451b99f1f5fe16460a69e5000d0223c34125e4d58d22e0ddbb4fa419b39c93d"
   },
-  "amended": "2026-10-19"
+  "amended": "2026-10-21"
 }

@@ -1078,6 +1078,28 @@
     "datetime_precision": null
   },
   {
+    "view_name": "portal_reviews",
+    "column_name": "v1_operators",
+    "position": 13,
+    "data_type": "nvarchar",
+    "nullable": "YES",
+    "max_length": -1,
+    "precision": null,
+    "scale": null,
+    "datetime_precision": null
+  },
+  {
+    "view_name": "portal_reviews",
+    "column_name": "v2_operator",
+    "position": 14,
+    "data_type": "nvarchar",
+    "nullable": "YES",
+    "max_length": 4000,
+    "precision": null,
+    "scale": null,
+    "datetime_precision": null
+  },
+  {
     "view_name": "portal_rule_membership",
     "column_name": "finding_id",
     "position": 1,

@@ -63,7 +63,7 @@
   },
   "run_scope": "An explicitly selected run must belong to the selected team",
   "payload_baseline": "console-openapi.json",
-  "schema_head": "019_erase_operator_names",
+  "schema_head": "020_portal_review_operators",
   "manual_window": "Monday 00:00 UTC to the selected Monday 00:00 UTC; omitted API/CLI run_at selects the latest completed week",
   "admin_gap_override": false,
   "execution_lock": "Database SQL session lock alerts-bi-weekly shared by manual HTTP/API and CLI runs, standalone CLI reports, weekly scheduling and deletion; held across scan, persistence and report writing, including model-off runs; standalone reports hold it before run-id/team lookup through the final file write; durable manual jobs also use this full-lifecycle lock",
