@@ -266,7 +266,13 @@ def _interpret_leaf(
     if field_class == "unknown":
         if field_name not in interpretation.unknown_fields:
             interpretation.unknown_fields.append(field_name)
-        log.info("suppression.unknown_field", panel_id=interpretation.panel_id, field=field_name)
+            log.warn(
+                "suppression.unknown_field",
+                "Panel {panel_id} filters on {field}, which suppression cannot read; that "
+                "condition is ignored, so suppressed alerts may be undercounted",
+                panel_id=interpretation.panel_id,
+                field=field_name,
+            )
         return LeafOutcome("ignored", field=field_name, reason="unknown field, ignored and logged")
 
     # Instance-level field: only a NEGATION is suppression.

@@ -9,6 +9,7 @@ It never defaults to all teams.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
@@ -16,7 +17,7 @@ from typing import Any
 from alerts_bi_operations.registry import load_registry, select_team, snapshot_team_entry
 from alerts_bi_shared.db.connection import Database
 from alerts_bi_shared.hashing import compact_json, sha256_of
-from alerts_bi_shared.logging_setup import log
+from alerts_bi_shared.logging_setup import bind_log_context, log
 from alerts_bi_shared.phase import derive_phase
 from alerts_bi_shared.timefmt import iso_instant
 from alerts_bi_shared.versions import APP_VERSION, PARSER_VERSION, PROMPT_VERSION, RULESET_VERSION
@@ -124,10 +125,12 @@ def execute_run(
     remain the caller's atomic step; the journal never exposes partial runs to readers.
     """
     started_at = datetime.now(UTC)
+    clock = time.monotonic()
 
     # 1. Registry validation completes before any Elasticsearch query: a registry mistake
     # silently changes which alerts belong to a team, and that error is invisible in the
     # output.
+    bind_log_context(team_id=team_id, stage="registry")
     loaded = load_registry(registry_path) if registry_path else load_registry()
     team = select_team(loaded, team_id)
 
@@ -143,16 +146,24 @@ def execute_run(
     if expected_run_id is not None and run_id != expected_run_id:
         raise ValueError("Run inputs changed since submission; start a new run.")
 
+    bind_log_context(run_id=run_id)
     log.info(
         "run.started",
-        run_id=run_id,
-        team_id=team.team_id,
-        window_start=_iso(window.window_start),
-        window_end=_iso(window.window_end),
+        "Analysis started for {window_start:utc} → {window_end:utc}: {v1_operators} v1 "
+        "operator{v1_operators:plural}, {v2_operators} v2 operator{v2_operators:plural}, "
+        "{panels} panel{panels:plural}; model {model}",
+        window_start=window.window_start,
+        window_end=window.window_end,
+        v1_operators=len(team.v1_operators),
+        v2_operators=1 if team.v2_operator else 0,
+        panels=sum(len(team.panels_for(schema)) for schema in SCHEMAS),
+        model=model_version or f"off ({llm_disabled_reason or 'not requested'})",
         registry_version=loaded.registry_version,
+        resume=True if resume_analysis else None,
     )
 
     # 2-5. Read pages and aggregate exact facts without retaining raw event documents.
+    bind_log_context(stage="checkpoint")
     evaluation = (
         checkpoint.load(db, run_id, config, team, window)
         if resume_analysis and db is not None
@@ -161,9 +172,13 @@ def execute_run(
     if evaluation is None:
         evaluation = analyze_team(es_client, team, window)
         if resume_analysis and db is not None:
+            bind_log_context(stage="checkpoint")
             checkpoint.save(db, run_id, config, evaluation)
     else:
-        log.info("run.analysis_resumed", run_id=run_id)
+        log.info(
+            "run.analysis_resumed",
+            "Reusing the Elasticsearch analysis an earlier attempt of this run saved",
+        )
     suppression = {schema: evaluation[schema].suppression for schema in SCHEMAS}
 
     # 6. Assess the identities that carry no core finding.
@@ -173,6 +188,26 @@ def execute_run(
         for identity in evaluation[schema].identities.values()
         if identity.llm_eligible
     ]
+    log.info(
+        "run.analyzed",
+        "Read {v1_rows:,} v1 and {v2_rows:,} v2 rows: {v1_alerts:,} v1 and {v2_alerts:,} v2 "
+        "alerts, {flagged:,} with a rule finding; {eligible:,} {next_step}",
+        v1_rows=evaluation["v1"].row_count,
+        v2_rows=evaluation["v2"].row_count,
+        v1_alerts=len(evaluation["v1"].identities),
+        v2_alerts=len(evaluation["v2"].identities),
+        flagged=sum(
+            identity.has_core_finding
+            for schema in SCHEMAS
+            for identity in evaluation[schema].identities.values()
+        ),
+        eligible=len(eligible),
+        next_step="go to the model"
+        if llm_client is not None
+        else f"stay unassessed ({llm_disabled_reason or 'LLM assessment did not run'})",
+        unmeasured_leaves=sum(suppression[schema].unmeasured_leaves for schema in SCHEMAS),
+    )
+    bind_log_context(stage="llm")
 
     outcomes: dict[str, AssessmentOutcome]
     batch_attempts: list[dict[str, Any]] = []
@@ -211,9 +246,17 @@ def execute_run(
         batch_attempts = assessment.batch_attempts
         new_verdicts = assessment.new_verdicts
         llm_assessed = True
+        states: dict[str, int] = {}
+        for outcome in outcomes.values():
+            states[outcome.state] = states.get(outcome.state, 0) + 1
         log.info(
             "run.llm_complete",
-            run_id=run_id,
+            "Model assessment done: {flagged:,} flagged, {review:,} need review, {good:,} "
+            "good, {unassessed:,} unassessed",
+            flagged=states.get("llm_flagged", 0),
+            review=states.get("needs_review", 0),
+            good=states.get("assessed_good", 0),
+            unassessed=states.get("unassessed", 0),
             eligible=len(eligible),
             batches=assessment.requested_batches,
             reused=assessment.reused_verdicts,
@@ -226,6 +269,7 @@ def execute_run(
         )
 
     # 7. Phase derivation from distinct identity presence and readiness.
+    bind_log_context(stage="assemble")
     v2_representatives = [i.representative for i in evaluation["v2"].identities.values()]
     readiness = phase2_readiness_pct(v2_representatives)
     phase = derive_phase(
@@ -446,6 +490,14 @@ def execute_run(
         v2_identities=len(evaluation["v2"].identities),
         llm_eligible=len(eligible),
         llm_assessed=llm_assessed,
+    )
+    bind_log_context(stage=None)
+    log.info(
+        "run.completed",
+        "Analysis completed in {elapsed:dur}: {phase}, v2 readiness {readiness}",
+        elapsed=time.monotonic() - clock,
+        phase=phase.replace("_", " "),
+        readiness="n/a" if readiness is None else f"{readiness:.1f}%",
     )
     return payload, summary
 

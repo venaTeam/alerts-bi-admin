@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from alerts_bi_operations.registry import RegistryError, load_registry
 from alerts_bi_operations.report.render import build_run_outputs
 from alerts_bi_shared.db.connection import Database, connect
-from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.logging_setup import redact_error
 from fastapi import HTTPException, status
 
 from ..config import ApiSettings, AppConfig
@@ -140,7 +140,6 @@ def execute_request(
             resume_analysis=expected_run_id is not None,
         )
         persist_run(db, payload)
-        log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
         # No files: the CSV downloads render from the committed SQL on each request.
         return summary
     finally:

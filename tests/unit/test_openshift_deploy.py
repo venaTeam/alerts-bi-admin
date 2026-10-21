@@ -36,8 +36,9 @@ _TEMPLATE_OWNED = {
 }
 #: Legacy trigger listener settings; `alerts-bi-admin serve` does not read them.
 _LEGACY = {"API_HOST", "API_PORT", "API_REGISTRY_PATH", "API_DATABASE"}
-#: Read by libraries rather than through read_*: the log threshold and the model client's CA file.
-_LIBRARY = {"LOG_LEVEL", "SSL_CERT_FILE"}
+#: Read by libraries rather than through read_*: the log threshold and format, and the model
+#: client's CA file.
+_LIBRARY = {"LOG_LEVEL", "LOG_FORMAT", "SSL_CERT_FILE"}
 #: How a template names a ConfigMap or Secret it reads.
 _OBJECT_REFERENCE = re.compile(
     r"(?:(?:configMapRef|secretRef|configMap|secretKeyRef): \{name"

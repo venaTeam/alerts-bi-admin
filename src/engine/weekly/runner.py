@@ -31,11 +31,12 @@ from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from alerts_bi_operations.registry import TeamEntry, load_registry
 from alerts_bi_operations.review.publication import SCHEDULED_PUBLISHER, publish_run
 from alerts_bi_shared.db.connection import Database, connect
-from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.logging_setup import bind_log_context, log, log_context, redact_error
 
 from ..config import AppConfig
 from ..db.repositories import persist_run
@@ -208,7 +209,12 @@ def weekly_lock(
                         if row is None or int(row["result"]) < 0:
                             raise
                         holding = True
-                        log.info("weekly.waiting_for_backfill")
+                        log.info(
+                            "weekly.waiting_for_backfill",
+                            "A backfill week holds the lock; waiting up to {wait:dur} for it "
+                            "to finish. The worker claims no further backfill weeks meanwhile",
+                            wait=wait.total_seconds(),
+                        )
                     sleep(poll_seconds)
                     continue
                 with stack:
@@ -344,6 +350,8 @@ def _run_team(
     held_week: datetime | None = None
     loaded = load_registry(registry_path) if registry_path else load_registry()
     for end in plan.due:
+        # Each week starts clean: a previous week's failure leaves its run and stage bound.
+        bind_log_context(run_id=None, stage=None)
         try:
             run_id = compute_run_id(
                 team_id=team.team_id,
@@ -371,12 +379,23 @@ def _run_team(
                 persist_run(db, payload)
                 run_id = summary.run_id
             else:
-                log.info("weekly.reused_run", team_id=team.team_id, run_id=run_id)
+                log.info(
+                    "weekly.reused_run",
+                    "Reusing the complete stored run for the week ending {week}",
+                    week=f"{end:%Y-%m-%d}",
+                    run_id=run_id,
+                )
             # Files only on an explicit --out; downloads render from SQL on request.
             if out_root is not None:
                 render_run_report(db, run_id, out_root / run_id[:16])
         except Exception as exc:
-            log.error("weekly.run_failed", team_id=team.team_id, error=redact_error(exc))
+            log.error(
+                "weekly.run_failed",
+                "The run for the week ending {week} failed; later weeks of this team are "
+                "stored but not published",
+                week=f"{end:%Y-%m-%d}",
+                exc=exc,
+            )
             outcomes.append(Outcome(team.team_id, end, "failed", detail=redact_error(exc)))
             publishing = False
             continue
@@ -433,10 +452,20 @@ def run_weekly(
     # measured on the same clock the weeks are planned on (and --as-of stays consistent).
     invoked_at = now if now.tzinfo else now.replace(tzinfo=UTC)
     outcomes: list[Outcome] = []
+    clock = time.monotonic()
+    log.info(
+        "weekly.started",
+        "{mode} as of {now:utc} for {teams} enrolled team{teams:plural}",
+        mode="Dry run of the weekly schedule" if dry_run else "Weekly schedule",
+        now=invoked_at,
+        teams=len(enrolled),
+        database=database,
+        model=llm_client.model_version if llm_client else f"off ({llm_disabled_reason})",
+    )
 
     with weekly_lock(config, database):
         for team in enrolled:
-            with connect(config.sql, database) as db:
+            with connect(config.sql, database) as db, log_context(team_id=team.team_id):
                 try:
                     team_outcomes = _run_team(
                         db,
@@ -451,23 +480,69 @@ def run_weekly(
                         dry_run=dry_run,
                     )
                 except Exception as exc:
-                    log.error("weekly.team_failed", team_id=team.team_id, error=redact_error(exc))
+                    log.error(
+                        "weekly.team_failed",
+                        "The weekly schedule could not process this team",
+                        exc=exc,
+                    )
                     team_outcomes = [
                         Outcome(team.team_id, None, "failed", detail=redact_error(exc))
                     ]
+                bind_log_context(run_id=None, stage=None)
                 if not dry_run:
                     for outcome in team_outcomes:
                         _log(db, invoked_at, outcome)
                 outcomes.extend(team_outcomes)
                 for outcome in team_outcomes:
-                    log.info(
-                        "weekly.outcome",
-                        team_id=outcome.team_id,
-                        window_end=outcome.window_end.isoformat() if outcome.window_end else None,
-                        outcome=outcome.outcome,
-                        run_id=outcome.run_id,
-                    )
+                    _log_outcome(outcome)
+    counts: dict[str, Any] = {}
+    for outcome in outcomes:
+        counts[outcome.outcome] = counts.get(outcome.outcome, 0) + 1
+    attention = sum(outcome.needs_attention for outcome in outcomes)
+    (log.warn if attention else log.info)(
+        "weekly.finished",
+        "Finished in {elapsed_seconds:dur}: {summary}. {attention_text}",
+        elapsed_seconds=round(time.monotonic() - clock, 3),
+        summary=", ".join(f"{n} {name}" for name, n in sorted(counts.items())) or "nothing due",
+        attention_text=f"{attention} {'week needs' if attention == 1 else 'weeks need'} a "
+        "person (see weekly-status); exiting 1"
+        if attention
+        else "Nothing needs a person",
+        **counts,
+    )
     return outcomes
+
+
+_OUTCOME_TEXT = {
+    "published": "Published the week ending {week}",
+    "held": "Held the week ending {week}",
+    "stored": "Stored the week ending {week} without publishing it",
+    "failed": "The week ending {week} failed",
+    "blocked": "Blocked",
+    "expired": "Skipped the week ending {week}",
+    "due": "Due: the week ending {week}",
+}
+
+
+def _log_outcome(outcome: Outcome) -> None:
+    template = _OUTCOME_TEXT.get(outcome.outcome, "{outcome} the week ending {week}")
+    if outcome.detail:
+        template += ": {detail}"
+    emit = (
+        log.error
+        if outcome.outcome == "failed"
+        else log.warn
+        if outcome.outcome in ("held", "blocked", "expired")
+        else log.info
+    )
+    emit(
+        "weekly.outcome",
+        template,
+        outcome=outcome.outcome,
+        week=f"{outcome.window_end:%Y-%m-%d}" if outcome.window_end else "-",
+        detail=outcome.detail,
+        run_id=outcome.run_id,
+    )
 
 
 def next_due(latest_published_end: datetime | None, now: datetime) -> datetime:

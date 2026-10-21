@@ -52,6 +52,7 @@ on the retired runs package/image/repository. Apply migrations before consumers.
 | LLM_ENABLED, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_MODEL_REVISION, LLM_TIMEOUT_MS, LLM_MAX_BATCH_SIZE, LLM_MAX_COMPLETION_TOKENS | Admin, run worker and weekly execution only; unchanged model configuration |
 | SSL_CERT_FILE | Optional; set to the mounted CA bundle when the model endpoint uses a private CA (the model client honours it). Never set but empty |
 | LOG_LEVEL | debug, info, warn or error; default info |
+| LOG_FORMAT | console (default) for people reading `oc logs`, or json for a log collector that parses each line (design "Console log format", 2026-10-20) |
 | ADMIN_HOST=0.0.0.0, ADMIN_PORT=8200 | Set by the template on the admin container (amended 2026-10-19: no login, so the console listens on the pod address) |
 | ADMIN_SECRET | Private random value of at least 32 characters, signs the CSRF tokens (bound to the day only since 2026-10-19) |
 | ADMIN_REGISTRY_PATH=/etc/alerts-bi/teams.json | Set by the templates on every admin container and job, so commands without `--registry` read the mounted registry, never the packaged mock one |

@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
 from alerts_bi_shared.config.env import read_str
 from alerts_bi_shared.db.connection import connect
-from alerts_bi_shared.logging_setup import log
+from alerts_bi_shared.logging_setup import bind_log_context, log
 from alerts_bi_shared.timefmt import iso_instant
 
 from .config import AppConfig, load_config
@@ -176,7 +177,6 @@ def _command_run(args: argparse.Namespace, config: AppConfig) -> int:
         )
 
         persist_run(db, payload)
-        log.info("run.persisted", run_id=summary.run_id, team_id=summary.team_id)
 
         # Files only on an explicit --out; downloads render from SQL on request.
         files = render_run_report(db, summary.run_id, Path(args.out)) if args.out else []
@@ -231,17 +231,12 @@ def _command_report(args: argparse.Namespace, config: AppConfig) -> int:
 def _command_db(args: argparse.Namespace, config: AppConfig) -> int:
     if args.db_command == "migrate":
         database = _target_database(args, config)
-        applied, already = migrate_database(config.sql, database)
+        applied, already, elapsed = _migrate(config, database)
         for version in applied:
             sys.stdout.write(f"applied {version}\n")
         if not applied:
             sys.stdout.write("database is up to date\n")
-        log.info(
-            "db.migrate_complete",
-            database=database,
-            applied=len(applied),
-            already_applied=len(already),
-        )
+        _log_migrated(database, applied, already, elapsed)
         return 0
 
     if args.db_command == "status":
@@ -271,11 +266,12 @@ def _command_db(args: argparse.Namespace, config: AppConfig) -> int:
 
     if args.db_command == "setup":
         database = _target_database(args, config)
-        applied, _ = migrate_database(config.sql, database)
+        applied, already, elapsed = _migrate(config, database)
         for version in applied:
             sys.stdout.write(f"applied {version}\n")
         if not applied:
             sys.stdout.write("database is up to date\n")
+        _log_migrated(database, applied, already, elapsed)
         return 0
 
     if args.db_command == "grant-reader":
@@ -295,6 +291,28 @@ def _command_db(args: argparse.Namespace, config: AppConfig) -> int:
     reset_test_database(config.sql, config.sql.test_database)
     sys.stdout.write(f"recreated {config.sql.test_database}\n")
     return 0
+
+
+def _migrate(config: AppConfig, database: str) -> tuple[list[str], list[str], float]:
+    """Apply pending migrations; a failure is reported by the CLI under stage ``migrate``."""
+    bind_log_context(stage="migrate")
+    started = time.monotonic()
+    applied, already = migrate_database(config.sql, database)
+    bind_log_context(stage=None)
+    return applied, already, time.monotonic() - started
+
+
+def _log_migrated(database: str, applied: list[str], already: list[str], elapsed: float) -> None:
+    log.info(
+        "db.migrate_complete",
+        "{database} is at the latest schema after {elapsed_seconds:dur}: {applied_count} "
+        "migrations applied now, {already_applied} already present",
+        database=database,
+        elapsed_seconds=round(elapsed, 3),
+        applied_count=len(applied),
+        already_applied=len(already),
+        applied=list(applied),
+    )
 
 
 def _instant(value: object) -> str:
@@ -340,7 +358,7 @@ def _command_weekly(args: argparse.Namespace, config: AppConfig) -> int:
             dry_run=args.dry_run,
         )
     except WeeklyBusy as exc:
-        sys.stderr.write(f"{exc}\n")
+        log.error("weekly.busy", "Nothing was run: {reason}", reason=str(exc))
         return 1
 
     if not outcomes:

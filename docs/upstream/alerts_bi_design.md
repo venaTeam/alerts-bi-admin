@@ -1,5 +1,59 @@
 # Alerts BI — Design Document
 
+## Console log format — accepted 2026-10-20
+
+The product owner approved this format on 2026-10-20, after reporting that the logs did not
+explain what the services and workers were doing and left out details an investigation needs
+([decision 008](../decisions/008-console-log-format.md)). It changes how records look and which
+records exist, not what they may contain. Section "Configuration and security" of the
+implementation plan and `outputs.md` still allow identifiers, hashes, counts, timings and
+redacted errors only.
+
+* **Line.** `<UTC time> <LEVEL> <process> <event> <message>  <key=value ...>  [<context>]`,
+  one record per line. For example:
+  `2026-10-20 14:05:58.330Z INFO  worker es.read_schema     Read 48,213 v1 rows in 49 pages, 47.3s (Elasticsearch 31.0s)  index=appchi-v1  [team=payments-core run=3f9a1c2b4d5e6f70 job=7c1e9a2f]`.
+  The event keeps its stable dotted name. The message is a plain-English sentence with grouped
+  numbers, short durations and UTC times. Fields the message does not mention follow it.
+* **Process.** `ui` (the console), `worker` (run-worker), `weekly`, `migrate` (`db setup` and
+  `db migrate`), `cli` (every other command) and `portal`.
+* **Context.** Team, run, job, backfill, model batch and request identifiers are bound once
+  for a piece of work and appear on every record inside it, including Elasticsearch, model
+  and SQL records. The console shows the first 16 characters of a run id (as the CLI and
+  console do), 8 of a job or backfill id and 12 of a batch id. The run's current `stage`
+  (`registry`, `es:v1`, `analysis:v1`, `checkpoint`, `llm`, `assemble`, `persist`) appears
+  only on warnings and errors.
+* **Levels.** Error: something a person or the schedule asked for did not happen (a job, run
+  or week failed, or a server error). Warn: the work went on in a worse state (a retry, an
+  exhausted model batch whose alerts stay unassessed, a recovered interrupted job, a held or
+  skipped week, a panel field suppression cannot read, unencrypted SQL). Info: a step started,
+  finished or produced an outcome. Debug: each model batch that succeeded and each successful
+  page read.
+* **Beginnings and ends.** A job, analysis, Elasticsearch read, model assessment, persistence,
+  migration and weekly invocation each record their end with duration and counts. A failure
+  names the stage, the time spent and the consequence ("marked failed", "the run continues").
+  Elasticsearch reads and model assessment record progress every 30 seconds.
+* **Errors.** The type and redacted message (at most 300 characters, URL credentials removed),
+  the chain of causes with where each began, and this application's frames as
+  `file:line in function`, innermost first, with library frames counted. No source text and
+  no local values.
+* **Worker.** It records its configuration when it starts (database, SQL host, Elasticsearch
+  host and indexes, model, registry and version) and, after 15 minutes without work, why it is
+  idle (nothing queued, backfill weeks waiting for the weekly job, or the execution lock held).
+* **Requests.** Each HTTP request gets an id, returned in `X-Request-ID` and bound to every
+  record made while it is handled, and one `http.request` record. Successful reads, and reads
+  of a missing page or method, are debug. Writes and other refusals are info. Server errors
+  are error, with the exception, and uvicorn does not report the same exception again. Every
+  refusal the console shows the operator is also recorded (`console.refused`).
+* **Output and settings.** Every record goes to stderr and stdout stays for command output.
+  `LOG_LEVEL` keeps debug, info, warn (or warning) and error, default info. `LOG_FORMAT` is
+  `console` (default) or `json`: one object per line with `ts`, `level`, `proc`, `event`,
+  `msg`, the full identifiers, every field and a structured `exception`. Colour is used only on
+  a terminal; `NO_COLOR` turns it off and `FORCE_COLOR` on. An unknown value falls back to the
+  default with a `log.settings_invalid` warning. Warnings and errors that libraries write
+  through Python logging (uvicorn, the Elasticsearch transport) use the same format.
+* **Libraries.** Shared 0.1.9 provides the format and the request logging, and operations
+  0.2.8 pins it. Admin adopts both; the portal vendors the shared wheel.
+
 ## Decisions page lists findings that need a decision — accepted 2026-10-20
 
 On 2026-10-20 the product owner reported that finding the alerts still waiting for a human

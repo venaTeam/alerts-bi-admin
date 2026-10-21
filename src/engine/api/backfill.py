@@ -309,6 +309,10 @@ def submit_backfill(
         row = get_backfill(db, backfill_id)
     log.info(
         "run.backfill_submitted",
+        "Queued a backfill of {weeks} weeks ending {first} to {last}; the worker runs them "
+        "oldest first",
+        first=f"{weeks[0]:%Y-%m-%d}",
+        last=f"{weeks[-1]:%Y-%m-%d}",
         backfill_id=backfill_id,
         team_id=team_id,
         weeks=len(weeks),
@@ -385,6 +389,9 @@ def cancel_backfill(
     db.commit()
     log.info(
         "run.backfill_cancelled",
+        "Cancelled {cancelled} queued {noun} of the backfill",
+        noun="week" if len(cancelled) == 1 else "weeks",
+        team_id=backfill["team_id"],
         backfill_id=backfill_id,
         job_id=job_id,
         cancelled=len(cancelled),
@@ -441,6 +448,9 @@ def retry_backfill(
                 )
     log.info(
         "run.backfill_retried",
+        "Queued {weeks} failed backfill {noun} again",
+        noun="week" if len(weeks) == 1 else "weeks",
+        team_id=team_id,
         backfill_id=backfill_id,
         weeks=len(weeks),
     )

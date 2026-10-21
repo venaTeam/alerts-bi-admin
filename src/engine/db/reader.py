@@ -102,7 +102,13 @@ def grant_reader(admin: SqlConfig, database: str, login: str, password: str) -> 
             ALTER ROLE {READER_ROLE} ADD MEMBER {quoted_login};
             """
         )
-    log.info("db.reader_granted", database=database, login=login, role=READER_ROLE)
+    log.info(
+        "db.reader_granted",
+        "{login} can now read only the portal views of {database}",
+        database=database,
+        login=login,
+        role=READER_ROLE,
+    )
 
 
 def read_only_problems(db: Database) -> list[str]:

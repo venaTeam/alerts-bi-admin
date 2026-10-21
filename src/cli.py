@@ -6,9 +6,9 @@ import argparse
 import sys
 from datetime import datetime
 
-from alerts_bi_shared.config.env import read_str
+from alerts_bi_shared.config.env import load_dotenv, read_str
 from alerts_bi_shared.db.connection import connect
-from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.logging_setup import configure_logging, log
 from alerts_bi_shared.timefmt import iso_instant
 from alerts_bi_shared.versions import APP_VERSION
 
@@ -237,18 +237,41 @@ def _command_admin(args: argparse.Namespace, config: AdminConfig) -> int:
         database=args.database,
         registry_path=args.registry,
     )
-    sys.stdout.write(
-        f"alerts-bi-admin on http://{settings.host}:{settings.port} (no login: anyone who can "
-        f"reach this address may use it), writing {settings.database}\n"
+    log.info(
+        "admin.listening",
+        "Admin console {version} on http://{host}:{port}; it has no login, so anyone who can "
+        "reach this address may use it. Writing {database}",
+        version=APP_VERSION,
+        host=settings.host,
+        port=settings.port,
+        database=settings.database,
+        sql=f"{config.sql.host}:{config.sql.port}",
+        registry=settings.registry_path or "packaged",
     )
     uvicorn.run(
         build_admin(settings),
         host=settings.host,
         port=settings.port,
         log_level="warning",
+        # Uvicorn's own warnings and errors go through the shared log format.
+        log_config=None,
+        access_log=False,
         server_header=False,
     )
     return 0
+
+
+def _process_name(args: argparse.Namespace) -> str:
+    """The short name each console line carries: which container or job wrote it."""
+    if args.command == "serve":
+        return "ui"
+    if args.command == "run-worker":
+        return "worker"
+    if args.command == "weekly":
+        return "weekly"
+    if args.command == "db" and getattr(args, "db_command", None) in ("setup", "migrate"):
+        return "migrate"
+    return "cli"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -259,6 +282,9 @@ def main(argv: list[str] | None = None) -> int:
     ):
         arguments.insert(0, "serve")
     args = build_parser().parse_args(arguments)
+    # LOG_LEVEL and LOG_FORMAT may come from .env, so read it before naming the process.
+    load_dotenv()
+    configure_logging(_process_name(args))
     if args.command in ENGINE_COMMANDS:
         return dispatch(args)
     config = load_config()
@@ -296,7 +322,5 @@ def run_cli() -> None:
     try:
         sys.exit(main())
     except Exception as exc:
-        error = redact_error(exc)
-        log.error("admin.cli_failed", error=error)
-        sys.stderr.write(f"{error}\n")
+        log.error("admin.cli_failed", "The command stopped with an error", exc=exc)
         sys.exit(1)

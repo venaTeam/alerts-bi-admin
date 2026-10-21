@@ -15,3 +15,4 @@ formats and columns remain unchanged. Version 0.2.6 uses alerts-bi-shared 0.1.8;
 that shared library independently and has no operations dependency. Version 0.2.7 records no
 operator names: publications, withdrawals and decisions no longer take or store a person, and
 `publish_run` refuses a `published_by` other than "" or the scheduler's `weekly-schedule`.
+Version 0.2.8 pins alerts-bi-shared 0.1.9, whose console log format it uses for its own records.

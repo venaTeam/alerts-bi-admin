@@ -724,6 +724,7 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
 | Pods rejected: `must specify limits.cpu` | The project's quota needs CPU limits. Stop and ask the project owner for a LimitRange with default CPU limits |
 | `admin_job` prints `FAILED` during a long migration | The log stream ended before the Job did. `oc get job <name> -n "$NS"` shows whether it still runs; follow it again with `oc logs -n "$NS" -f job/<name>` |
 | Weekly Job failed | `oc logs job/<name> -n "$NS"` and `weekly-status`. Held or failed weeks fail the Job on purpose; the next run retries due weeks |
+| A run or job failed, or a page showed an error | Every log line ends with `[team=… run=<16 characters> job=<8 characters>]`. Take the run id as the console shows it and `oc logs -n "$NS" deploy/alerts-bi-admin -c run-worker \| grep <run id>`; the `ERROR` line names the stage that broke, and the indented lines under it the error and where it began. For a page error, grep the admin container for `ERROR` near that time; its `req=` matches the request |
 
 ## 14. Rules that always apply
 

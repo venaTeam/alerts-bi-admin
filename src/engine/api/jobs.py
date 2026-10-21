@@ -13,12 +13,14 @@ from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from alerts_bi_operations.registry import RegistryError, load_registry, select_team
 from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.hashing import sha256_text
-from alerts_bi_shared.logging_setup import log, redact_error
+from alerts_bi_shared.logging_setup import log, log_context
+from alerts_bi_shared.versions import APP_VERSION
 from fastapi import HTTPException
 
 from ..config import ApiSettings
@@ -214,10 +216,16 @@ def _admit(
     db.commit()
     log.info(
         "run.job_submitted",
+        "Accepted a manual run for the week ending {week}; {placement}",
+        week=f"{run_at:%Y-%m-%d}",
+        placement="next for the worker"
+        if status == "pending"
+        else "queued ahead of the remaining backfill weeks",
+        llm=body.llm,
+        status=status,
         job_id=job_id,
         team_id=body.team,
         run_id=run_id,
-        status=status,
     )
     return get_job(db, job_id)
 
@@ -276,7 +284,6 @@ def finish_job(db: Database, job_id: str, state: str, error: str | None = None) 
         },
     )
     db.commit()
-    log.info("run.job_finished", job_id=job_id, status=state)
 
 
 def committed_result(db: Database, job: dict[str, Any]) -> bool:
@@ -358,6 +365,19 @@ def work_once(settings: ApiSettings) -> bool:
                         if orphan.get("backfill_id")
                         else "Worker interrupted. Start a new run to retry.",
                     )
+                    log.warn(
+                        "run.job_recovered",
+                        "Found a job still running from an interrupted worker (started "
+                        "{started:utc}); {outcome}",
+                        started=orphan["started_at"],
+                        outcome="its result was stored, so it is marked completed"
+                        if completed
+                        else "no result was stored, so it is marked failed",
+                        team_id=orphan["team_id"],
+                        run_id=orphan["run_id"],
+                        job_id=orphan["job_id"],
+                        backfill_id=orphan.get("backfill_id"),
+                    )
                 started = datetime.now(UTC).replace(tzinfo=None)
                 started = started.replace(microsecond=started.microsecond // 1000 * 1000)
                 job = db.query_one(
@@ -374,40 +394,13 @@ def work_once(settings: ApiSettings) -> bool:
                     if job is None:
                         return False
                 job["started_at"] = started
-                log.info(
-                    "run.job_started",
-                    job_id=job["job_id"],
+                with log_context(
                     team_id=job["team_id"],
                     run_id=job["run_id"],
+                    job_id=job["job_id"],
                     backfill_id=job.get("backfill_id"),
-                )
-                try:
-                    registry = (
-                        load_registry(settings.registry_path)
-                        if settings.registry_path
-                        else load_registry()
-                    )
-                    if registry.file_sha256 != job["registry_sha256"]:
-                        raise ValueError("Registry changed since submission. Start a new run.")
-                    body = RunRequest(
-                        team=job["team_id"], run_at=job["run_at"], llm=job["llm_mode"]
-                    )
-                    execute_request(settings, db, body, expected_run_id=str(job["run_id"]))
-                    finish_job(db, str(job["job_id"]), "completed")
-                except Exception as exc:
-                    db.rollback()
-                    completed = committed_result(db, job)
-                    log.error("run.job_failed", job_id=job["job_id"], error=redact_error(exc))
-                    finish_job(
-                        db,
-                        str(job["job_id"]),
-                        "completed" if completed else "failed",
-                        None
-                        if completed
-                        else "Analysis failed. Check the service logs, then retry this week."
-                        if job.get("backfill_id")
-                        else "Analysis failed. Check the service logs, then start a new run to retry.",
-                    )
+                ):
+                    _run_job(settings, db, job)
                 return True
         except HTTPException as exc:
             if exc.status_code == 409:
@@ -415,11 +408,183 @@ def work_once(settings: ApiSettings) -> bool:
             raise
 
 
-def run_worker(settings: ApiSettings, *, once: bool = False, poll_seconds: float = 2) -> None:
+def _run_job(settings: ApiSettings, db: Database, job: dict[str, Any]) -> None:
+    """Execute one claimed job on the lock-owning session and record how it ended."""
+    kind = "backfill week" if job.get("backfill_id") else "manual run"
+    submitted = job.get("submitted_at")
+    queued = (
+        (job["started_at"] - submitted).total_seconds() if isinstance(submitted, datetime) else 0
+    )
+    log.info(
+        "run.job_started",
+        "Started the {kind} for the week ending {week} after {queued:dur} in the queue",
+        kind=kind,
+        week=f"{job['run_at']:%Y-%m-%d}",
+        queued=queued,
+        llm=job["llm_mode"],
+    )
+    clock = time.monotonic()
+    try:
+        registry = (
+            load_registry(settings.registry_path) if settings.registry_path else load_registry()
+        )
+        if registry.file_sha256 != job["registry_sha256"]:
+            raise ValueError("Registry changed since submission. Start a new run.")
+        body = RunRequest(team=job["team_id"], run_at=job["run_at"], llm=job["llm_mode"])
+        execute_request(settings, db, body, expected_run_id=str(job["run_id"]))
+        finish_job(db, str(job["job_id"]), "completed")
+    except Exception as exc:
+        db.rollback()
+        completed = committed_result(db, job)
+        advice = (
+            "Analysis failed. Check the service logs, then retry this week."
+            if job.get("backfill_id")
+            else "Analysis failed. Check the service logs, then start a new run to retry."
+        )
+        elapsed = time.monotonic() - clock
+        # Record the failure before updating the job, so it survives a failed update.
+        if completed:
+            log.warn(
+                "run.job_failed",
+                "The {kind} raised an error after its result was stored; marking it completed",
+                kind=kind,
+                elapsed=elapsed,
+                exc=exc,
+            )
+        else:
+            log.error(
+                "run.job_failed",
+                "The {kind} failed after {elapsed:dur}",
+                kind=kind,
+                elapsed=elapsed,
+                exc=exc,
+            )
+        finish_job(
+            db,
+            str(job["job_id"]),
+            "completed" if completed else "failed",
+            None if completed else advice,
+        )
+        if completed:
+            log.info(
+                "run.job_finished",
+                "Job completed: queued {queued:dur}, ran {elapsed:dur}",
+                queued=queued,
+                elapsed=elapsed,
+                status="completed",
+            )
+            return
+        log.error(
+            "run.job_finished",
+            "Job failed: queued {queued:dur}, ran {elapsed:dur}. The console tells the "
+            'operator: "{advice}"',
+            queued=queued,
+            elapsed=elapsed,
+            advice=advice,
+            status="failed",
+        )
+        return
+    log.info(
+        "run.job_finished",
+        "Job completed: queued {queued:dur}, ran {elapsed:dur}",
+        queued=queued,
+        elapsed=time.monotonic() - clock,
+        status="completed",
+    )
+
+
+#: An idle worker says so this often, so a quiet log is not mistaken for a stuck worker.
+IDLE_HEARTBEAT_SECONDS = 15 * 60
+
+
+def run_worker(
+    settings: ApiSettings,
+    *,
+    once: bool = False,
+    poll_seconds: float = 2,
+    heartbeat_seconds: float = IDLE_HEARTBEAT_SECONDS,
+) -> None:
     """The supervisor restarts a worker after infrastructure errors; jobs stay durable."""
+    _log_worker_started(settings, poll_seconds)
+    idle_since = last_heartbeat = time.monotonic()
     while True:
         worked = work_once(settings)
         if once:
             return
-        if not worked:
-            time.sleep(poll_seconds)
+        now = time.monotonic()
+        if worked:
+            idle_since = last_heartbeat = now
+            continue
+        if now - last_heartbeat >= heartbeat_seconds:
+            _log_idle(settings, now - idle_since)
+            last_heartbeat = now
+        time.sleep(poll_seconds)
+
+
+def _log_worker_started(settings: ApiSettings, poll_seconds: float) -> None:
+    config = settings.config
+    try:
+        registry = (
+            load_registry(settings.registry_path) if settings.registry_path else load_registry()
+        )
+        registry_version: str | None = registry.registry_version
+    except Exception as exc:
+        # Each job loads the registry itself and fails with the reason; say so up front.
+        log.warn("worker.registry_unreadable", "The team registry cannot be read", exc=exc)
+        registry_version = None
+    log.info(
+        "worker.started",
+        "Run worker {version} ready, polling {database} every {poll:dur}",
+        version=APP_VERSION,
+        database=settings.target_database,
+        poll=poll_seconds,
+        sql=f"{config.sql.host}:{config.sql.port}",
+        es=_host_and_port(config.es.url),
+        indexes=[config.es.v1_index, config.es.v2_index],
+        llm=config.llm.model if config.llm.enabled else "disabled",
+        registry=settings.registry_path or "packaged",
+        registry_version=registry_version,
+    )
+
+
+def _host_and_port(url: str) -> str:
+    """The host of a service URL without credentials; a malformed URL is the jobs' to report."""
+    try:
+        parts = urlsplit(url)
+        return f"{parts.hostname or ''}{f':{parts.port}' if parts.port else ''}"
+    except ValueError:
+        return "(invalid ES_URL)"
+
+
+def _log_idle(settings: ApiSettings, idle: float) -> None:
+    try:
+        with connect(settings.config.sql, settings.target_database) as db:
+            counts = {
+                str(row["status"]): int(row["n"])
+                for row in db.query(
+                    "SELECT status, COUNT(*) AS n FROM run_jobs "
+                    "WHERE status IN ('pending','queued','running') GROUP BY status"
+                )
+            }
+            backfill_blocked = not _may_claim_backfill(db)
+    except Exception as exc:
+        log.warn(
+            "worker.idle", "Idle for {idle:dur}; the job queue cannot be read", idle=idle, exc=exc
+        )
+        return
+    waiting = sum(counts.values())
+    if not waiting:
+        reason = "nothing is pending or queued"
+    elif backfill_blocked and counts.get("queued"):
+        reason = "backfill weeks wait while the weekly job runs"
+    else:
+        reason = "jobs wait for the execution lock (a CLI run, report, weekly job or deletion)"
+    log.info(
+        "worker.idle",
+        "Idle for {idle:dur}; {reason}",
+        idle=idle,
+        reason=reason,
+        pending=counts.get("pending", 0),
+        queued=counts.get("queued", 0),
+        running=counts.get("running", 0),
+    )
