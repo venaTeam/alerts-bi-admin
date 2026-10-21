@@ -60,7 +60,9 @@ def test_020_adds_operator_columns_and_keeps_every_review(monkeypatch: pytest.Mo
                 team_display_name=team.title(),
                 registry_entry_snapshot="not json" if entry is None else json.dumps(entry),
             )
-            persist_run(db, PersistencePayload(run=run, findings=[sample_finding(run_id=run["run_id"])]))
+            persist_run(
+                db, PersistencePayload(run=run, findings=[sample_finding(run_id=run["run_id"])])
+            )
             publish_run(db, str(run["run_id"]), allow_gap=True)
         db.commit()
         before = _reviews(db)
