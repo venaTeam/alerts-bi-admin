@@ -256,6 +256,30 @@ def test_the_collector_reads_only_documented_objects_and_settings() -> None:
     assert used == from_template | from_secret
 
 
+def test_only_the_alerts_bi_pods_may_reach_the_collector() -> None:
+    # The HTTP input has no authentication: the NetworkPolicy admits exactly the pods that
+    # send records (admin console and worker, weekly CronJob, one-off Jobs, portal).
+    objects, _ = _template("logging.yaml")
+    policy = objects[objects.index("kind: NetworkPolicy") :]
+    assert "podSelector: {matchLabels: {app: alerts-bi-logs}}" in policy
+    assert "policyTypes: [Ingress]" in policy
+    (allowed,) = re.findall(r"values: \[([^\]]+)\]", policy)
+    senders = {
+        label
+        for name in ("admin.yaml", "admin-job.yaml")
+        for label in re.findall(
+            r"labels: \{app: (alerts-bi-[a-z-]+),", (DEPLOY / name).read_text("utf-8")
+        )
+    }
+    # The portal's Deployment lives in alerts-bi-portal; its pods are labelled alerts-bi-portal.
+    assert {value.strip() for value in allowed.split(",")} == senders | {"alerts-bi-portal"}
+    assert re.findall(r"port: (\d+)\}", policy) == ["9880", "2020"]
+    runbook = (DEPLOY / "README.md").read_text("utf-8")
+    assert (
+        "networkpolicy/alerts-bi-logs" in runbook and "NetworkPolicy\n`alerts-bi-logs`" in runbook
+    )
+
+
 def test_the_secret_example_follows_the_from_env_file_format() -> None:
     for line in (DEPLOY / "logs-es.env.example").read_text("utf-8").splitlines():
         if line and not line.startswith("#"):

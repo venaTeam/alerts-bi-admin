@@ -159,6 +159,26 @@ def test_an_unreachable_collector_never_blocks_and_is_reported(
     assert "Could not send 200 log records" in console
 
 
+@pytest.mark.parametrize("log_format", ["console", "json"])
+def test_the_failure_warning_never_shows_url_credentials(
+    log_format: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The warning names the collector URL; credentials in it are scrubbed like everywhere else.
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        port = unused.getsockname()[1]
+    monkeypatch.setenv("LOG_FORWARD_URL", f"http://fluent:s3cret@127.0.0.1:{port}")
+    monkeypatch.setenv("LOG_FORMAT", log_format)
+    configure_logging("worker", color=False, capture_libraries=False)
+    log.info("run.started", "Analysis started")
+    _close()
+
+    console = capsys.readouterr().err
+    assert "log.forward_failed" in console
+    assert "s3cret" not in console
+    assert f"http://[redacted]@127.0.0.1:{port}" in console
+
+
 def test_a_full_queue_drops_instead_of_growing() -> None:
     reports: list[tuple[str, str, str, dict[str, Any]]] = []
     forwarder = LogForwarder(

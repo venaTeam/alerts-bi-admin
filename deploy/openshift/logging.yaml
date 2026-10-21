@@ -102,6 +102,29 @@ objects:
         - {name: http, port: 9880, targetPort: 9880}
         - {name: metrics, port: 2020, targetPort: 2020}
 
+  # The HTTP input has no authentication, so only the Alerts BI pods that send records may
+  # reach the collector: the admin console and run worker, the weekly CronJob, one-off admin
+  # Jobs and the portal. Any other pod in the namespace is refused. OpenShift still lets the
+  # kubelet's readiness and liveness probes through.
+  - apiVersion: networking.k8s.io/v1
+    kind: NetworkPolicy
+    metadata:
+      name: alerts-bi-logs
+      labels: {app: alerts-bi-logs, app.kubernetes.io/part-of: alerts-bi}
+    spec:
+      podSelector: {matchLabels: {app: alerts-bi-logs}}
+      policyTypes: [Ingress]
+      ingress:
+        - from:
+            - podSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values: [alerts-bi-admin, alerts-bi-weekly, alerts-bi-admin-job, alerts-bi-portal]
+          ports:
+            - {protocol: TCP, port: 9880}
+            - {protocol: TCP, port: 2020}
+
 parameters:
   - name: LOGS_IMAGE
     description: Fluent Bit 5.1.2 image by digest, <registry>/<repository>@sha256:<64 hex>, mirrored from docker.io/fluent/fluent-bit:5.1.2 (README.md section 15).

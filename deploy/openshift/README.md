@@ -831,7 +831,11 @@ oc logs -n "$NS" deployment/alerts-bi-logs | grep -E '\[(error|warn)\]'
 
 Expect `deployment "alerts-bi-logs" successfully rolled out`, and no `[error]` or `[warn]`
 lines from the last command. The restart is what makes a changed Secret, ConfigMap or CA take
-effect: Fluent Bit reads them only when it starts. To change the account later, fill
+effect: Fluent Bit reads them only when it starts. The Template also creates the NetworkPolicy
+`alerts-bi-logs`, because the collector's HTTP input has no authentication. It admits only the
+pods labelled `app` = `alerts-bi-admin`, `alerts-bi-weekly`, `alerts-bi-admin-job` or
+`alerts-bi-portal` on ports 9880 and 2020, so no other pod in the namespace can write records
+into the log indices. To change the account later, fill
 `logs-es.env` again from the example and repeat this whole step.
 
 ### 15.4 Check that records reach Elasticsearch
@@ -905,7 +909,7 @@ Comment out `LOG_FORWARD_URL` again in `config.env`, install it and restart as i
 if the collector should go:
 
 ```bash
-oc delete -n "$NS" deployment/alerts-bi-logs service/alerts-bi-logs serviceaccount/alerts-bi-logs configmap/alerts-bi-logs-config secret/alerts-bi-logs-es
+oc delete -n "$NS" deployment/alerts-bi-logs service/alerts-bi-logs networkpolicy/alerts-bi-logs serviceaccount/alerts-bi-logs configmap/alerts-bi-logs-config secret/alerts-bi-logs-es
 ```
 
 Records still on the collector's buffer volume are lost with it. Indices already written stay in
