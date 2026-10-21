@@ -103,4 +103,5 @@ def test_snapshot_operators_reads_only_a_listed_entry() -> None:
     assert snapshot_operators('{"team_id":"x"}') is None
     assert snapshot_operators("not json") is None
     assert snapshot_operators(json.dumps({**entry, "v1_operators": ["a", None]})) is None
+    assert snapshot_operators(json.dumps({**entry, "v2_operator": 5})) is None
     assert snapshot_operators(None) is None

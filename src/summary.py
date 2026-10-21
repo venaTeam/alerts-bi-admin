@@ -363,11 +363,12 @@ def snapshot_operators(text: Any) -> tuple[tuple[str, ...], str | None] | None:
         return None
     if not isinstance(raw, dict):
         return None
-    v1 = raw.get("v1_operators")
+    v1, v2 = raw.get("v1_operators"), raw.get("v2_operator")
     if not isinstance(v1, list) or not all(isinstance(op, str) for op in v1):
         return None
-    v2 = raw.get("v2_operator")
-    return tuple(v1), None if v2 is None else str(v2)
+    if v2 is not None and not isinstance(v2, str):
+        return None
+    return tuple(v1), v2
 
 
 def summary_inputs(
