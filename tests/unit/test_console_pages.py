@@ -269,17 +269,53 @@ def test_decisions_page_keeps_filters_in_pagination() -> None:
         }
     ]
     teams = [("checkout-api", "Checkout API", True)]
-    html = pages.decisions_page(rows, 120, 2, teams, team="checkout-api", state="pending")
+    html = pages.decisions_page(
+        rows, 120, 2, teams, team="checkout-api", state="pending", counts=(7, 130)
+    )
     no_inline_styles(html)
     assert (
         '<option value="checkout-api" selected>' in html
         and '<option value="pending" selected>' in html
     )
-    assert "/decisions?team=checkout-api&amp;state=pending&amp;page=1" in html
-    assert "/decisions?team=checkout-api&amp;state=pending&amp;page=3" in html
+    assert "/decisions?team=checkout-api&amp;state=pending&amp;view=recorded&amp;page=1" in html
+    assert "/decisions?team=checkout-api&amp;state=pending&amp;view=recorded&amp;page=3" in html
     assert f"/runs/{RUN}/findings?finding=" in html
+    assert '<a href="/decisions?team=checkout-api">Needs a decision · 7</a>' in html
+    assert (
+        '<a href="/decisions?team=checkout-api&amp;view=recorded" aria-current=page>Recorded · 130</a>'
+        in html
+    )
     empty = pages.decisions_page([], 0, 1, teams, state="confirmed")
     assert "No decisions match these filters." in empty
+
+
+def test_decisions_page_lists_findings_that_need_a_decision() -> None:
+    rows = [
+        {
+            **ROW,
+            "run_id": RUN,
+            "team_id": "checkout-api",
+            "team_display_name": "Checkout API",
+            "window_start": START,
+            "window_end": END,
+            "published_at": datetime(2026, 10, 13, 8, 30),
+            "finding_id": "R1",
+        }
+    ]
+    teams = [("checkout-api", "Checkout API", True), ("search", "Search", True)]
+    html = pages.decisions_page(rows, 51, 1, teams, view="needed", counts=(51, 4))
+    no_inline_styles(html)
+    assert '<a href="/decisions" aria-current=page>Needs a decision · 51</a>' in html
+    assert '<a href="/decisions?view=recorded">Recorded · 4</a>' in html
+    assert "No decision" in html and "Published 13 Oct 2026" in html
+    assert "Checkout API · 5 Oct \u2013 12 Oct 2026 · payments-api" in html
+    assert "Rule finding · v2 · 4,210 events" in html
+    assert f"/runs/{RUN}/findings?finding=" in html
+    assert 'name="state"' not in html and 'name="view"' not in html, "no decision filter here"
+    assert "Page 1 of 2 · 51 findings" in html and '<a href="/decisions?page=2">Next</a>' in html
+    empty = pages.decisions_page([], 0, 1, teams, team="search", view="needed")
+    assert "Nothing needs a decision for this team." in empty
+    assert '<a href="/decisions?team=search" aria-current=page>' in empty
 
 
 def test_schedule_names_the_next_week_and_each_teams_next_step() -> None:
@@ -369,6 +405,7 @@ def test_new_runs_without_a_week_is_refused(client: TestClient) -> None:
 def test_console_query_parameters_are_validated(client: TestClient) -> None:
     assert client.get("/?show=everything").status_code == 422
     assert client.get("/decisions?state=maybe").status_code == 422
+    assert client.get("/decisions?view=everything").status_code == 422
     assert client.get("/teams/checkout-api?tab=nonsense").status_code == 422
 
 

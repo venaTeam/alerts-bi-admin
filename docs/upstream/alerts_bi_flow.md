@@ -1,5 +1,12 @@
 # Alerts BI — Runtime Flow
 
+## Decisions page needs-a-decision view — accepted 2026-10-20
+
+The global Decisions page opens on the findings of currently published weeks that have no
+decision for that week, across teams, newest week first; `view=recorded` shows the recorded
+decisions. It only reads; recording a decision, publication and withdrawal are unchanged. See
+design section "Decisions page lists findings that need a decision".
+
 ## Operator console redesign — accepted 2026-10-19
 
 The admin console shows one week of a team at a time: a week picker replaces the run history

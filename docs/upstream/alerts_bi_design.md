@@ -54,6 +54,39 @@ redacted errors only.
 * **Libraries.** Shared 0.1.9 provides the format and the request logging, and operations
   0.2.8 pins it. Admin adopts both; the portal vendors the shared wheel.
 
+## Decisions page lists findings that need a decision — accepted 2026-10-20
+
+On 2026-10-20 the product owner reported that finding the alerts still waiting for a human
+decision meant opening every team and published week. They asked the global Decisions page to
+list those findings too, chose the options below, and approved the mock built from the console's
+own layout. This extends "Schedule and Decisions" in "Operator console redesign". Decision rules,
+the append-only record, migrations, portal views, CSV outputs and the shared/operations libraries
+are unchanged.
+
+* **Needs a decision.** A finding needs a decision when its week is currently published (not
+  withdrawn) and no decision is recorded for that exact identity and finding id on that run. A
+  finding is what a decision may name (operations `findings_on`): each core rule id, each
+  readiness gap, and the model's cited principle when the model raised something. Every
+  published week counts, not only each team's latest, so an undecided finding stays listed until
+  someone decides it or the week is withdrawn. Pending is a recorded decision: a finding marked
+  pending is not listed. Decisions on other weeks do not carry over, matching the "No decision"
+  chip on a published week's findings.
+* **Two views.** `/decisions` opens on Needs a decision; `view=recorded` shows the recorded
+  decisions as before. A switch at the top shows both counts for the selected team. Needs a
+  decision lists findings newest week first, then team name, then the alerts with the most
+  events, fifty per page. Each row shows "No decision", the finding's title, team, week and
+  application, the finding type, schema and event count, and when the week was published; it
+  opens the exact finding, where Record decision is offered. The team filter applies to both
+  views; the decision filter only to recorded decisions. `view` accepts `needed` or `recorded`;
+  without it, a `state` filter opens the recorded view, so existing links keep their meaning.
+* **Empty state.** "Nothing needs a decision" (or "… for this team") with "Every finding of a
+  published week has a decision."
+
+The list is read from `review_publications`, `runs`, `alert_findings` and `finding_decisions`
+with the existing keys and the `ix_finding_decisions_run` index; no migration is needed.
+`contracts/console-http.json` and `contracts/console-openapi.json` record the `view` parameter.
+No deployment is authorized by this amendment.
+
 ## Admin console without login — accepted 2026-10-19
 
 The product owner decided on 2026-10-19 to remove the login to the admin console entirely and
