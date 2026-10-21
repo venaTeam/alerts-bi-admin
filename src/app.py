@@ -90,6 +90,7 @@ SortOrder = Annotated[str, Query(pattern="^(" + "|".join(summary.SORTS) + ")$")]
 Tab = Annotated[str, Query(pattern="^(overview|findings|decisions|activity|publish)$")]
 Show = Annotated[str, Query(pattern="^(all|attention)$")]
 DecisionState = Annotated[str, Query(pattern="^(|" + "|".join(DECISION_STATES) + ")$")]
+DecisionView = Annotated[str, Query(pattern="^(|needed|recorded)$")]
 TeamFilter = Annotated[str, Query(max_length=128)]
 
 
@@ -309,12 +310,32 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.get("/decisions", response_class=HTMLResponse)
     def decisions(
-        request: Request, page: Page = 1, team: TeamFilter = "", state: DecisionState = ""
+        request: Request,
+        page: Page = 1,
+        team: TeamFilter = "",
+        state: DecisionState = "",
+        view: DecisionView = "",
     ) -> HTMLResponse:
+        """Findings that need a decision by default; a state filter alone means recorded."""
+        view = view or ("recorded" if state else "needed")
         with database() as db:
-            rows, total = queries.all_decisions(db, page, team, state)
+            if view == "needed":
+                rows, total = queries.undecided_findings(db, page, team)
+                counts = (total, queries.decision_count(db, team))
+            else:
+                rows, total = queries.all_decisions(db, page, team, state)
+                counts = (queries.undecided_count(db, team), queries.decision_count(db, team))
         return HTMLResponse(
-            pages.decisions_page(rows, total, page, registry_teams(), team=team, state=state)
+            pages.decisions_page(
+                rows,
+                total,
+                page,
+                registry_teams(),
+                team=team,
+                state=state,
+                view=view,
+                counts=counts,
+            )
         )
 
     @app.get("/teams/{team_id}", response_class=HTMLResponse)

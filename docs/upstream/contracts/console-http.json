@@ -56,7 +56,8 @@
       "/decisions": [
         "page",
         "team",
-        "state"
+        "state",
+        "view"
       ]
     }
   },

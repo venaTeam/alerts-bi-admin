@@ -17,6 +17,7 @@ __all__ = [
     "alerts_with_findings",
     "all_decisions",
     "backfill_calendar",
+    "decision_count",
     "decision_history",
     "first_run_end",
     "other_publication",
@@ -24,9 +25,33 @@ __all__ = [
     "team_log",
     "team_overview",
     "team_runs",
+    "undecided_count",
+    "undecided_findings",
 ]
 
 PAGE_SIZE = 50
+
+# Every finding of a currently published week with no decision for that week. A finding is what
+# findings_on() lets a decision name: each core rule id, each readiness gap, and the model's
+# principle when the model raised something. STRING_SPLIT yields them in no set order, so the
+# listing orders by the finding id last.
+_UNDECIDED = """
+    FROM review_publications AS p
+    JOIN runs AS r ON r.run_id = p.run_id
+    JOIN alert_findings AS f ON f.run_id = p.run_id
+    CROSS APPLY STRING_SPLIT(CONCAT(f.core_rule_ids, ',', f.readiness_rule_ids, ',',
+        CASE WHEN f.quality_state IN ('llm_flagged', 'needs_review') THEN f.llm_principle_id END),
+        ',') AS s
+    WHERE p.withdrawn_at IS NULL {team}
+      AND (f.core_rule_ids <> '' OR f.readiness_rule_ids <> ''
+           OR f.quality_state IN ('llm_flagged', 'needs_review'))
+      AND s.value <> ''
+      AND NOT EXISTS (
+        SELECT 1 FROM finding_decisions AS d
+        WHERE d.run_id = p.run_id AND d.alert_schema = f.alert_schema
+          AND d.application = f.application AND d.key_field = f.key_field
+          AND d.finding_id = s.value)
+"""
 
 
 def team_overview(db: Database) -> dict[str, dict[str, Any]]:
@@ -243,6 +268,47 @@ def all_decisions(
         params,
     )
     return rows, int(total["n"]) if total else 0
+
+
+def decision_count(db: Database, team: str = "") -> int:
+    """How many decisions are recorded, optionally for one team."""
+    clause, params = ("WHERE team_id = :team", {"team": team}) if team else ("", {})
+    row = db.query_one(f"SELECT COUNT(*) AS n FROM finding_decisions {clause}", params)
+    return int(row["n"]) if row else 0
+
+
+def undecided_count(db: Database, team: str = "") -> int:
+    """How many findings of published weeks have no decision, optionally for one team."""
+    clause, params = ("AND p.team_id = :team", {"team": team}) if team else ("", {})
+    row = db.query_one("SELECT COUNT(*) AS n " + _UNDECIDED.format(team=clause), params)
+    return int(row["n"]) if row else 0
+
+
+def undecided_findings(
+    db: Database, page: int = 1, team: str = ""
+) -> tuple[list[dict[str, Any]], int]:
+    """Findings of published weeks with no decision: newest week first, then team, then the
+    alerts with the most events."""
+    clause = "AND p.team_id = :team" if team else ""
+    params: dict[str, Any] = {"offset": (page - 1) * PAGE_SIZE, "size": PAGE_SIZE}
+    if team:
+        params["team"] = team
+    rows = db.query(
+        """
+        SELECT r.team_id, r.team_display_name, r.window_start, r.window_end, p.published_at,
+               f.run_id, f.alert_schema, f.application, f.key_field, f.component, f.row_count,
+               f.quality_state, f.llm_principle_id, f.llm_justification, f.findings_evidence,
+               f.core_rule_ids, f.readiness_rule_ids, s.value AS finding_id
+        """
+        + _UNDECIDED.format(team=clause)
+        + """
+        ORDER BY r.window_end DESC, r.team_display_name, r.team_id, f.row_count DESC,
+                 f.alert_schema, f.application, f.key_field, s.value
+        OFFSET :offset ROWS FETCH NEXT :size ROWS ONLY
+        """,
+        params,
+    )
+    return rows, undecided_count(db, team)
 
 
 def first_run_end(db: Database, team_id: str) -> datetime | None:

@@ -163,6 +163,11 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
     published = client.get(f"/teams/{TEAM}?run_id={RUN}")
     assert "Findings and decisions" in published.text and "In the portal since" in published.text
     assert 'action="/runs/' + RUN + '/withdraw"' in published.text
+    needed = client.get("/decisions")
+    assert needed.status_code == 200 and "Needs a decision · " in needed.text
+    assert f"/runs/{RUN}/findings?finding={FINDING}" in needed.text
+    assert f"finding={FINDING}" in client.get(f"/decisions?team={TEAM}").text
+    assert f"finding={FINDING}" not in client.get("/decisions?team=other-team").text
     decision = client.post(
         f"/runs/{RUN}/decide",
         data={
@@ -179,10 +184,12 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
     history = client.get(decision.headers["location"])
     assert "Agreed after checking evidence" in history.text and "alice" not in history.text
     assert "tab=findings" in decision.headers["location"]
-    all_decisions = client.get("/decisions")
+    assert f"finding={FINDING}" not in client.get("/decisions").text, "decided findings leave"
+    all_decisions = client.get("/decisions?view=recorded")
     assert all_decisions.status_code == 200
     assert "Agreed after checking evidence" in all_decisions.text
     assert "Checkout API" in all_decisions.text and "alice" not in all_decisions.text
+    assert "Agreed after checking evidence" in client.get("/decisions?state=confirmed").text
     key = finding_key(
         {"alert_schema": "v1", "application": TEAM, "key_field": "checkout-api:cart:node-1"}, "R1"
     )
@@ -193,6 +200,7 @@ def test_publication_decision_and_withdrawal_keep_selected_run(client: TestClien
         f"/runs/{RUN}/withdraw", data={"csrf": csrf, "reason": "Review needs correction"}
     )
     assert withdrawn.status_code == 303 and f"run_id={RUN}" in withdrawn.headers["location"]
+    assert f"/runs/{RUN}/" not in client.get("/decisions").text, "withdrawn weeks need none"
     activity = client.get(f"/teams/{TEAM}?run_id={RUN}&tab=activity")
     assert "Review needs correction" in activity.text and "Withdrawn by" not in activity.text
     with connect(CONFIG.sql, DB) as db:
@@ -706,3 +714,75 @@ def test_deletion_refuses_active_schedule_or_model_review(
         ).status_code
         == 303
     )
+
+
+def test_decisions_page_lists_every_undecided_finding_of_published_weeks(
+    client: TestClient,
+) -> None:
+    run_id, team = "e" * 64, "search-platform"
+    findings = [
+        sample_finding(
+            run_id=run_id,
+            key_field="search:rules",
+            quality_state="rule_flagged",
+            core_rule_ids="R1,R4",
+            findings_evidence='[{"rule_id":"R1","matched_rows":4}]',
+        ),
+        sample_finding(
+            run_id=run_id,
+            key_field="search:model",
+            quality_state="llm_flagged",
+            readiness_rule_ids="R9",
+            llm_principle_id="P2",
+        ),
+        sample_finding(run_id=run_id, key_field="search:good"),
+    ]
+    keys = {
+        finding_key(findings[0], "R1"),
+        finding_key(findings[0], "R4"),
+        finding_key(findings[1], "R9"),
+        finding_key(findings[1], "P2"),
+    }
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=run_id,
+                    team_id=team,
+                    team_display_name="Search Platform",
+                    registry_entry_snapshot='{"team_id":"search-platform"}',
+                ),
+                findings=findings,
+            ),
+        )
+    unpublished = client.get(f"/decisions?team={team}").text
+    assert "Nothing needs a decision for this team." in unpublished
+    with connect(CONFIG.sql, DB) as db:
+        publish_run(db, run_id)
+    needed = client.get(f"/decisions?team={team}").text
+    assert "Needs a decision · 4" in needed and "4 findings" in needed
+    assert all(f"finding={key}" in needed for key in keys)
+    assert "search:good" not in needed and finding_key(findings[2], "NONE") not in needed
+    assert "Search Platform" in needed
+    pending = client.post(
+        f"/runs/{run_id}/decide",
+        data={
+            "csrf": token(client),
+            "schema": "v1",
+            "application": "checkout-api",
+            "key_field": "search:rules",
+            "finding": "R4",
+            "state": "pending",
+            "note": "Asking the team",
+        },
+    )
+    assert pending.status_code == 303 and "done=" in pending.headers["location"]
+    needed = client.get(f"/decisions?team={team}").text
+    assert "Needs a decision · 3" in needed and "Recorded · 1" in needed
+    assert f"finding={finding_key(findings[0], 'R4')}" not in needed, "pending is recorded"
+    recorded = client.get(f"/decisions?team={team}&view=recorded").text
+    assert "Asking the team" in recorded and "aria-current=page>Recorded · 1" in recorded
+    with connect(CONFIG.sql, DB) as db:
+        unpublish_run(db, run_id, reason="correction")
+    assert "Nothing needs a decision for this team." in client.get(f"/decisions?team={team}").text

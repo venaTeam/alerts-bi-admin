@@ -159,6 +159,7 @@
     "/decisions": {
       "get": {
         "summary": "Decisions",
+        "description": "Findings that need a decision by default; a state filter alone means recorded.",
         "operationId": "decisions_decisions_get",
         "parameters": [
           {
@@ -193,6 +194,17 @@
               "pattern": "^(|pending|confirmed|dismissed)$",
               "default": "",
               "title": "State"
+            }
+          },
+          {
+            "name": "view",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^(|needed|recorded)$",
+              "default": "",
+              "title": "View"
             }
           }
         ],
