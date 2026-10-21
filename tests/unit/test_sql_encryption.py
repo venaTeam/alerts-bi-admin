@@ -63,7 +63,8 @@ def test_default_connections_are_unchanged_and_logged_once_per_server(
     warnings = _unencrypted_warnings(capsys.readouterr().err)
     assert len(warnings) == 1
     assert warnings[0]["level"] == "warn"
-    assert (warnings[0]["host"], warnings[0]["port"]) == ("sql.internal", 1433)
+    fields = warnings[0]["data"]["sql_unencrypted"]
+    assert (fields["host"], fields["port"]) == ("sql.internal", 1433)
     assert "test-placeholder" not in json.dumps(warnings[0])
 
     WebDatabasePool(dataclasses.replace(CONFIG, host="other-sql"), CONFIG.database).dispose()

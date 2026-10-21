@@ -13,14 +13,22 @@ to stderr, one per line, so stdout stays free for command output. ``LOG_FORMAT=c
 ``LOG_FORMAT=json`` writes the same record as one JSON object with full identifiers.
 Identifiers bound with :func:`log_context` (team, run, job, backfill, batch, request and
 stage) are attached to every record written inside that scope.
+
+With ``LOG_FORWARD_URL`` set, every record at ``LOG_FORWARD_LEVEL`` or above is also sent,
+as the same JSON document, to the in-namespace Fluent Bit (design "Log shipping to
+Elasticsearch"), which writes it to the ``runs``, ``admin`` or ``portal`` index. A record
+logged with ``console=False`` (a model group with its alerts) goes only there, and to the
+console only at ``LOG_LEVEL=debug``.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
+import socket
 import string
 import sys
 import sysconfig
@@ -33,9 +41,14 @@ from datetime import UTC, date, datetime
 from pathlib import PurePath
 from types import TracebackType
 from typing import Any, Final, TextIO
+from urllib.parse import urlsplit
+
+from .log_forwarding import LogForwarder
+from .versions import APP_VERSION
 
 __all__ = [
     "CONTEXT_KEYS",
+    "STREAMS",
     "bind_log_context",
     "configure_logging",
     "format_duration",
@@ -71,7 +84,15 @@ _CONTEXT_LABELS: Final = {
     "request_id": ("req", None),
     "stage": ("stage", None),
 }
-_RESERVED: Final = frozenset({"ts", "level", "proc", "event", "msg", "exception"})
+#: The Elasticsearch index family each record goes to. Run execution (the worker, the weekly
+#: schedule, and any process inside execute_run) is ``runs``; the portal is ``portal``;
+#: everything else, including console actions on a run, is ``admin``.
+STREAMS: Final = ("runs", "admin", "portal")
+_PROC_STREAMS: Final = {"worker": "runs", "weekly": "runs", "portal": "portal"}
+#: Fields kept at the top of the JSON document instead of under ``data.<event>``, so they
+#: are searched the same way on every record: a model group's ``alerts``.
+_DOCUMENT_FIELDS: Final = frozenset({"alerts"})
+_HOST: Final = socket.gethostname()
 
 # Secret-ish keys that must never reach the log.
 _REDACT_KEYS: Final = {
@@ -101,10 +122,33 @@ class _Settings:
     fmt: str
     color: bool | None
     """None decides per write from whether stderr is a terminal."""
+    forward_url: str | None = None
+    forward_threshold: int = 20
 
 
 _settings: _Settings | None = None
+_forwarder: LogForwarder | None = None
 _settings_lock = threading.Lock()
+
+
+def _forward_settings(problems: list[str]) -> tuple[str | None, int]:
+    url = os.environ.get("LOG_FORWARD_URL", "").strip() or None
+    if url is not None:
+        parts = urlsplit(url)
+        try:
+            valid = parts.scheme in ("http", "https") and bool(parts.hostname)
+            _ = parts.port  # raises ValueError for a port that is not a number
+        except ValueError:
+            valid = False
+        if not valid:
+            problems.append(f"LOG_FORWARD_URL={url!r} is not an http(s) URL; nothing is forwarded")
+            url = None
+    raw = os.environ.get("LOG_FORWARD_LEVEL", "info").strip().lower() or "info"
+    level = _LEVEL_ALIASES.get(raw, raw)
+    if level not in _LEVELS:
+        problems.append(f"LOG_FORWARD_LEVEL={raw!r} is not debug, info, warn or error; using info")
+        level = "info"
+    return url, _LEVELS[level]
 
 
 def _env_settings(proc: str | None = None) -> tuple[_Settings, list[str]]:
@@ -123,16 +167,42 @@ def _env_settings(proc: str | None = None) -> tuple[_Settings, list[str]]:
         color = False
     elif os.environ.get("FORCE_COLOR"):
         color = True
-    return _Settings(proc or "app", _LEVELS[level], fmt, color), problems
+    forward_url, forward_threshold = _forward_settings(problems)
+    settings = _Settings(proc or "app", _LEVELS[level], fmt, color)
+    settings.forward_url, settings.forward_threshold = forward_url, forward_threshold
+    return settings, problems
+
+
+def _activate(settings: _Settings, *, only_if_unset: bool = False) -> None:
+    """Install ``settings`` and start, keep or stop the forwarder to match them."""
+    global _settings, _forwarder
+    with _settings_lock:
+        if only_if_unset and _settings is not None:
+            return
+        previous, _forwarder = _forwarder, None
+        if settings.forward_url:
+            if previous is not None and previous.url == settings.forward_url.rstrip("/"):
+                _forwarder, previous = previous, None
+            else:
+                _forwarder = LogForwarder(settings.forward_url, _report)
+        _settings = settings
+    if previous is not None:
+        previous.close()
+
+
+def _report(level: str, event: str, message: str, fields: dict[str, Any]) -> None:
+    """The forwarder's own problems go to the console only, never back to the forwarder."""
+    _emit(level, event, message, fields, forward=False)
 
 
 def _current_settings() -> _Settings:
-    global _settings
-    if _settings is None:
-        with _settings_lock:
-            if _settings is None:
-                _settings, _problems = _env_settings()
-    return _settings
+    settings = _settings
+    if settings is None:
+        fresh, _problems = _env_settings()
+        _activate(fresh, only_if_unset=True)
+        settings = _settings
+    assert settings is not None
+    return settings
 
 
 def configure_logging(
@@ -143,15 +213,16 @@ def configure_logging(
     color: bool | None = None,
     capture_libraries: bool = True,
 ) -> None:
-    """Name this process and read ``LOG_LEVEL``/``LOG_FORMAT``; call once at startup.
+    """Name this process and read the ``LOG_*`` settings; call once at startup.
 
     ``proc`` is the short process name shown on every console line (``ui``, ``worker``,
-    ``weekly``, ``migrate``, ``cli``, ``portal``). Arguments override the environment,
-    which tests use. With ``capture_libraries`` the warnings and errors that libraries
-    such as uvicorn and the Elasticsearch transport write through :mod:`logging` are
-    rendered in the same format instead of their own.
+    ``weekly``, ``migrate``, ``cli``, ``portal``); it also chooses the default index
+    (worker and weekly: ``runs``; portal: ``portal``; others: ``admin``). Arguments override
+    the environment, which tests use. ``LOG_FORWARD_URL`` and ``LOG_FORWARD_LEVEL`` start
+    the forwarder. With ``capture_libraries`` the warnings and errors that libraries such
+    as uvicorn and the Elasticsearch transport write through :mod:`logging` are rendered in
+    the same format instead of their own.
     """
-    global _settings
     settings, problems = _env_settings(proc)
     if level is not None:
         settings.threshold = _LEVELS[_LEVEL_ALIASES.get(level, level)]
@@ -161,8 +232,7 @@ def configure_logging(
         settings.fmt = fmt
     if color is not None:
         settings.color = color
-    with _settings_lock:
-        _settings = settings
+    _activate(settings)
     for problem in problems:
         log.warn("log.settings_invalid", "{problem}", problem=problem)
     if capture_libraries:
@@ -184,6 +254,8 @@ def bind_log_context(**fields: Any) -> None:
 
     A run binds ``stage`` as it moves from step to step and clears it when it succeeds, so
     a failure recorded by the job, weekly or CLI caller still names the step that broke.
+    ``stream`` (one of :data:`STREAMS`) routes the scope's records to another index; it is
+    not shown and not stored as a field.
     """
     _CONTEXT.set(_merged(fields))
 
@@ -392,6 +464,7 @@ class _Record:
     fields: dict[str, Any]
     used: set[str]
     exception: dict[str, Any] | None
+    stream: str
 
 
 _ANSI: Final = {
@@ -416,6 +489,9 @@ def _console_value(value: Any) -> str:
         text = f"{value:.3f}".rstrip("0").rstrip(".")
     elif isinstance(value, datetime | date):
         text = _instant(value)
+    elif isinstance(value, list | tuple) and value and isinstance(value[0], Mapping):
+        # A model group's alerts: too long for a line, searchable in the log index.
+        text = f"{len(value)} item{'s' if len(value) != 1 else ''}"
     elif isinstance(value, list | tuple | set | frozenset):
         text = ",".join(str(item) for item in value)
     else:
@@ -486,28 +562,69 @@ def _context_order(key: str) -> tuple[int, str]:
 
 
 def _json_value(value: Any) -> Any:
+    if isinstance(value, str):
+        # A rule URL or an error may embed user:token@; the console already strips it.
+        return _URL_CREDENTIALS.sub(r"\1[redacted]@", value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return None  # NaN and infinity are not JSON; one would void a whole batch
     if isinstance(value, datetime | date):
         return _instant(value)
     if isinstance(value, set | frozenset):
-        return sorted(value, key=str)
+        return [_json_value(item) for item in sorted(value, key=str)]
+    if isinstance(value, list | tuple):
+        return [_json_value(item) for item in value]
+    if isinstance(value, Mapping):
+        return {str(key): _json_value(item) for key, item in value.items()}
     return value
 
 
-def _json(record: _Record) -> str:
-    line: dict[str, Any] = {
-        "ts": _instant(record.ts),
+def _document(record: _Record) -> dict[str, Any]:
+    """The JSON document written by ``LOG_FORMAT=json`` and sent to the log index.
+
+    Fixed fields keep one type in every record. Each event's own fields sit under
+    ``data.<event with _ for .>``, so ``status`` as an HTTP code and as a job state never
+    collide in an Elasticsearch mapping. ``line`` is the console line, for reading.
+    """
+    document: dict[str, Any] = {
+        "@timestamp": _instant(record.ts),
         "level": record.level,
         "proc": record.proc,
+        "stream": record.stream,
         "event": record.event,
-        "msg": record.message,
+        "message": record.message,
     }
     for key in sorted(record.context, key=_context_order):
-        line[key] = _json_value(record.context[key])
+        document[key] = _json_value(record.context[key])
+    data: dict[str, Any] = {}
     for key, value in record.fields.items():
-        line[f"field_{key}" if key in _RESERVED else key] = _json_value(value)
+        # Only a list of objects is lifted: a count called "alerts" stays under data, so the
+        # top-level field keeps one type in every record.
+        if key in _DOCUMENT_FIELDS and _is_object_list(value):
+            document[key] = _json_value(value)
+        else:
+            data[key] = _json_value(value)
+    if data:
+        document["data"] = {record.event.replace(".", "_"): data}
     if record.exception is not None:
-        line["exception"] = record.exception
-    return json.dumps(line, default=str, ensure_ascii=False)
+        document["error"] = record.exception
+    document["line"] = _console(record, False)
+    document["pod"] = _HOST
+    document["version"] = APP_VERSION
+    return document
+
+
+def _is_object_list(value: Any) -> bool:
+    return isinstance(value, list | tuple) and all(isinstance(item, Mapping) for item in value)
+
+
+def _json(record: _Record) -> str:
+    return json.dumps(_document(record), default=str, ensure_ascii=False)
+
+
+def _stream_for(proc: str, bound: Any) -> str:
+    if isinstance(bound, str) and bound in STREAMS:
+        return bound
+    return _PROC_STREAMS.get(proc, "admin")
 
 
 def _stream() -> TextIO:
@@ -520,12 +637,20 @@ def _emit(
     message: str | None,
     fields: dict[str, Any],
     exc: BaseException | None = None,
+    *,
+    console: bool = True,
+    forward: bool = True,
 ) -> None:
     settings = _current_settings()
-    if _LEVELS[level] < settings.threshold:
+    forwarder = _forwarder if forward else None
+    rank = _LEVELS[level]
+    to_console = rank >= settings.threshold and (console or settings.threshold <= _LEVELS["debug"])
+    to_forward = forwarder is not None and rank >= settings.forward_threshold
+    if not (to_console or to_forward):
         return
     try:
         context = dict(_CONTEXT.get() or {})
+        bound_stream = context.pop("stream", None)
         body: dict[str, Any] = {}
         for key, value in _redact(fields).items():
             if key in CONTEXT_KEYS:
@@ -546,18 +671,23 @@ def _emit(
             fields=body,
             used=used,
             exception=_exception(exc) if exc is not None else None,
+            stream=_stream_for(settings.proc, bound_stream),
         )
-        stream = _stream()
-        if settings.fmt == "json":
-            line = _json(record)
-        else:
-            color = settings.color
-            if color is None:
-                color = bool(getattr(stream, "isatty", lambda: False)())
-            line = _console(record, color)
-        with _WRITE_LOCK:
-            stream.write(line + "\n")
-            stream.flush()
+        if to_console:
+            out = _stream()
+            if settings.fmt == "json":
+                line = _json(record)
+            else:
+                color = settings.color
+                if color is None:
+                    color = bool(getattr(out, "isatty", lambda: False)())
+                line = _console(record, color)
+            with _WRITE_LOCK:
+                out.write(line + "\n")
+                out.flush()
+        if to_forward and forwarder is not None:
+            document = json.dumps(_document(record), default=str, ensure_ascii=False)
+            forwarder.submit(record.stream, document.encode("utf-8"))
     except Exception:  # pragma: no cover - last resort; logging never breaks the caller
         with suppress(Exception):
             sys.stderr.write(f"logging failed for event {event}\n")
@@ -571,6 +701,8 @@ class _Logger:
     The message is a ``str.format`` template over the fields and the current context; the
     console shows fields it does not mention after the message. ``exc`` attaches an
     exception's type, redacted message, cause chain and this application's frames.
+    ``console=False`` keeps a record off the console unless ``LOG_LEVEL=debug``; it is still
+    forwarded to the log index.
     """
 
     @staticmethod
@@ -580,9 +712,10 @@ class _Logger:
         /,
         *,
         exc: BaseException | None = None,
+        console: bool = True,
         **fields: Any,
     ) -> None:
-        _emit("debug", event, message, fields, exc)
+        _emit("debug", event, message, fields, exc, console=console)
 
     @staticmethod
     def info(
@@ -591,9 +724,10 @@ class _Logger:
         /,
         *,
         exc: BaseException | None = None,
+        console: bool = True,
         **fields: Any,
     ) -> None:
-        _emit("info", event, message, fields, exc)
+        _emit("info", event, message, fields, exc, console=console)
 
     @staticmethod
     def warn(
@@ -602,9 +736,10 @@ class _Logger:
         /,
         *,
         exc: BaseException | None = None,
+        console: bool = True,
         **fields: Any,
     ) -> None:
-        _emit("warn", event, message, fields, exc)
+        _emit("warn", event, message, fields, exc, console=console)
 
     @staticmethod
     def error(
@@ -613,14 +748,19 @@ class _Logger:
         /,
         *,
         exc: BaseException | None = None,
+        console: bool = True,
         **fields: Any,
     ) -> None:
-        _emit("error", event, message, fields, exc)
+        _emit("error", event, message, fields, exc, console=console)
 
     @staticmethod
-    def enabled(level: str) -> bool:
-        """True when a record at ``level`` would be written; skips costly field building."""
-        return _LEVELS[level] >= _current_settings().threshold
+    def enabled(level: str, *, console: bool = True) -> bool:
+        """True when a record at ``level`` would go anywhere; skips costly field building."""
+        settings = _current_settings()
+        rank = _LEVELS[level]
+        if rank >= settings.threshold and (console or settings.threshold <= _LEVELS["debug"]):
+            return True
+        return _forwarder is not None and rank >= settings.forward_threshold
 
 
 log = _Logger()

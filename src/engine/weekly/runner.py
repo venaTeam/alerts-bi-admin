@@ -525,7 +525,15 @@ _OUTCOME_TEXT = {
 
 
 def _log_outcome(outcome: Outcome) -> None:
-    template = _OUTCOME_TEXT.get(outcome.outcome, "{outcome} the week ending {week}")
+    if outcome.window_end is None:
+        # A blocked team, or one that failed before any week: no week to name, and no
+        # placeholder, so the week field holds a date in every record.
+        template = {
+            "blocked": "Blocked",
+            "failed": "The weekly schedule could not process this team",
+        }.get(outcome.outcome, "{outcome}")
+    else:
+        template = _OUTCOME_TEXT.get(outcome.outcome, "{outcome} the week ending {week}")
     if outcome.detail:
         template += ": {detail}"
     emit = (
@@ -539,7 +547,7 @@ def _log_outcome(outcome: Outcome) -> None:
         "weekly.outcome",
         template,
         outcome=outcome.outcome,
-        week=f"{outcome.window_end:%Y-%m-%d}" if outcome.window_end else "-",
+        week=f"{outcome.window_end:%Y-%m-%d}" if outcome.window_end else None,
         detail=outcome.detail,
         run_id=outcome.run_id,
     )

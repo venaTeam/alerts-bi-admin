@@ -36,9 +36,8 @@ _TEMPLATE_OWNED = {
 }
 #: Legacy trigger listener settings; `alerts-bi-admin serve` does not read them.
 _LEGACY = {"API_HOST", "API_PORT", "API_REGISTRY_PATH", "API_DATABASE"}
-#: Read by libraries rather than through read_*: the log threshold and format, and the model
-#: client's CA file.
-_LIBRARY = {"LOG_LEVEL", "LOG_FORMAT", "SSL_CERT_FILE"}
+#: Read by libraries rather than through read_*: the log settings and the model client's CA file.
+_LIBRARY = {"LOG_LEVEL", "LOG_FORMAT", "LOG_FORWARD_URL", "LOG_FORWARD_LEVEL", "SSL_CERT_FILE"}
 #: How a template names a ConfigMap or Secret it reads.
 _OBJECT_REFERENCE = re.compile(
     r"(?:(?:configMapRef|secretRef|configMap|secretKeyRef): \{name"
@@ -210,3 +209,97 @@ def test_the_drain_check_queries_while_its_connection_is_open(
     exec(compile(match.group(1), "deploy/openshift/README.md", "exec"), {})
     assert len(queries) == 1 and "FROM run_jobs" in queries[0]
     assert "'completed'" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- the optional log collector
+
+_LOGGING_OBJECTS = {"alerts-bi-logs-config", "alerts-bi-logs-es", "alerts-bi-ca-bundle"}
+
+
+def _fluent_bit_sections() -> list[dict[str, str]]:
+    sections: list[dict[str, str]] = []
+    for line in (DEPLOY / "fluent-bit.conf").read_text("utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("["):
+            sections.append({"_section": stripped.strip("[]")})
+        else:
+            key, _, value = stripped.partition(" ")
+            sections[-1][key] = value.strip()
+    return sections
+
+
+def test_the_logging_template_and_its_values_example_agree() -> None:
+    objects, parameters = _template("logging.yaml")
+    assert _references(objects) == set(parameters)
+    values = _env_example("logging-values.env.example")
+    assert set(values) == set(parameters)
+    for key, fields in parameters.items():
+        expected = "" if fields.get("required") == "true" else _default(fields)
+        assert values[key] == expected, key
+    assert re.findall(r"^\s*image: (.+)$", objects, flags=re.MULTILINE) == ['"${LOGS_IMAGE}"']
+
+
+def test_the_collector_reads_only_documented_objects_and_settings() -> None:
+    objects, _ = _template("logging.yaml")
+    referenced = set(_OBJECT_REFERENCE.findall(objects))
+    assert referenced == _LOGGING_OBJECTS
+    runbook = (DEPLOY / "README.md").read_text("utf-8")
+    for cluster_object in _LOGGING_OBJECTS | {"alerts-bi-logs"}:
+        assert f"`{cluster_object}`" in runbook, cluster_object
+    # Every ${VAR} in fluent-bit.conf is set by the Template or the Secret, and nothing else.
+    used = set(re.findall(r"\$\{([A-Z_]+)\}", (DEPLOY / "fluent-bit.conf").read_text("utf-8")))
+    from_template = set(re.findall(r"\{name: (LOGS_[A-Z_]+), value:", objects))
+    from_secret = set(_env_example("logs-es.env.example"))
+    assert not from_template & from_secret
+    assert used == from_template | from_secret
+
+
+def test_only_the_alerts_bi_pods_may_reach_the_collector() -> None:
+    # The HTTP input has no authentication: the NetworkPolicy admits exactly the pods that
+    # send records (admin console and worker, weekly CronJob, one-off Jobs, portal).
+    objects, _ = _template("logging.yaml")
+    policy = objects[objects.index("kind: NetworkPolicy") :]
+    assert "podSelector: {matchLabels: {app: alerts-bi-logs}}" in policy
+    assert "policyTypes: [Ingress]" in policy
+    (allowed,) = re.findall(r"values: \[([^\]]+)\]", policy)
+    senders = {
+        label
+        for name in ("admin.yaml", "admin-job.yaml")
+        for label in re.findall(
+            r"labels: \{app: (alerts-bi-[a-z-]+),", (DEPLOY / name).read_text("utf-8")
+        )
+    }
+    # The portal's Deployment lives in alerts-bi-portal; its pods are labelled alerts-bi-portal.
+    assert {value.strip() for value in allowed.split(",")} == senders | {"alerts-bi-portal"}
+    assert re.findall(r"port: (\d+)\}", policy) == ["9880", "2020"]
+    runbook = (DEPLOY / "README.md").read_text("utf-8")
+    assert (
+        "networkpolicy/alerts-bi-logs" in runbook and "NetworkPolicy\n`alerts-bi-logs`" in runbook
+    )
+
+
+def test_the_secret_example_follows_the_from_env_file_format() -> None:
+    for line in (DEPLOY / "logs-es.env.example").read_text("utf-8").splitlines():
+        if line and not line.startswith("#"):
+            assert re.fullmatch(r"[A-Z][A-Z0-9_]*=[^\"'#\s]*", line), line
+
+
+def test_each_stream_has_its_own_output_and_the_apps_post_to_the_service() -> None:
+    from alerts_bi_shared.logging_setup import STREAMS
+
+    sections = _fluent_bit_sections()
+    (http_input,) = [s for s in sections if s["_section"] == "INPUT"]
+    assert (http_input["Name"], http_input["Port"]) == ("http", "9880")
+    outputs = [s for s in sections if s["_section"] == "OUTPUT"]
+    assert [s["Match"] for s in outputs] == list(STREAMS)
+    for output in outputs:
+        assert output["Name"] == "es"
+        assert output["Logstash_Prefix"] == "${LOGS_INDEX_PREFIX}-" + output["Match"]
+        # The records carry @timestamp; Fluent Bit must not write a second one.
+        assert output["Time_Key"] != "@timestamp"
+    objects, _ = _template("logging.yaml")
+    assert "{name: http, port: 9880, targetPort: 9880}" in objects
+    config = _env_example("config.env.example", include_commented=True)
+    assert config["LOG_FORWARD_URL"] == "http://alerts-bi-logs:9880"
