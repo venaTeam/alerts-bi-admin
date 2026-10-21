@@ -145,10 +145,10 @@ def test_019_erases_names_and_keeps_everything_else(monkeypatch: pytest.MonkeyPa
             check_schema(db)
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["019_erase_operator_names"]
+    assert applied == ["019_erase_operator_names", "020_portal_review_operators"]
 
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "019_erase_operator_names"
+        assert migrations.current_revision(db) == "020_portal_review_operators"
         assert _counts(db) == before
         check_schema(db)
         publications = db.query(

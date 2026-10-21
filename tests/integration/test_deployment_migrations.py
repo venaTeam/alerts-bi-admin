@@ -83,7 +83,7 @@ def test_init_applies_missing_revision_once_to_admin_database(
     assert after.status_code == 200, after.text
     assert after.json()["ok"] is True
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "019_erase_operator_names"
+        assert migrations.current_revision(db) == "020_portal_review_operators"
         assert db.query_one(
             "SELECT COUNT(*) AS n FROM schema_migrations WHERE version='011_run_job_keys'"
         ) == {"n": 1}

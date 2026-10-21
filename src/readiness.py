@@ -86,6 +86,7 @@ def check_schema(db: Database) -> None:
         "017_case_sensitive_teams",
         "018_alert_identity_hash",
         "019_erase_operator_names",
+        "020_portal_review_operators",
     ):
         if (
             db.query_one(

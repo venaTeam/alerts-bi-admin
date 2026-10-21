@@ -145,6 +145,10 @@ html,body{margin:0;min-height:100%;color-scheme:light}body{background:#f4f6f8}
 #abi-console .abi-stats dd{margin:0;font-size:26px;font-weight:600}
 #abi-console .abi-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin:0}
 #abi-console .abi-facts dt{color:var(--abi-muted);font-size:13px}#abi-console .abi-facts dd{margin:0;font-size:14px;overflow-wrap:anywhere}
+#abi-console .abi-ops{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px 28px;margin:0}
+#abi-console .abi-ops dt{color:var(--abi-muted);font-size:13px;margin-bottom:6px}#abi-console .abi-ops dd{margin:0}
+#abi-console .abi-op-list{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+#abi-console .abi-op-list .abi-chip{white-space:normal;overflow-wrap:anywhere}
 #abi-console .abi-list{list-style:none;margin:0;padding:0;border-top:1px solid var(--abi-line)}
 #abi-console .abi-list>li{border-bottom:1px solid var(--abi-line)}
 #abi-console .abi-item{display:flex;align-items:center;gap:16px;padding:14px 8px;color:var(--abi-ink);text-decoration:none}
@@ -243,6 +247,7 @@ html,body{margin:0;min-height:100%;color-scheme:light}body{background:#f4f6f8}
 
 /* Narrow screens: the sidebar becomes a top strip */
 @media(max-width:760px){
+ #abi-console .abi-ops{grid-template-columns:minmax(0,1fr)}
  #abi-console .abi-side{flex-basis:100%;flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:12px 16px}
  #abi-console .abi-navs{flex-direction:row;flex-wrap:wrap;gap:4px}
  #abi-console .abi-nav{padding:0 10px}#abi-console .abi-nav svg{display:none}

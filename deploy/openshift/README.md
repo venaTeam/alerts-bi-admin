@@ -398,7 +398,9 @@ Expect `succeeded=1`, a `revision:` line naming a migration listed below it, and
 Pending migrations can lock tables for a long time and cannot be undone except by restoring a
 backup. 015, 016, 017 and 018 rebuild the primary keys and indexes of the largest tables; while they
 run, portal pages and every query on those tables wait. 019 erases stored operator names for
-good (section 5). Before applying any pending migration,
+good (section 5). 020 only recreates the `portal_reviews` view: the portal image that reads its
+new operator columns is not ready until 020 is applied, so upgrade admin first. Before applying
+any pending migration,
 the database owner must confirm all of the following to you in writing. You cannot do them yourself:
 
 1. They will take a database backup in this window, after section 7.5 has stopped every
@@ -538,7 +540,7 @@ oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly --dry
 oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly-status
 ```
 
-Expect every migration `applied` (the last one `019_erase_operator_names`), the registry valid
+Expect every migration `applied` (the last one `020_portal_review_operators`), the registry valid
 with the expected teams, the due weeks listed without anything being run, and each enrolled
 team's latest published week.
 

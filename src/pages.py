@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import quote, urlencode
 from uuid import uuid4
 
+from alerts_bi_operations.registry import TeamEntry
 from alerts_bi_operations.review.decisions import DECISION_STATES, findings_on
 from alerts_bi_shared.team_urls import encode_team_id
 from alerts_bi_shared.ui.assets import STYLESHEET as SHARED_CSS
@@ -1333,6 +1334,108 @@ def delete_dialog(run: Mapping[str, Any], token: str) -> str:
     )
 
 
+#: A run's operators as its frozen registry entry listed them: (v1 operators, v2 operator).
+Operators = tuple[tuple[str, ...], str | None]
+
+
+def _operator_chips(values: Sequence[str]) -> str:
+    return (
+        '<ul class="abi-op-list">'
+        + "".join(f'<li><span class="abi-chip abi-mono">{h(v)}</span></li>' for v in values)
+        + "</ul>"
+    )
+
+
+def _effective(value: Any) -> str:
+    try:
+        day = datetime.strptime(str(value), "%Y-%m-%d")
+    except ValueError:
+        return ""
+    return f" · effective {day.day} {day:%b %Y}"
+
+
+def operators_panel(
+    team_id: str,
+    teams: Sequence[TeamEntry],
+    registry_version: str,
+    effective_date: Any,
+    selected: Mapping[str, Any] | None,
+    frozen: Operators | None,
+) -> str:
+    """The team's operators from the current registry, with the selected run's when they differ.
+
+    Design "Team operators on the team page" (2026-10-21).
+    """
+    entry = next((team for team in teams if team.team_id == team_id), None)
+    current: Operators | None = (entry.v1_operators, entry.v2_operator) if entry else None
+    shown = current or frozen
+    notes = []
+    if entry is None:
+        notes.append(
+            "This team is not in the current registry."
+            + (" These are the operators the selected week ran with." if frozen else "")
+        )
+    elif not entry.v1_operators and not entry.v2_operator:
+        notes.append(
+            "This team has no operators in the registry, so a run finds no alerts for it. "
+            "Add its v1 operators or v2 operator to the team registry."
+        )
+    if current is not None and frozen is not None and frozen != current and selected:
+        listed = [*frozen[0], *([frozen[1]] if frozen[1] else [])]
+        notes.append(
+            f"The selected week ({_week(selected)}) ran with registry "
+            f"{selected.get('registry_version') or 'unknown'}, which listed "
+            + (
+                f"{_plural(len(listed), 'operator')}: {', '.join(listed)}"
+                if listed
+                else "no operators"
+            )
+            + ". Run the week again to use the current list."
+        )
+    lines = []
+    if entry is not None:
+        # The v1 and v2 schemas are separate sources, so an operator is shared only within one.
+        listed_by = [(op, "v1") for op in dict.fromkeys(entry.v1_operators)]
+        listed_by += [(entry.v2_operator, "v2")] if entry.v2_operator else []
+        for operator, schema in listed_by:
+            others = [
+                team.display_name
+                for team in teams
+                if team.team_id != team_id
+                and (
+                    operator in team.v1_operators
+                    if schema == "v1"
+                    else operator == team.v2_operator
+                )
+            ]
+            if others:
+                lines.append(
+                    f'<p class="abi-small abi-muted"><span class="abi-mono">{h(operator)}</span> '
+                    f"is also listed for {h(', '.join(others))}. Its alerts count for each team.</p>"
+                )
+    lists = ""
+    if shown is not None:
+        v1, v2 = shown
+        lists = (
+            '<dl class="abi-ops">'
+            f"<div><dt>v1 operators ({len(v1):,})</dt><dd>"
+            + (_operator_chips(v1) if v1 else '<span class="abi-chip none">None</span>')
+            + "</dd></div><div><dt>v2 operator</dt><dd>"
+            + (_operator_chips([v2]) if v2 else '<span class="abi-chip none">Not set yet</span>')
+            + "</dd></div></dl>"
+        )
+    return (
+        '<section class="abi-panel tight" aria-labelledby="operators-title">'
+        '<div class="abi-row abi-between"><h2 id="operators-title" class="abi-h3">Operators</h2>'
+        f'<span class="abi-small abi-muted">Registry {h(registry_version)}{_effective(effective_date)}</span></div>'
+        + lists
+        + "".join(f'<div class="abi-note">{icon("info")}<p>{h(text)}</p></div>' for text in notes)
+        + "".join(lines)
+        + '<p class="abi-tiny abi-muted">Alerts are matched to the team by these exact, '
+        "case-sensitive values. Change them in the team registry.</p></section>"
+    )
+
+
 def team_page(
     team_id: str,
     name: str,
@@ -1351,10 +1454,11 @@ def team_page(
     backfill: str = "",
     new_runs: str = "",
     note: str = "",
+    operators: str = "",
     details: str = "",
     dialogs: str = "",
 ) -> str:
-    """One week of a team: header, notes, progress steps, the current step and details."""
+    """One week of a team: header, operators, notes, progress steps, the current step and details."""
     selected_id = str(selected["run_id"]) if selected else None
     label = _job_week(job) if job is not None else _week(selected) if selected else ""
     picker = (
@@ -1372,7 +1476,7 @@ def team_page(
         f'<a class="abi-back" href="/">{icon("back")}Teams</a>'
         f'<div class="abi-head"><div><h1>{h(name)}</h1><p class="abi-sub">{schedule}</p></div>'
         f'<div class="abi-actions">{picker}{new_button}</div></div>'
-        f"{note}{backfill}{jobs}{week_steps(selected, job, view)}{content}{details}"
+        f"{operators}{note}{backfill}{jobs}{week_steps(selected, job, view)}{content}{details}"
     )
     return layout(name, body + new_runs + dialogs, flash, error)
 
