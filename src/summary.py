@@ -361,10 +361,13 @@ def snapshot_operators(text: Any) -> tuple[tuple[str, ...], str | None] | None:
         raw = json.loads(text) if isinstance(text, str) else None
     except ValueError:
         return None
-    if not isinstance(raw, dict) or not isinstance(raw.get("v1_operators"), list):
+    if not isinstance(raw, dict):
+        return None
+    v1 = raw.get("v1_operators")
+    if not isinstance(v1, list) or not all(isinstance(op, str) for op in v1):
         return None
     v2 = raw.get("v2_operator")
-    return tuple(str(op) for op in raw["v1_operators"]), None if v2 is None else str(v2)
+    return tuple(v1), None if v2 is None else str(v2)
 
 
 def summary_inputs(
