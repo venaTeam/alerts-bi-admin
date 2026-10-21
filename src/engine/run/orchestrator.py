@@ -130,7 +130,9 @@ def execute_run(
     # 1. Registry validation completes before any Elasticsearch query: a registry mistake
     # silently changes which alerts belong to a team, and that error is invisible in the
     # output.
-    bind_log_context(team_id=team_id, stage="registry")
+    # Everything a run does goes to the runs log index, whichever process executes it
+    # (the worker, the weekly job, a CLI run or the console's synchronous run).
+    bind_log_context(team_id=team_id, stage="registry", stream="runs")
     loaded = load_registry(registry_path) if registry_path else load_registry()
     team = select_team(loaded, team_id)
 

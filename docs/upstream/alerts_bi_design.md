@@ -1,5 +1,67 @@
 # Alerts BI — Design Document
 
+## Log shipping to Elasticsearch — accepted 2026-10-20
+
+On 2026-10-20 the product owner asked to send the logs to Elasticsearch as well
+([decision 009](../decisions/009-log-shipping.md)). Of the options offered (the cluster's own log
+forwarding, a Fluent Bit sidecar per pod, one Fluent Bit in the namespace receiving records over
+the network) they chose the last, with three indices, runs, admin and portal. They decided that
+console actions on a run belong to the admin index, and that every model group of every run is
+logged with its alerts inside it. Elasticsearch itself (index templates, retention, accounts,
+Kibana) is configured by whoever deploys it; this design only sends to it, and an agent must be
+able to deploy everything on OpenShift from the repository's files. What logs may contain is
+unchanged except for one addition, below.
+
+* **Transport.** With `LOG_FORWARD_URL` set (`http://alerts-bi-logs:9880` in a deployment), each
+  process also sends every record at `LOG_FORWARD_LEVEL` (default info) or above, as a JSON
+  array, to `<url>/runs`, `<url>/admin` or `<url>/portal`. Shared 0.1.10 holds the sender: a
+  bounded queue (16 MB), a background thread that sends at least once a second, a three-second
+  timeout and a five-second flush at exit. It never blocks or raises; when the collector is
+  unreachable or the queue is full, records are dropped and the console says how many, at most
+  once a minute (`log.forward_failed`). It ignores `HTTP_PROXY`, since the collector is in the
+  namespace. Unset, nothing is sent and nothing else changes.
+* **Streams.** The worker and weekly processes write to `runs`, the portal to `portal`, and
+  everything else to `admin`. Any process executing a run (a CLI run, the console's synchronous
+  run, acceptance verification) writes that run's records to `runs`. Console actions on a run
+  (submission, publication, withdrawal, deletion, decisions, refusals) stay in `admin`.
+* **Collector.** One Fluent Bit 5.1.2 Deployment `alerts-bi-logs` (`logging.yaml`, configured by
+  `fluent-bit.conf` as the ConfigMap `alerts-bi-logs-config`, Elasticsearch host, port and account
+  in the Secret `alerts-bi-logs-es`). The URL path is the record's tag, and each tag goes to its
+  own daily index `<LOGS_INDEX_PREFIX>-<stream>-YYYY.MM.DD` (default prefix `alerts-bi`). It
+  buffers on its volume while Elasticsearch is unreachable and retries with backoff up to 15
+  minutes apart, dropping a chunk after `LOGS_RETRY_LIMIT` tries (default 60, roughly eight
+  hours), so neither a long outage nor records Elasticsearch keeps refusing hold the buffer
+  forever. It writes deterministic ids so a retry never duplicates, and adds its arrival time as
+  `received_at`.
+* **Document.** `@timestamp`, `level`, `proc`, `stream`, `event`, `message` (the sentence), the
+  full identifiers (`team_id`, `run_id`, `job_id`, `backfill_id`, `batch_id`, `request_id`,
+  `stage`), the event's own fields under `data.<event with _ for .>` so one field name never
+  takes two types across events, `error` (type, message, frames, library frame count, causes)
+  for a failure, `line` (exactly the console line, for reading), `pod` and `version`. A
+  group's `alerts` list is the only top-level event field (a count with that name stays under
+  `data`). Every field keeps one type in every record, and dates are never replaced by a
+  placeholder, because Elasticsearch fixes a field's type when it first sees it and then refuses
+  records that disagree. URL credentials are removed from every string, and a non-finite
+  number is written as null.
+* **Model groups.** Each model group (one request batch) writes one `llm.group` record: its
+  group type and value, partition, attempts, status (`succeeded` or `exhausted`), duration,
+  state counts, token usage when the endpoint reports it, and `alerts`, a list with each
+  member's `schema`, `application`, `key_field`, `alert_id`, `state` and, when the model
+  answered, `assessment`, `principle_id` and `confidence`. It never holds the alert document or
+  the model's justification. These records reach the console only at `LOG_LEVEL=debug`.
+  Searching `alerts.application` and `alerts.key_field` therefore finds an alert in each run that
+  sent it to the model; alerts with a rule finding, reused verdicts and runs with the model off
+  have no group record. A run resumed after an interrupted worker logs its groups again, with
+  the same `batch_id` and outcome.
+* **Content.** The logs now also carry, inside group records, the application, key field and
+  model outcome of the alerts sent to the model. These are identities and enumerated outcomes,
+  which `outputs.md` section 9 allows; documents, justifications, payloads and credentials stay
+  out.
+* **Deployment.** `deploy/openshift/README.md` section 15 of alerts-bi-admin is the procedure:
+  mirror the image by digest, fill `logging-values.env` and `logs-es.env`, create the Secret
+  and ConfigMap, apply `logging.yaml`, send a check record, then set `LOG_FORWARD_URL` in
+  `alerts-bi-config` and restart admin and portal. Removing `LOG_FORWARD_URL` turns it off.
+
 ## Console log format — accepted 2026-10-20
 
 The product owner approved this format on 2026-10-20, after reporting that the logs did not
@@ -46,8 +108,9 @@ redacted errors only.
   refusal the console shows the operator is also recorded (`console.refused`).
 * **Output and settings.** Every record goes to stderr and stdout stays for command output.
   `LOG_LEVEL` keeps debug, info, warn (or warning) and error, default info. `LOG_FORMAT` is
-  `console` (default) or `json`: one object per line with `ts`, `level`, `proc`, `event`,
-  `msg`, the full identifiers, every field and a structured `exception`. Colour is used only on
+  `console` (default) or `json`: one object per line, the document described in "Log shipping
+  to Elasticsearch" (amended 2026-10-20; it first had `ts`, `msg`, top-level fields and an
+  `exception` object). Colour is used only on
   a terminal; `NO_COLOR` turns it off and `FORCE_COLOR` on. An unknown value falls back to the
   default with a `log.settings_invalid` warning. Warnings and errors that libraries write
   through Python logging (uvicorn, the Elasticsearch transport) use the same format.

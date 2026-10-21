@@ -49,6 +49,9 @@ Portal (alerts-bi-portal) --> the same SQL_DATABASE, published portal_* views on
 | `alerts-bi-admin-secrets` | Secret | you, generated | `ADMIN_SECRET`, which signs the console's forms |
 | `alerts-bi-ca-bundle` | ConfigMap | you, only for a private CA | `ca-bundle.crt`, mounted at `/etc/alerts-bi-ca` |
 | `alerts-bi-pull` | Secret | you, only if the registry needs credentials | Image pull credentials |
+| `alerts-bi-logs` | Deployment, Service, ServiceAccount | `logging.yaml`, optional | Log collector that writes the logs to Elasticsearch ([section 15](#15-ship-logs-to-elasticsearch-optional)) |
+| `alerts-bi-logs-config` | ConfigMap | you, from `fluent-bit.conf`, only with section 15 | The collector's configuration |
+| `alerts-bi-logs-es` | Secret | you, from `logs-es.env`, only with section 15 | Elasticsearch host, port and account for the collector |
 
 The runs-era objects (the `alerts-bi-runs` trigger, its image and any old weekly CronJob) and
 the former login proxy's objects (the `oauth-proxy` container, the Role and RoleBinding
@@ -724,6 +727,11 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
 | Pods rejected: `must specify limits.cpu` | The project's quota needs CPU limits. Stop and ask the project owner for a LimitRange with default CPU limits |
 | `admin_job` prints `FAILED` during a long migration | The log stream ended before the Job did. `oc get job <name> -n "$NS"` shows whether it still runs; follow it again with `oc logs -n "$NS" -f job/<name>` |
 | Weekly Job failed | `oc logs job/<name> -n "$NS"` and `weekly-status`. Held or failed weeks fail the Job on purpose; the next run retries due weeks |
+| Collector log `[error] [output:es...] HTTP status=401` or `403` | The account in `alerts-bi-logs-es` is wrong or may not create or write `<prefix>-*` indices: fill `logs-es.env` again from the example and repeat 15.3, which restarts the collector |
+| Collector log `[error] [tls]` or certificate errors | Set `LOGS_ES_TLS` to match the endpoint; for a private CA add it to `alerts-bi-ca-bundle` and set `LOGS_ES_CA_FILE` (15.2), then repeat 15.2's render and 15.3, which restarts the collector |
+| Collector log repeats `[engine] failed to flush chunk ... retry in N seconds` with no `HTTP status` error | The cluster cannot reach `LOGS_ES_HOST:LOGS_ES_PORT`; records wait on the buffer volume and are sent when it can, for up to `LOGS_RETRY_LIMIT` tries (about eight hours by default) |
+| Collector log `"status":400` with `document_parsing_exception` or `mapper_parsing_exception` | Elasticsearch refuses those records' field types, usually because an index template on `<prefix>-*` declares a field differently from the documents in 15.6. The rest of the chunk is written; the refused records are dropped after `LOGS_RETRY_LIMIT` tries. Ask the Elasticsearch owner to align or remove the template |
+| An application logs `log.forward_failed` | It cannot reach `alerts-bi-logs:9880`: check `oc get pods -l app=alerts-bi-logs -n "$NS"`, and that the sending pod is admitted by `oc get networkpolicy/alerts-bi-logs -n "$NS" -o yaml`: only pods whose `app` label is `alerts-bi-admin`, `alerts-bi-weekly`, `alerts-bi-admin-job` or `alerts-bi-portal` may reach 9880 (section 15.3). Fix a missing label on the sender rather than adding a broader policy. The records it names are only in `oc logs` |
 | A run or job failed, or a page showed an error | Every log line ends with `[team=… run=<16 characters> job=<8 characters>]`. Take the run id as the console shows it and `oc logs -n "$NS" deploy/alerts-bi-admin -c run-worker \| grep <run id>`; the `ERROR` line names the stage that broke, and the indented lines under it the error and where it began. For a page error, grep the admin container for `ERROR` near that time; its `req=` matches the request |
 
 ## 14. Rules that always apply
@@ -739,3 +747,170 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
   running, never with a deadline, never stamped, downgraded, edited or reset.
 - Deploy admin before the portal whenever a release contains migrations.
 - Secrets live only in the cluster: never commit filled value files or paste them anywhere.
+- The log collector is optional. With `LOG_FORWARD_URL` unset, or the collector down, every
+  application works unchanged and `oc logs` still has every record.
+
+## 15. Ship logs to Elasticsearch (optional)
+
+Design "Log shipping to Elasticsearch". One Fluent Bit pod, `alerts-bi-logs`, receives every
+log record of the console, run worker, weekly CronJob, admin Jobs and the portal, and writes
+them to an Elasticsearch you name, as three families of daily indices:
+
+| Index | Holds |
+|---|---|
+| `<prefix>-runs-YYYY.MM.DD` | Everything a run does: the worker and weekly job, analysis, model groups with their alerts, persistence, weekly outcomes |
+| `<prefix>-admin-YYYY.MM.DD` | The console (requests, submissions, publications, withdrawals, deletions, decisions, refusals), migrations and other commands |
+| `<prefix>-portal-YYYY.MM.DD` | The portal |
+
+`<prefix>` is `LOGS_INDEX_PREFIX` (default `alerts-bi`); the date is the UTC day the collector
+received the record. Creating index templates, retention or Kibana views is the Elasticsearch
+owner's business, not this procedure's: the collector only writes. The applications send to the
+collector only when `LOG_FORWARD_URL` is set, never wait for it, and drop records (saying so on
+their console) when it is unreachable.
+
+```text
+admin pod (admin, run-worker) ─┐
+alerts-bi-weekly / admin Jobs ─┼─ POST JSON ──> Service alerts-bi-logs:9880 ──> alerts-bi-logs ──> Elasticsearch
+alerts-bi-portal ──────────────┘   /runs /admin /portal                    buffer volume       (LOGS_ES_HOST)
+```
+
+You need, from the Elasticsearch owner: its host name and port, whether it is HTTPS, the CA
+that signed its certificate when that CA is private, and an account allowed to create the
+indices `<prefix>-runs-*`, `<prefix>-admin-*` and `<prefix>-portal-*` and to write to them
+(`create_index`, `create_doc` and `auto_configure`). The cluster must reach that host and port.
+
+### 15.1 Image
+
+The collector runs `docker.io/fluent/fluent-bit:5.1.2`
+(`sha256:d792375ca8e53be72fc25716c28f291f32c6fc6f4f31d12d0d14bc78cefe9226`, a multi-platform
+index). If the cluster can pull from Docker Hub, `LOGS_IMAGE` can be
+`docker.io/fluent/fluent-bit@sha256:d792375ca8e53be72fc25716c28f291f32c6fc6f4f31d12d0d14bc78cefe9226`.
+Otherwise copy it into the registry the admin image comes from and take that digest:
+
+```bash
+oc image mirror --filter-by-os=linux/amd64 \
+  docker.io/fluent/fluent-bit@sha256:d792375ca8e53be72fc25716c28f291f32c6fc6f4f31d12d0d14bc78cefe9226 \
+  <registry>/<repository>/fluent-bit:5.1.2
+oc image info <registry>/<repository>/fluent-bit:5.1.2
+```
+
+Expect a `Digest: sha256:<64 hex>` line; `LOGS_IMAGE` is `<registry>/<repository>/fluent-bit@sha256:<64 hex>`.
+Add `--registry-config=<auth.json>` when the registry needs credentials.
+
+### 15.2 Value files
+
+```bash
+cp logging-values.env.example "$VALUES_DIR/logging-values.env"
+cp logs-es.env.example "$VALUES_DIR/logs-es.env"
+```
+
+In `logging-values.env` set `LOGS_IMAGE`. For plain HTTP set `LOGS_ES_TLS=Off`. For a private
+CA, add it to `alerts-bi-ca-bundle` (6.4) and set
+`LOGS_ES_CA_FILE=/etc/alerts-bi-ca/ca-bundle.crt`. In `logs-es.env` set `LOGS_ES_HOST`,
+`LOGS_ES_PORT` and the account. Render to check, changing nothing on the cluster:
+
+```bash
+oc process --local -f logging.yaml --param-file "$VALUES_DIR/logging-values.env" -o yaml > "$VALUES_DIR/logging.rendered.yaml"
+grep 'image:' "$VALUES_DIR/logging.rendered.yaml"
+```
+
+Expect: `oc process` prints nothing, and the one `image:` line ends in `@sha256:` and 64 hex characters.
+
+### 15.3 Deploy the collector
+
+```bash
+oc create secret generic alerts-bi-logs-es -n "$NS" --from-env-file="$VALUES_DIR/logs-es.env" --dry-run=client -o yaml | oc apply -n "$NS" -f -
+rm "$VALUES_DIR/logs-es.env"
+oc create configmap alerts-bi-logs-config -n "$NS" --from-file=fluent-bit.conf="$ADMIN_REPO/deploy/openshift/fluent-bit.conf" --dry-run=client -o yaml | oc apply -n "$NS" -f -
+oc apply -n "$NS" -f "$VALUES_DIR/logging.rendered.yaml"
+oc rollout restart deployment/alerts-bi-logs -n "$NS"
+oc rollout status deployment/alerts-bi-logs -n "$NS" --timeout=5m
+sleep 15
+oc logs -n "$NS" deployment/alerts-bi-logs | grep -E '\[(error|warn)\]'
+```
+
+Expect `deployment "alerts-bi-logs" successfully rolled out`, and no `[error]` or `[warn]`
+lines from the last command. The restart is what makes a changed Secret, ConfigMap or CA take
+effect: Fluent Bit reads them only when it starts. The Template also creates the NetworkPolicy
+`alerts-bi-logs`, because the collector's HTTP input has no authentication. It admits only the
+pods labelled `app` = `alerts-bi-admin`, `alerts-bi-weekly`, `alerts-bi-admin-job` or
+`alerts-bi-portal` on ports 9880 and 2020, so no other pod in the namespace can write records
+into the log indices. To change the account later, fill
+`logs-es.env` again from the example and repeat this whole step.
+
+### 15.4 Check that records reach Elasticsearch
+
+Send one record from the admin pod, then read the collector's counters:
+
+```bash
+oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- python -c 'import datetime,json,urllib.request as u; now=datetime.datetime.now(datetime.UTC).isoformat(timespec="milliseconds").replace("+00:00","Z"); r=u.Request("http://alerts-bi-logs:9880/admin", data=json.dumps([{"@timestamp": now, "level": "info", "proc": "check", "stream": "admin", "event": "log.check", "message": "Log shipping check"}]).encode(), headers={"Content-Type": "application/json"}); print(u.urlopen(r, timeout=5).status)'
+sleep 10
+oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- python -c 'import json,urllib.request as u; m=json.load(u.urlopen("http://alerts-bi-logs:2020/api/v1/metrics", timeout=5)); print({k: {f: v[f] for f in ("proc_records","errors","retries_failed")} for k, v in m["output"].items()})'
+```
+
+Expect `201`, then three outputs (`es.0` runs, `es.1` admin, `es.2` portal) with `errors: 0` and
+`retries_failed: 0`, and `proc_records` of at least 1 for `es.1`. A growing `errors` count means
+Elasticsearch refuses the records: `oc logs deployment/alerts-bi-logs -n "$NS"` names the reason
+(section 13). The record is now in `<prefix>-admin-<today>` with `event: log.check`.
+
+### 15.5 Turn on forwarding
+
+In `$VALUES_DIR/config.env` make sure the line `LOG_FORWARD_URL=http://alerts-bi-logs:9880`
+is present and not commented: remove the leading `# ` in a file made from the example, or add
+the line to a `config.env` exported from the live ConfigMap (section 7.1), which has no such
+line. Then install it and restart the applications.
+Restarting `alerts-bi-admin` interrupts a running analysis, so drain first (7.2):
+
+```bash
+oc create configmap alerts-bi-config -n "$NS" --from-env-file="$VALUES_DIR/config.env" --dry-run=client -o yaml | oc apply -n "$NS" -f -
+oc rollout restart deployment/alerts-bi-admin -n "$NS"
+oc rollout status deployment/alerts-bi-admin -n "$NS" --timeout=60m
+oc rollout restart deployment/alerts-bi-portal -n "$NS"
+oc rollout status deployment/alerts-bi-portal -n "$NS" --timeout=10m
+```
+
+The weekly CronJob and admin Jobs read the new value at their next run. Open the console once
+and run 15.4's counter command again: `proc_records` of `es.1` (admin) and `es.2` (portal) grow.
+No application console shows `log.forward_failed`:
+
+```bash
+oc logs -n "$NS" deploy/alerts-bi-admin -c admin --since=10m | grep -c log.forward_failed
+```
+
+Expect `0`.
+
+### 15.6 Finding records
+
+In Kibana (an index pattern or data view per family, time field `@timestamp`) or any
+Elasticsearch query. Every record has `@timestamp`, `level`, `proc`, `event`, `message` (one
+sentence), `line` (exactly what `oc logs` shows, including an error's trace), the identifiers
+`team_id`, `run_id`, `job_id`, `backfill_id`, `batch_id`, `request_id` and `stage` when they
+apply, `error` (type, message, frames, causes) for a failure, and the event's own fields under
+`data.<event with _ for .>`, for example `data.http_request.status`. KQL examples:
+
+| Find | Index | Query |
+|---|---|---|
+| Everything one run did | `<prefix>-runs-*` | `run_id : 3f9a1c2b4d5e6f70*` (the 16 characters the console shows) |
+| Every run of a team | `<prefix>-runs-*` | `team_id : "payments-core"` |
+| What happened to one alert | `<prefix>-runs-*` | `alerts.application : "checkout-svc" and alerts.key_field : "checkout-svc:inventory-check:chk-node-3"` |
+| Failures | any | `level : error` |
+| One console request | `<prefix>-admin-*` | `request_id : 4be1f0a2` (also the `X-Request-ID` response header) |
+
+An alert appears in the `llm.group` record of each model group it was sent to: its `alerts`
+list holds each member's `schema`, `application`, `key_field`, `alert_id`, `state` and, when
+the model answered, `assessment`, `principle_id` and `confidence`; never the alert document or
+the model's justification. Alerts with a rule finding, verdicts reused from an earlier run, and
+runs with the model off send no alert to the model and so have no group record. A run resumed
+after its worker was interrupted logs its groups again, with the same `batch_id` and outcome.
+
+### 15.7 Turn it off or remove it
+
+Comment out `LOG_FORWARD_URL` again in `config.env`, install it and restart as in 15.5. Then,
+if the collector should go:
+
+```bash
+oc delete -n "$NS" deployment/alerts-bi-logs service/alerts-bi-logs networkpolicy/alerts-bi-logs serviceaccount/alerts-bi-logs configmap/alerts-bi-logs-config secret/alerts-bi-logs-es
+```
+
+Records still on the collector's buffer volume are lost with it. Indices already written stay in
+Elasticsearch.
