@@ -294,7 +294,10 @@ needs defending.
 
 Alert documents, credentials and complete LLM payloads never appear in logs — logs carry
 identifiers, hashes, counts, timings and redacted errors only. The audit payloads live in
-SQL and nowhere else.
+SQL and nowhere else. Since 2026-10-20 (design "Log shipping to Elasticsearch") each model
+group's log record lists its alerts by `schema`, `application`, `key_field` and `alert_id`
+with their state and, when the model answered, its assessment, principle and confidence;
+never the document or the justification.
 
 ---
 
