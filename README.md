@@ -335,3 +335,8 @@ collector is `deploy/openshift/README.md` section 15 (design "Log shipping to El
 Migration `019_erase_operator_names` blanks every name already stored. It is roll-forward only:
 an image without 019 cannot start its init container against an 019 database, and only a
 pre-019 backup holds the erased names. Follow the migration gate in `deploy/openshift/README.md`.
+
+Migration `020_portal_review_operators` adds `v1_operators` and `v2_operator` to the
+`portal_reviews` view from each run's frozen registry entry, so the portal can list the
+operators a published week ran with. It changes no rows. Deploy admin before the portal: a
+portal built for 020 stays not ready until the migration is applied.

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 from urllib.parse import parse_qs, urlencode
 
-from alerts_bi_operations.registry import RegistryError, load_registry
+from alerts_bi_operations.registry import LoadedRegistry, RegistryError, load_registry
 from alerts_bi_operations.review.decisions import (
     DECISION_STATES,
     DecisionRefused,
@@ -238,14 +238,16 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No such run.")
         return row
 
-    def registry_teams() -> list[tuple[str, str, bool]]:
+    def current_registry() -> LoadedRegistry:
         try:
-            loaded = (
+            return (
                 load_registry(settings.registry_path) if settings.registry_path else load_registry()
             )
         except RegistryError as exc:
             raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(exc)) from None
-        return [(t.team_id, t.display_name, t.weekly_review) for t in loaded.teams]
+
+    def registry_teams() -> list[tuple[str, str, bool]]:
+        return [(t.team_id, t.display_name, t.weekly_review) for t in current_registry().teams]
 
     @app.get(pages.STYLESHEET_PATH, include_in_schema=False)
     def stylesheet() -> Response:
@@ -357,7 +359,8 @@ def build_admin(settings: AdminSettings) -> FastAPI:
     ) -> HTMLResponse:
         """One week of a team: a submission, a failed run, or a completed run's current step."""
         team_id = _team_id_from_path(team_id)
-        registered = registry_teams()
+        registry = current_registry()
+        registered = [(t.team_id, t.display_name, t.weekly_review) for t in registry.teams]
         names = {key: label for key, label, _ in registered}
         enrolled = {key: on for key, _, on in registered}.get(team_id, False)
         now = datetime.now(UTC)
@@ -572,6 +575,16 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 if registered_team
                 else "",
                 note=pages.retention_note(calendar, now, first_end) if registered_team else "",
+                operators=pages.operators_panel(
+                    team_id,
+                    registry.teams,
+                    registry.registry_version,
+                    registry.registry.get("effective_date"),
+                    selected,
+                    summary.snapshot_operators(selected.get("registry_entry_snapshot"))
+                    if selected
+                    else None,
+                ),
                 details=details,
                 dialogs=dialogs,
             )

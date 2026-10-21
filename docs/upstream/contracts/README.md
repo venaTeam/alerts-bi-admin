@@ -75,3 +75,10 @@ type or CSV output changes.
 The 2026-10-20 needs-a-decision amendment adds the `view` query parameter (`needed` or
 `recorded`) to `GET /decisions`; console-http.json and console-openapi.json record it. No
 migration, view, column, CSV output or shared/operations interface changes.
+
+The 2026-10-21 team-operators amendment appends migration 020_portal_review_operators without
+modifying 001–019. It recreates `portal_reviews` with two trailing columns, `v1_operators`
+(nvarchar(max), JSON array text) and `v2_operator` (nvarchar(4000)), read from the run's frozen
+registry entry; sql-views.json records them. Earlier columns, other views, CSV outputs, console
+routes and shared/operations interfaces are unchanged. Deploy admin before the portal: the
+portal's readiness probe requires both columns.

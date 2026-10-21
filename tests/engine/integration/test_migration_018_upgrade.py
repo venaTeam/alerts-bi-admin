@@ -109,10 +109,14 @@ def test_018_upgrades_a_populated_database_and_readiness_requires_it(
         db.rollback()
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["018_alert_identity_hash", "019_erase_operator_names"]
+    assert applied == [
+        "018_alert_identity_hash",
+        "019_erase_operator_names",
+        "020_portal_review_operators",
+    ]
 
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "019_erase_operator_names"
+        assert migrations.current_revision(db) == "020_portal_review_operators"
         assert _counts(db) == before
         check_schema(db)
         assert _key_columns(db, "pk_alert_findings") == ["run_id", "alert_schema", "identity_hash"]
@@ -200,7 +204,11 @@ def test_a_failed_018_rolls_back_completely_and_a_retry_applies_it(
             db.commit()
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["018_alert_identity_hash", "019_erase_operator_names"]
+    assert applied == [
+        "018_alert_identity_hash",
+        "019_erase_operator_names",
+        "020_portal_review_operators",
+    ]
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "019_erase_operator_names"
+        assert migrations.current_revision(db) == "020_portal_review_operators"
         assert _counts(db) == before

@@ -1,5 +1,44 @@
 # Alerts BI — Design Document
 
+## Team operators on the team page — accepted 2026-10-21
+
+On 2026-10-21 the product owner asked that the team page in both the admin console and the
+review portal list the team's operators. They reviewed the mock in
+`docs/mockups/team-operators/`, had the portal card's explanatory sentence (which named the
+registry version) removed, and asked for it to be implemented. Operators are the registry
+entry's `v1_operators` and `v2_operator` (section 3.1, `contracts/teams.schema.json`). Matching,
+runs, findings, CSV outputs and the shared/operations libraries are unchanged.
+
+* **Admin team page.** An "Operators" panel sits between the team header and the selected
+  week's Run, Review and Publish steps. It lists every v1 operator exactly as written (case
+  variants and repeats included, registry order) with a count, and the v2 operator, or "None" /
+  "Not set yet". The source is the current registry, labelled with its `registry_version` and
+  `effective_date`. Notes appear when the selected run's frozen entry
+  (`runs.registry_entry_snapshot`) listed different operators (naming that run's
+  `registry_version` and its list), when the team lists no operators (a run finds no alerts),
+  and when the team is no longer in the registry (then the selected run's operators are shown).
+  A line names other teams that list the same operator in the same schema, because those alerts
+  count for each team. A stored entry without an operator list is treated as unknown, not empty.
+* **Portal team week.** The Overview tab shows an "Operators" card in the side column, below
+  Phase. It lists the operators the published week was run with (its frozen entry, not the
+  current registry), so the list always explains that week's alerts: the first six values, then
+  "Show N more". When the entry listed none it says "No operators were listed for this team, so
+  this week has no alerts."; when the entry holds no operator list the card is omitted. The card
+  shows no registry version. It describes the whole team, like Phase, whatever applications are
+  selected.
+* **Disclosure.** This amends "What a reader sees" in section 7.10: operator values are the
+  team-supplied routing values for its own alerts, so the portal shows them. The registry file,
+  its version and every other registry field stay hidden from readers.
+* **Migration `020_portal_review_operators`.** `CREATE OR ALTER VIEW portal_reviews` keeps the
+  008 definition and appends `v1_operators` (`nvarchar(max)`, the entry's JSON array text) and
+  `v2_operator` (`nvarchar(4000)`), both NULL when the stored entry is not JSON. View only: no
+  row changes, earlier columns keep their positions, grants survive. Roll forward only.
+* **Compatibility and order.** The portal's readiness probe compiles the pinned view columns,
+  so a portal built from this contract is not ready until admin has applied 020. Deploy admin
+  (which migrates) first, then the portal. An older portal ignores the new columns.
+
+No deployment is authorized by this amendment.
+
 ## Log shipping to Elasticsearch — accepted 2026-10-20
 
 On 2026-10-20 the product owner asked to send the logs to Elasticsearch as well
@@ -1259,7 +1298,7 @@ Four states are kept distinct and never inferred from one another:
 
 **Publication is back to back.** Runs are managed so that published weeks never overlap. Publishing refuses a run whose 168-hour window overlaps any current publication of the same team. It also refuses one that leaves a gap after that team's latest published week, unless the operator passes `--allow-gap` explicitly. Republishing the same week with a different run needs `--replace`, which withdraws the earlier publication rather than deleting it. A publication can be withdrawn with a reason. Withdrawn rows are kept for audit and never shown. A run that is currently published cannot be re-persisted underneath its readers: the pipeline refuses, and the run has to be withdrawn first.
 
-**What a reader sees is alert data, not service internals.** The portal shows the week covered, when it was published, the review note, the alert fields, the findings with their evidence, and the decisions. It shows no run id, registry, ruleset, prompt or model version, run timing or document hash. Those stay in the scorecard and the operator CLI, where the standardization team needs them.
+**What a reader sees is alert data, not service internals.** The portal shows the week covered, when it was published, the review note, the alert fields, the findings with their evidence, and the decisions. It shows no run id, registry, ruleset, prompt or model version, run timing or document hash. Those stay in the scorecard and the operator CLI, where the standardization team needs them. **Amended 2026-10-21:** the team week's Overview also lists the operators the week was run with; see "Team operators on the team page" at the top of this document.
 
 **Volume in the portal is a weekly total.** For each schema separately it shows **alert events in the week** (every firing, repeats included, `sum(daily_metrics.alerts)`) and **distinct alerts in the week** (distinct `application` + `key_field` identities in the 168-hour window, which equals the number of work-list rows for that schema). This amends section 3.3 for the portal only; the scorecard and the CSV exports keep the per-day distinct rate. v1 and v2 are never added together and no cross-schema or migration percentage is shown.
 

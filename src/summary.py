@@ -351,6 +351,26 @@ def read_snapshot(text: Any) -> SnapshotEntry:
     )
 
 
+def snapshot_operators(text: Any) -> tuple[tuple[str, ...], str | None] | None:
+    """The operators a run's stored entry listed, or None when it does not list them.
+
+    Stricter than :func:`read_snapshot`: an unreadable or legacy snapshot is unknown, not
+    empty, so the console never reports a changed list it cannot see.
+    """
+    try:
+        raw = json.loads(text) if isinstance(text, str) else None
+    except ValueError:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    v1, v2 = raw.get("v1_operators"), raw.get("v2_operator")
+    if not isinstance(v1, list) or not all(isinstance(op, str) for op in v1):
+        return None
+    if v2 is not None and not isinstance(v2, str):
+        return None
+    return tuple(v1), v2
+
+
 def summary_inputs(
     run: Mapping[str, Any],
     daily: Sequence[Mapping[str, Any]],
