@@ -41,3 +41,10 @@ Unified operator UI, execution, migrations, weekly jobs, registry and shared/ope
 Use this project guidance with more specific area instructions. Requirements and decisions remain in their linked sources.
 Preserve local changes; use the narrowest meaningful checks and report what actually ran. Setup does not grant deployment authority.
 <!-- /eng-project-setup -->
+
+## Change notes
+
+Every pull request adds one note in `changes/`, in the format of `changes/README.md`. The
+private network imports this repository from GitHub ZIPs, which carry no commit messages or
+pull request descriptions; its import agent reads these notes for what changed, how to deploy
+it and what the private side must do. Never edit a merged note.
