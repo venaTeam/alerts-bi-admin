@@ -9,8 +9,15 @@ import to learn what changed and what the private side must do (alerts-bi-design
 `docs/private-network-import.md`). Write for a reader who has not seen the pull request. Never
 edit a merged note; a later pull request adds its own.
 
-Copy the template, replace every `<...>`, and write "none" or "no change" instead of deleting
-a line:
+Create the note with `poetry run python changes/notes.py new` on the pull request's branch.
+It writes the file below with the facts filled in from the diff with `main` (new migrations,
+`.env.example` keys, Dockerfile and CI changes, `poetry.lock` package versions) and TODO for
+what only the author knows. Replace every TODO, check the facts, and commit the note. CI runs
+`python changes/notes.py check` on every pull request and fails when the note is missing, still
+has a TODO, or contradicts the diff.
+
+The format, if you write a note by hand (write "none" or "no change" instead of deleting a
+line):
 
 ````markdown
 # <Pull request title>
