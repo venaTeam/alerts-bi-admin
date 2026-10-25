@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team operators (portal mock) · Alerts BI</title>
+<link rel="stylesheet" href="portal.css">
+<style>
+/* Mock-only switcher; not part of the proposal. */
+.mock-bar{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;background:#fff8db;border-bottom:1px dashed #b58a00;font:13px system-ui,sans-serif;color:#5c4600}
+.mock-bar button{font:inherit;border:1px solid #d9b84a;background:#fff;border-radius:999px;padding:2px 10px;cursor:pointer;color:inherit}
+.mock-bar button[aria-pressed=true]{background:#5c4600;color:#fff;border-color:#5c4600}
+.mock-tag{font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:11px}
+/* Proposed additions to the portal STYLESHEET. */
+.ops{display:flex;flex-direction:column;gap:10px;margin:0}
+.ops dt{display:flex;gap:6px;align-items:center;font-size:12.5px;color:var(--ink-2)}
+.ops dd{margin:0}
+.op-list{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+.op-list .chip{white-space:normal;overflow-wrap:anywhere;font-family:var(--mono);background:var(--surface-2);color:var(--ink);border:1px solid var(--line)}
+.ops details summary{cursor:pointer;width:fit-content;font-size:12.5px;margin-top:6px}
+.ops details[open] summary{margin-bottom:6px}
+</style>
+</head>
+<body>
+<div id="mock-bar" class="mock-bar"></div>
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="#"><span class="brand-mark" aria-hidden="true"></span>Alerts BI <small>· Review portal</small></a>
+  <span class="ro" title="This portal is view-only.">Read-only</span>
+</div></header>
+<main class="wrap" id="page"></main>
+<script src="mock-data.js"></script>
+<script>
+const esc = window.mockEscape;
+const VISIBLE = 6;
+const CHEVRON = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
+const PHASES = {
+  phase_0: "Phase 0 · Clean up",
+  phase_1: "Phase 1 · New rules",
+  phase_2: "Phase 2 · Enrich",
+  done: "Done",
+};
+const TABS = ["Overview", "Fix list", "Volume", "Dashboards", "Migration", "History", "Slides"];
+
+function list(values) {
+  const items = (vs) => vs.map((v) => `<li><span class="chip">${esc(v)}</span></li>`).join("");
+  if (values.length <= VISIBLE) return `<ul class="op-list">${items(values)}</ul>`;
+  return (
+    `<ul class="op-list">${items(values.slice(0, VISIBLE))}</ul>` +
+    `<details><summary>Show ${values.length - VISIBLE} more</summary><ul class="op-list">${items(values.slice(VISIBLE))}</ul></details>`
+  );
+}
+
+// Proposed: the operators this week's published review was run with (its frozen registry).
+function operatorsCard(team) {
+  const used = team.run || team;
+  const v1 = used.v1.length ? list(used.v1) : '<span class="sub">None</span>';
+  const v2 = used.v2 ? list([used.v2]) : '<span class="sub">Not set yet</span>';
+  const empty = !used.v1.length && !used.v2;
+  return (
+    '<section class="card pad stack" aria-labelledby="operators-title">' +
+    '<div class="eyebrow" id="operators-title">Operators</div>' +
+    (empty
+      ? '<p class="sub">No operators were listed for this team, so this week has no alerts.</p>'
+      : '<dl class="ops">' +
+        `<div><dt><span class="chip v1">v1</span>${used.v1.length} operator${used.v1.length === 1 ? "" : "s"}</dt><dd>${v1}</dd></div>` +
+        `<div><dt><span class="chip v2">v2</span>operator</dt><dd>${v2}</dd></div>` +
+        "</dl>") +
+    "</section>"
+  );
+}
+
+function render(team) {
+  document.title = `${team.name} (portal mock) · Alerts BI`;
+  const steps = Object.entries(PHASES)
+    .map(([key, label]) => `<li${key === team.phase ? ' class="on"' : ""}>${label}</li>`)
+    .join("");
+  const tabs = TABS.map(
+    (label, i) =>
+      `<a class="tab${i === 0 ? " on" : ""}" href="#"${i === 0 ? ' aria-current="page"' : ""}>${label}${i === 1 ? ' <span class="cnt">4</span>' : ""}</a>`,
+  ).join("");
+  const schema = (s, name, alerts, events) =>
+    `<article class="card pad stack ${s}"><h2>${name}</h2>` +
+    (alerts
+      ? `<div class="kp"><div><span class="big">${alerts}</span><span class="sub">alerts</span></div><div><span class="big">${events}</span><span class="sub">events</span></div></div>`
+      : `<p class="sub">No ${s} alerts this week.</p>`) +
+    "</article>";
+  const used = team.run || team;
+  document.getElementById("page").innerHTML =
+    `<nav class="crumbs" aria-label="Breadcrumb"><a href="#">All teams</a><span>/</span><span>${esc(team.name)}</span></nav>` +
+    `<section class="head"><h1>${esc(team.name)}</h1><div class="wk"><span class="sub">Week</span>` +
+    `<button class="filter-toggle" type="button">${esc(team.week)}${CHEVRON}</button></div></section>` +
+    `<nav class="tabs" aria-label="This week">${tabs}</nav>` +
+    '<div class="split"><div class="colmain">' +
+    '<div class="two">' +
+    schema("v1", "v1 alerts", used.v1.length ? 31 : 0, "11,880") +
+    schema("v2", "v2 alerts", used.v2 ? 7 : 0, "1,024") +
+    "</div>" +
+    '<section class="card pad stack"><h2>Key findings</h2><ol class="findings">' +
+    '<li><span class="n1">1</span><div class="col"><b>Three alerts make most of the noise</b><span class="sub">Unchanged by this proposal.</span><a href="#">Show alerts</a></div></li>' +
+    "</ol></section></div>" +
+    '<aside class="colside">' +
+    `<section class="card pad stack"><div class="eyebrow">Phase</div><ol class="vsteps">${steps}</ol><a href="#">Details</a></section>` +
+    operatorsCard(team) +
+    '<a class="button primary" href="#">Open fix list (4)</a>' +
+    "</aside></div>";
+}
+
+window.mountMockBar(render);
+</script>
+</body>
+</html>

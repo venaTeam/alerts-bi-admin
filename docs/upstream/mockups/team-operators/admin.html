@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team operators (admin mock) · Alerts BI</title>
+<link rel="stylesheet" href="admin.css">
+<style>
+/* Mock-only switcher; not part of the proposal. */
+.mock-bar{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;background:#fff8db;border-bottom:1px dashed #b58a00;font:13px system-ui,sans-serif;color:#5c4600}
+.mock-bar button{font:inherit;border:1px solid #d9b84a;background:#fff;border-radius:999px;padding:2px 10px;cursor:pointer;color:inherit}
+.mock-bar button[aria-pressed=true]{background:#5c4600;color:#fff;border-color:#5c4600}
+.mock-tag{font-weight:700;text-transform:uppercase;letter-spacing:.08em;font-size:11px}
+/* Proposed additions to CONSOLE_CSS. */
+#abi-console .abi-ops{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:16px 28px;margin:0}
+#abi-console .abi-ops dt{color:var(--abi-muted);font-size:13px;margin-bottom:6px}
+#abi-console .abi-ops dd{margin:0}
+#abi-console .abi-op-list{display:flex;flex-wrap:wrap;gap:6px;margin:0;padding:0;list-style:none}
+#abi-console .abi-op-list .abi-chip{white-space:normal;overflow-wrap:anywhere}
+@media(max-width:720px){#abi-console .abi-ops{grid-template-columns:minmax(0,1fr)}}
+</style>
+</head>
+<body>
+<div id="mock-bar" class="mock-bar"></div>
+<div id="abi-console">
+  <aside class="abi-side"><a class="abi-brand" href="#"><span class="abi-mark" aria-hidden="true"></span>Alerts BI</a>
+    <nav class="abi-navs" aria-label="Main">
+      <a class="abi-nav" href="#" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>Teams</a>
+      <a class="abi-nav" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Schedule</a>
+      <a class="abi-nav" href="#"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg>Decisions</a>
+    </nav>
+  </aside>
+  <main class="abi-main" id="abi-main"><div class="abi-page" id="page"></div></main>
+</div>
+<script src="mock-data.js"></script>
+<script>
+const esc = window.mockEscape;
+const ICON = {
+  back: '<path d="M19 12H5m6-6-6 6 6 6"/>',
+  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
+  down: '<path d="m6 9 6 6 6-6"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  check: '<path d="M5 12l5 5L20 7"/>',
+  info: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5v.01"/>',
+  arrow: '<path d="M5 12h14m-6-6 6 6-6 6"/>',
+};
+const icon = (name) =>
+  '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  ICON[name] + "</svg>";
+const plural = (n, word) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
+const chips = (values) =>
+  '<ul class="abi-op-list">' + values.map((v) => `<li><span class="abi-chip abi-mono">${esc(v)}</span></li>`).join("") + "</ul>";
+
+// Proposed: the team's operators, from the current team registry.
+function operatorsPanel(team) {
+  const v1 = team.v1.length
+    ? chips(team.v1)
+    : '<span class="abi-chip none">None</span>';
+  const v2 = team.v2
+    ? chips([team.v2])
+    : '<span class="abi-chip none">Not set yet</span>';
+  const notes = [];
+  if (!team.v1.length && !team.v2) {
+    notes.push(
+      `<div class="abi-note">${icon("info")}<p>This team has no operators in the registry, so a run finds no alerts for it. Add its v1 operators or v2 operator to the team registry.</p></div>`,
+    );
+  }
+  if (team.run) {
+    const listed = [...team.run.v1, ...(team.run.v2 ? [team.run.v2] : [])];
+    notes.push(
+      `<div class="abi-note">${icon("info")}<p>The selected week (${esc(team.week)}) ran with registry ${esc(team.run.registry)}, ` +
+        `which listed ${plural(listed.length, "operator")}: ${listed.map(esc).join(", ")}. Run the week again to use the current list.</p></div>`,
+    );
+  }
+  for (const s of team.shared) {
+    notes.push(
+      `<p class="abi-small abi-muted"><span class="abi-mono">${esc(s.operator)}</span> is also listed for ${s.teams.map(esc).join(", ")}. Its alerts count for each team.</p>`,
+    );
+  }
+  return (
+    '<section class="abi-panel tight" aria-labelledby="operators-title">' +
+    '<div class="abi-row abi-between"><h2 id="operators-title" class="abi-h3">Operators</h2>' +
+    `<span class="abi-small abi-muted">Registry ${esc(team.registry)} · effective ${esc(team.effective)}</span></div>` +
+    '<dl class="abi-ops">' +
+    `<div><dt>v1 operators (${team.v1.length})</dt><dd>${v1}</dd></div>` +
+    `<div><dt>v2 operator</dt><dd>${v2}</dd></div>` +
+    "</dl>" +
+    notes.join("") +
+    '<p class="abi-tiny abi-muted">Alerts are matched to the team by these exact, case-sensitive values. Change them in the team registry.</p>' +
+    "</section>"
+  );
+}
+
+function render(team) {
+  document.title = `${team.name} (admin mock) · Alerts BI`;
+  const step = (cls, dot, name, text) =>
+    `<li class="abi-step ${cls}"${cls === "" ? " aria-current=step" : ""}><span class="abi-step-dot" aria-hidden="true">${dot}</span>` +
+    `<span><span class="abi-step-name">${name}</span><span class="abi-step-text">${text}</span></span></li>`;
+  document.getElementById("page").innerHTML =
+    `<a class="abi-back" href="#">${icon("back")}Teams</a>` +
+    `<div class="abi-head"><div><h1>${esc(team.name)}</h1><p class="abi-sub">Weekly · Monday to Monday UTC</p></div>` +
+    '<div class="abi-actions">' +
+    `<details class="abi-picker"><summary aria-label="Week: ${esc(team.week)}. Change week">${icon("calendar")}<span>${esc(team.week)}</span>${icon("down")}</summary>` +
+    '<div class="abi-pop"><p class="abi-pop-title">3 runs · newest first</p><ul>' +
+    `<li><a href="#" aria-current="true"><span class="abi-dot good" aria-hidden="true"></span><span class="abi-pop-week">${esc(team.week)}</span><span class="abi-pop-state">In review</span></a></li>` +
+    '<li><a href="#" aria-current="false"><span class="abi-dot good" aria-hidden="true"></span><span class="abi-pop-week">5 Oct – 12 Oct 2026</span><span class="abi-pop-state">Published</span></a></li>' +
+    "</ul></div></details>" +
+    `<button type="button" class="abi-btn">${icon("plus")}New runs</button></div></div>` +
+    operatorsPanel(team) +
+    '<ol class="abi-steps" aria-label="Steps for this week">' +
+    step("done", icon("check"), "Run", "Done · 19 Oct 06:12") +
+    step("", "2", "Review", "4 findings") +
+    step("todo", "3", "Publish", "When you're ready") +
+    "</ol>" +
+    '<section class="abi-panel" aria-labelledby="step-title"><h2 id="step-title">Review findings</h2>' +
+    '<dl class="abi-stats"><div><dt>Alerts</dt><dd>38</dd></div><div><dt>Events</dt><dd>12,904</dd></div><div><dt>With findings</dt><dd>4</dd></div></dl>' +
+    '<p class="abi-small abi-muted">The week’s findings list is unchanged by this proposal.</p>' +
+    `<div class="abi-panel-foot"><span class="abi-small abi-muted">4 alerts with findings</span><a class="abi-btn primary" href="#">Continue to publish${icon("arrow")}</a></div></section>` +
+    '<details class="abi-more"><summary>Run details and activity</summary><div class="abi-more-body"><p class="abi-small abi-muted">Unchanged.</p></div></details>';
+}
+
+window.mountMockBar(render);
+</script>
+</body>
+</html>
