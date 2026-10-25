@@ -73,14 +73,16 @@ and will define those names in Elasticsearch as data streams that split the indi
   own data stream `<LOGS_INDEX_PREFIX>-<stream>` (default prefix `alerts-bi`), written with
   `create` operations (amended 2026-10-25; it first wrote daily indices
   `<LOGS_INDEX_PREFIX>-<stream>-YYYY.MM.DD`, dated by the UTC day of arrival). The Elasticsearch
-  owner defines the three data streams (index templates, the rollover that dates the backing
-  indices, retention) before the collector first writes; a name without a data stream template
-  would become a plain index, which the deployment's check record detects. Every record carries
-  the `@timestamp` a data stream requires. It buffers on its volume while Elasticsearch is unreachable and retries with backoff up to 15
-  minutes apart, dropping a chunk after `LOGS_RETRY_LIMIT` tries (default 60, roughly eight
-  hours), so neither a long outage nor records Elasticsearch keeps refusing hold the buffer
-  forever. It writes deterministic ids so a retry never duplicates, and adds its arrival time as
-  `received_at`.
+  owner defines the three data streams (index templates whose patterns are exactly those names,
+  the rollover that dates the backing indices, retention) before the collector first writes; a
+  name without a data stream template would become a plain index, which the deployment's check
+  record detects. Every record carries the `@timestamp` a data stream requires. It buffers on its
+  volume while Elasticsearch is unreachable and retries with backoff up to 15 minutes apart,
+  dropping a chunk after `LOGS_RETRY_LIMIT` tries (default 60, roughly eight hours), so neither a
+  long outage nor records Elasticsearch keeps refusing hold the buffer forever. It writes
+  deterministic ids, so a retry does not duplicate records within one backing index; a chunk
+  still being retried when its data stream rolls over can store them again in the new backing
+  index (amended 2026-10-25). It adds its arrival time as `received_at`.
 * **Document.** `@timestamp`, `level`, `proc`, `stream`, `event`, `message` (the sentence), the
   full identifiers (`team_id`, `run_id`, `job_id`, `backfill_id`, `batch_id`, `request_id`,
   `stage`), the event's own fields under `data.<event with _ for .>` so one field name never

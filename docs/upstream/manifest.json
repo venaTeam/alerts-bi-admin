@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "ecbb9092dd76d2b985e7a2aaa749de2d4a4b14e0",
+  "revision": "bc936abcfe41139283b99344ad9b5e7d15c846ec",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
-    "docs/upstream/alerts_bi_design.md": "d1ab0befaf446450597ee00ec3a538f92665a8992481a6e316b79b57e79ebdcf",
+    "docs/upstream/alerts_bi_design.md": "b99d837b06691ec0f3aa60e67484b33b4d31b5bb243242a06bfcf7d7a126352b",
     "docs/upstream/alerts_bi_flow.md": "b3d5464295d98a20ca204055b7aa35191580e3d684d5a10bbbefbe7744821d94",
     "docs/upstream/alerts_bi_implementation_plan.md": "9dceae708ee31fb1e613f8a1535733b6c06f3d63a70e4843295c85abed4e788a",
     "docs/upstream/async-runs.md": "50088b8281df59e51128442b4930219d3ad6e352b0eac8535cf5e0b9ebc348c0",
@@ -45,6 +45,6 @@
     "docs/decisions/007-admin-console-without-login.md": "aa7886d9a43ec1c14d61f3c1a9d366b3bfc54029e399a619f6177f6516afc943",
     "docs/decisions/008-console-log-format.md": "77a19df9646fa10bb69cd4cf286e47df532cdc9d8fc8e6ee12af864b49469597",
     "docs/decisions/009-log-shipping.md": "1635c3787cb78a2fd1c48048ed1691e6856035ce320c4677398b826d6202f77a",
-    "docs/decisions/010-log-data-streams.md": "54d357cd6dda2602739751c5f836d219008c923a9489943d268af6ca576088fc"
+    "docs/decisions/010-log-data-streams.md": "f12a90e209838e7742bcab64fd686f460d2c5909091a4889eff03c5e8667c4fb"
   }
 }
