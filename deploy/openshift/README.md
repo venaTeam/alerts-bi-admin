@@ -767,9 +767,13 @@ them to an Elasticsearch you name, into three data streams:
 `<prefix>` is `LOGS_INDEX_PREFIX` (default `alerts-bi`). The collector writes each record to
 its stream's name, with `create` operations, and every record carries the `@timestamp` a data
 stream requires. The Elasticsearch owner defines the three data streams before the collector
-first writes: an index template whose `index_patterns` matches each name and that sets
-`data_stream`, with the rollover that splits the backing indices by date, the retention and any
-Kibana views. Those are theirs, not this procedure's. A name with no such template makes
+first writes: an index template that sets `data_stream` and whose `index_patterns` is exactly
+each name (`<prefix>-runs`, not a wildcard such as `<prefix>-runs*`, which would also match the
+daily names and, after a rollback to them (15.8), make one data stream per day), with the
+rollover that splits the backing indices by date, the retention and any Kibana views. Those are
+theirs, not this procedure's. A retried chunk does not duplicate records within one backing
+index; one still being retried when a data stream rolls over can store its records again in the
+new backing index, so counts across a rollover after an outage may include repeats. A name with no such template makes
 Elasticsearch create a plain index of that name on the first write instead, and a data stream
 cannot take that name until the index is deleted or reindexed; 15.4 checks for it. The
 applications send to the collector only when `LOG_FORWARD_URL` is set, never wait for it, and
@@ -963,4 +967,4 @@ The daily indices are no longer written and stay until the Elasticsearch owner d
 Kibana data view `<prefix>-runs-*` matches only them, not the data stream: change it to
 `<prefix>-runs*`, which covers both (likewise for admin and portal). To go back, install
 `fluent-bit.conf` from the admin revision deployed before and repeat step 2; the account then
-needs its old grants again.
+needs its old grants again, and no data stream template may match the daily names.
