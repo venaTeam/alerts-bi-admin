@@ -51,6 +51,10 @@ Kibana) is configured by whoever deploys it; this design only sends to it, and a
 able to deploy everything on OpenShift from the repository's files. What logs may contain is
 unchanged except for one addition, below.
 
+Amended 2026-10-25 ([decision 010](../decisions/010-log-data-streams.md)): the product owner
+asked that each stream go to one specific name instead of the collector's own daily indices,
+and will define those names in Elasticsearch as data streams that split the indices by date.
+
 * **Transport.** With `LOG_FORWARD_URL` set (`http://alerts-bi-logs:9880` in a deployment), each
   process also sends every record at `LOG_FORWARD_LEVEL` (default info) or above, as a JSON
   array, to `<url>/runs`, `<url>/admin` or `<url>/portal`. Shared 0.1.10 holds the sender: a
@@ -66,12 +70,19 @@ unchanged except for one addition, below.
 * **Collector.** One Fluent Bit 5.1.2 Deployment `alerts-bi-logs` (`logging.yaml`, configured by
   `fluent-bit.conf` as the ConfigMap `alerts-bi-logs-config`, Elasticsearch host, port and account
   in the Secret `alerts-bi-logs-es`). The URL path is the record's tag, and each tag goes to its
-  own daily index `<LOGS_INDEX_PREFIX>-<stream>-YYYY.MM.DD` (default prefix `alerts-bi`). It
-  buffers on its volume while Elasticsearch is unreachable and retries with backoff up to 15
-  minutes apart, dropping a chunk after `LOGS_RETRY_LIMIT` tries (default 60, roughly eight
-  hours), so neither a long outage nor records Elasticsearch keeps refusing hold the buffer
-  forever. It writes deterministic ids so a retry never duplicates, and adds its arrival time as
-  `received_at`.
+  own data stream `<LOGS_INDEX_PREFIX>-<stream>` (default prefix `alerts-bi`), written with
+  `create` operations (amended 2026-10-25; it first wrote daily indices
+  `<LOGS_INDEX_PREFIX>-<stream>-YYYY.MM.DD`, dated by the UTC day of arrival). The Elasticsearch
+  owner defines the three data streams (index templates whose patterns are exactly those names,
+  the rollover that dates the backing indices, retention) before the collector first writes; a
+  name without a data stream template would become a plain index, which the deployment's check
+  record detects. Every record carries the `@timestamp` a data stream requires. It buffers on its
+  volume while Elasticsearch is unreachable and retries with backoff up to 15 minutes apart,
+  dropping a chunk after `LOGS_RETRY_LIMIT` tries (default 60, roughly eight hours), so neither a
+  long outage nor records Elasticsearch keeps refusing hold the buffer forever. It writes
+  deterministic ids, so a retry does not duplicate records within one backing index; a chunk
+  still being retried when its data stream rolls over can store them again in the new backing
+  index (amended 2026-10-25). It adds its arrival time as `received_at`.
 * **Document.** `@timestamp`, `level`, `proc`, `stream`, `event`, `message` (the sentence), the
   full identifiers (`team_id`, `run_id`, `job_id`, `backfill_id`, `batch_id`, `request_id`,
   `stage`), the event's own fields under `data.<event with _ for .>` so one field name never
@@ -98,8 +109,11 @@ unchanged except for one addition, below.
   out.
 * **Deployment.** `deploy/openshift/README.md` section 15 of alerts-bi-admin is the procedure:
   mirror the image by digest, fill `logging-values.env` and `logs-es.env`, create the Secret
-  and ConfigMap, apply `logging.yaml`, send a check record, then set `LOG_FORWARD_URL` in
-  `alerts-bi-config` and restart admin and portal. Removing `LOG_FORWARD_URL` turns it off.
+  and ConfigMap, apply `logging.yaml`, send a check record and confirm it reached its data
+  stream, then set `LOG_FORWARD_URL` in `alerts-bi-config` and restart admin and portal.
+  Removing `LOG_FORWARD_URL` turns it off. A collector deployed with daily indices moves to the
+  data streams by its ConfigMap and a collector restart only (section 15.8), once the data
+  streams exist and its account may write them.
 
 ## Console log format — accepted 2026-10-20
 

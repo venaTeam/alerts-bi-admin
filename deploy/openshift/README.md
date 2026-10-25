@@ -729,10 +729,10 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
 | Pods rejected: `must specify limits.cpu` | The project's quota needs CPU limits. Stop and ask the project owner for a LimitRange with default CPU limits |
 | `admin_job` prints `FAILED` during a long migration | The log stream ended before the Job did. `oc get job <name> -n "$NS"` shows whether it still runs; follow it again with `oc logs -n "$NS" -f job/<name>` |
 | Weekly Job failed | `oc logs job/<name> -n "$NS"` and `weekly-status`. Held or failed weeks fail the Job on purpose; the next run retries due weeks |
-| Collector log `[error] [output:es...] HTTP status=401` or `403` | The account in `alerts-bi-logs-es` is wrong or may not create or write `<prefix>-*` indices: fill `logs-es.env` again from the example and repeat 15.3, which restarts the collector |
+| Collector log `[error] [output:es...] HTTP status=401` or `403`, or `"status":403` with `security_exception` | The account in `alerts-bi-logs-es` is wrong or may not write the data streams `<prefix>-runs`, `<prefix>-admin` and `<prefix>-portal` (section 15; grants on `<prefix>-runs-*` and the like do not cover them): fill `logs-es.env` again from the example and repeat 15.3, which restarts the collector |
 | Collector log `[error] [tls]` or certificate errors | Set `LOGS_ES_TLS` to match the endpoint; for a private CA add it to `alerts-bi-ca-bundle` and set `LOGS_ES_CA_FILE` (15.2), then repeat 15.2's render and 15.3, which restarts the collector |
 | Collector log repeats `[engine] failed to flush chunk ... retry in N seconds` with no `HTTP status` error | The cluster cannot reach `LOGS_ES_HOST:LOGS_ES_PORT`; records wait on the buffer volume and are sent when it can, for up to `LOGS_RETRY_LIMIT` tries (about eight hours by default) |
-| Collector log `"status":400` with `document_parsing_exception` or `mapper_parsing_exception` | Elasticsearch refuses those records' field types, usually because an index template on `<prefix>-*` declares a field differently from the documents in 15.6. The rest of the chunk is written; the refused records are dropped after `LOGS_RETRY_LIMIT` tries. Ask the Elasticsearch owner to align or remove the template |
+| Collector log `"status":400` with `document_parsing_exception` or `mapper_parsing_exception` | Elasticsearch refuses those records' field types, usually because a data stream's index template declares a field differently from the documents in 15.6. The rest of the chunk is written; the refused records are dropped after `LOGS_RETRY_LIMIT` tries. Ask the Elasticsearch owner to align the template's mappings. `data stream timestamp field [@timestamp] is missing` means a record without `@timestamp`; the applications and 15.4's check always send one, so it came from another sender |
 | An application logs `log.forward_failed` | It cannot reach `alerts-bi-logs:9880`: check `oc get pods -l app=alerts-bi-logs -n "$NS"`, and that the sending pod is admitted by `oc get networkpolicy/alerts-bi-logs -n "$NS" -o yaml`: only pods whose `app` label is `alerts-bi-admin`, `alerts-bi-weekly`, `alerts-bi-admin-job` or `alerts-bi-portal` may reach 9880 (section 15.3). Fix a missing label on the sender rather than adding a broader policy. The records it names are only in `oc logs` |
 | A run or job failed, or a page showed an error | Every log line ends with `[team=… run=<16 characters> job=<8 characters>]`. Take the run id as the console shows it and `oc logs -n "$NS" deploy/alerts-bi-admin -c run-worker \| grep <run id>`; the `ERROR` line names the stage that broke, and the indented lines under it the error and where it began. For a page error, grep the admin container for `ERROR` near that time; its `req=` matches the request |
 
@@ -756,19 +756,30 @@ Never downgrade, stamp, edit or reset migrations, and never delete data to make 
 
 Design "Log shipping to Elasticsearch". One Fluent Bit pod, `alerts-bi-logs`, receives every
 log record of the console, run worker, weekly CronJob, admin Jobs and the portal, and writes
-them to an Elasticsearch you name, as three families of daily indices:
+them to an Elasticsearch you name, into three data streams:
 
-| Index | Holds |
+| Data stream | Holds |
 |---|---|
-| `<prefix>-runs-YYYY.MM.DD` | Everything a run does: the worker and weekly job, analysis, model groups with their alerts, persistence, weekly outcomes |
-| `<prefix>-admin-YYYY.MM.DD` | The console (requests, submissions, publications, withdrawals, deletions, decisions, refusals), migrations and other commands |
-| `<prefix>-portal-YYYY.MM.DD` | The portal |
+| `<prefix>-runs` | Everything a run does: the worker and weekly job, analysis, model groups with their alerts, persistence, weekly outcomes |
+| `<prefix>-admin` | The console (requests, submissions, publications, withdrawals, deletions, decisions, refusals), migrations and other commands |
+| `<prefix>-portal` | The portal |
 
-`<prefix>` is `LOGS_INDEX_PREFIX` (default `alerts-bi`); the date is the UTC day the collector
-received the record. Creating index templates, retention or Kibana views is the Elasticsearch
-owner's business, not this procedure's: the collector only writes. The applications send to the
-collector only when `LOG_FORWARD_URL` is set, never wait for it, and drop records (saying so on
-their console) when it is unreachable.
+`<prefix>` is `LOGS_INDEX_PREFIX` (default `alerts-bi`). The collector writes each record to
+its stream's name, with `create` operations, and every record carries the `@timestamp` a data
+stream requires. The Elasticsearch owner defines the three data streams before the collector
+first writes: an index template that sets `data_stream` and whose `index_patterns` is exactly
+each name (`<prefix>-runs`, not a wildcard such as `<prefix>-runs*`, which would also match the
+daily names and, after a rollback to them (15.8), make one data stream per day), with the
+rollover that splits the backing indices by date, the retention and any Kibana views. Those are
+theirs, not this procedure's. A retried chunk does not duplicate records within one backing
+index; one still being retried when a data stream rolls over can store its records again in the
+new backing index, so counts across a rollover after an outage may include repeats. A name
+with no such template makes Elasticsearch create a plain index of that name on the first write
+instead, and a data stream cannot take that name until the index is deleted or reindexed; 15.4
+checks for it. The applications send to the collector only when `LOG_FORWARD_URL` is set, never
+wait for it, and drop records (saying so on their console) when it is unreachable. A collector
+already deployed with daily `<prefix>-<stream>-YYYY.MM.DD` indices moves to the data streams
+with 15.8.
 
 ```text
 admin pod (admin, run-worker) ─┐
@@ -777,9 +788,11 @@ alerts-bi-portal ──────────────┘   /runs /admin /p
 ```
 
 You need, from the Elasticsearch owner: its host name and port, whether it is HTTPS, the CA
-that signed its certificate when that CA is private, and an account allowed to create the
-indices `<prefix>-runs-*`, `<prefix>-admin-*` and `<prefix>-portal-*` and to write to them
-(`create_index`, `create_doc` and `auto_configure`). The cluster must reach that host and port.
+that signed its certificate when that CA is private, confirmation that the three data streams'
+index templates exist, and an account allowed to write to the data streams `<prefix>-runs`,
+`<prefix>-admin` and `<prefix>-portal` (`create_doc` and `auto_configure` on those names;
+`auto_configure` lets the first write create a data stream from its template and add new fields
+to its mapping). The cluster must reach that host and port.
 
 ### 15.1 Image
 
@@ -837,7 +850,7 @@ effect: Fluent Bit reads them only when it starts. The Template also creates the
 `alerts-bi-logs`, because the collector's HTTP input has no authentication. It admits only the
 pods labelled `app` = `alerts-bi-admin`, `alerts-bi-weekly`, `alerts-bi-admin-job` or
 `alerts-bi-portal` on ports 9880 and 2020, so no other pod in the namespace can write records
-into the log indices. To change the account later, fill
+into the log data streams. To change the account later, fill
 `logs-es.env` again from the example and repeat this whole step.
 
 ### 15.4 Check that records reach Elasticsearch
@@ -853,7 +866,13 @@ oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- python -c 'import json,urlli
 Expect `201`, then three outputs (`es.0` runs, `es.1` admin, `es.2` portal) with `errors: 0` and
 `retries_failed: 0`, and `proc_records` of at least 1 for `es.1`. A growing `errors` count means
 Elasticsearch refuses the records: `oc logs deployment/alerts-bi-logs -n "$NS"` names the reason
-(section 13). The record is now in `<prefix>-admin-<today>` with `event: log.check`.
+(section 13). The record is now in the data stream `<prefix>-admin` with `event: log.check`.
+Ask the Elasticsearch owner to confirm, in Kibana Dev Tools or with any client, that
+`GET _data_stream/<prefix>-admin` returns that data stream with a `.ds-<prefix>-admin-...`
+backing index. If it returns `index_not_found_exception` while `GET <prefix>-admin` finds an
+index, the template was missing: the record went into a plain index. Have them add the template
+and delete that index (it holds only check records and whatever was sent since), then send the
+check again.
 
 ### 15.5 Turn on forwarding
 
@@ -883,20 +902,19 @@ Expect `0`.
 
 ### 15.6 Finding records
 
-In Kibana (an index pattern or data view per family, time field `@timestamp`) or any
-Elasticsearch query. Every record has `@timestamp`, `level`, `proc`, `event`, `message` (one
-sentence), `line` (exactly what `oc logs` shows, including an error's trace), the identifiers
+In Kibana (a data view per data stream, time field `@timestamp`) or any Elasticsearch query.
+Every record has `@timestamp`, `level`, `proc`, `event`, `message` (one sentence), `line` (exactly what `oc logs` shows, including an error's trace), the identifiers
 `team_id`, `run_id`, `job_id`, `backfill_id`, `batch_id`, `request_id` and `stage` when they
 apply, `error` (type, message, frames, causes) for a failure, and the event's own fields under
 `data.<event with _ for .>`, for example `data.http_request.status`. KQL examples:
 
-| Find | Index | Query |
+| Find | Data stream | Query |
 |---|---|---|
-| Everything one run did | `<prefix>-runs-*` | `run_id : 3f9a1c2b4d5e6f70*` (the 16 characters the console shows) |
-| Every run of a team | `<prefix>-runs-*` | `team_id : "payments-core"` |
-| What happened to one alert | `<prefix>-runs-*` | `alerts.application : "checkout-svc" and alerts.key_field : "checkout-svc:inventory-check:chk-node-3"` |
+| Everything one run did | `<prefix>-runs` | `run_id : 3f9a1c2b4d5e6f70*` (the 16 characters the console shows) |
+| Every run of a team | `<prefix>-runs` | `team_id : "payments-core"` |
+| What happened to one alert | `<prefix>-runs` | `alerts.application : "checkout-svc" and alerts.key_field : "checkout-svc:inventory-check:chk-node-3"` |
 | Failures | any | `level : error` |
-| One console request | `<prefix>-admin-*` | `request_id : 4be1f0a2` (also the `X-Request-ID` response header) |
+| One console request | `<prefix>-admin` | `request_id : 4be1f0a2` (also the `X-Request-ID` response header) |
 
 An alert appears in the `llm.group` record of each model group it was sent to: its `alerts`
 list holds each member's `schema`, `application`, `key_field`, `alert_id`, `state` and, when
@@ -914,5 +932,40 @@ if the collector should go:
 oc delete -n "$NS" deployment/alerts-bi-logs service/alerts-bi-logs networkpolicy/alerts-bi-logs serviceaccount/alerts-bi-logs configmap/alerts-bi-logs-config secret/alerts-bi-logs-es
 ```
 
-Records still on the collector's buffer volume are lost with it. Indices already written stay in
-Elasticsearch.
+Records still on the collector's buffer volume are lost with it. Data streams already written
+stay in Elasticsearch.
+
+### 15.8 Move a collector from daily indices to data streams
+
+A collector deployed before the data streams wrote the daily indices
+`<prefix>-runs-YYYY.MM.DD`, `<prefix>-admin-YYYY.MM.DD` and `<prefix>-portal-YYYY.MM.DD`. Only
+its configuration changes: the Template, the Secret, `LOG_FORWARD_URL` and the applications stay
+as they are, and no application restarts.
+
+1. Have the Elasticsearch owner create the three data streams' index templates (section 15) and
+   grant the account in `alerts-bi-logs-es` `create_doc` and `auto_configure` on
+   `<prefix>-runs`, `<prefix>-admin` and `<prefix>-portal`. Its old grants on `<prefix>-runs-*`
+   and the like do not cover those names. Until both are done the collector would get `403`, or
+   create plain indices.
+2. While Elasticsearch is reachable, so little waits on the buffer volume (the collector's log
+   of the last minutes shows no `failed to flush chunk`), install the new configuration from an
+   admin checkout that contains it and restart the collector:
+
+   ```bash
+   oc create configmap alerts-bi-logs-config -n "$NS" --from-file=fluent-bit.conf="$ADMIN_REPO/deploy/openshift/fluent-bit.conf" --dry-run=client -o yaml | oc apply -n "$NS" -f -
+   oc rollout restart deployment/alerts-bi-logs -n "$NS"
+   oc rollout status deployment/alerts-bi-logs -n "$NS" --timeout=5m
+   sleep 15
+   oc logs -n "$NS" deployment/alerts-bi-logs | grep -E '\[(error|warn)\]'
+   ```
+
+   Expect what 15.3 expects. Records sent in the seconds the collector restarts, and any still on
+   its buffer volume, are lost to Elasticsearch; the sending application says so
+   (`log.forward_failed`), and `oc logs` keeps them.
+3. Run 15.4 in full, including the `_data_stream` confirmation.
+
+The daily indices are no longer written and stay until the Elasticsearch owner deletes them. A
+Kibana data view `<prefix>-runs-*` matches only them, not the data stream: change it to
+`<prefix>-runs*`, which covers both (likewise for admin and portal). To go back, install
+`fluent-bit.conf` from the admin revision deployed before and repeat step 2; the account then
+needs its old grants again, and no data stream template may match the daily names.

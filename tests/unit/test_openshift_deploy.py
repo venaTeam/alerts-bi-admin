@@ -296,7 +296,10 @@ def test_each_stream_has_its_own_output_and_the_apps_post_to_the_service() -> No
     assert [s["Match"] for s in outputs] == list(STREAMS)
     for output in outputs:
         assert output["Name"] == "es"
-        assert output["Logstash_Prefix"] == "${LOGS_INDEX_PREFIX}-" + output["Match"]
+        # One data stream per stream, never a dated index name; data streams accept only create.
+        assert output["Index"] == "${LOGS_INDEX_PREFIX}-" + output["Match"]
+        assert "Logstash_Format" not in output and "Logstash_Prefix" not in output
+        assert output["Write_Operation"] == "create"
         # The records carry @timestamp; Fluent Bit must not write a second one.
         assert output["Time_Key"] != "@timestamp"
     objects, _ = _template("logging.yaml")
