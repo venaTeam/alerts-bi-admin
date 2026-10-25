@@ -8,9 +8,10 @@
 #
 # One Fluent Bit pod. The admin console, run worker, weekly CronJob, one-off jobs and the portal
 # POST their log records to http://alerts-bi-logs:9880/<runs|admin|portal> once LOG_FORWARD_URL
-# is set in alerts-bi-config, and it writes them to Elasticsearch as daily indices
-# <LOGS_INDEX_PREFIX>-runs-*, -admin-* and -portal-*. While Elasticsearch is slow or down it
-# keeps the records on its buffer volume; the applications never wait for it.
+# is set in alerts-bi-config, and it writes them to the Elasticsearch data streams
+# <LOGS_INDEX_PREFIX>-runs, -admin and -portal, which the Elasticsearch owner defines. While
+# Elasticsearch is slow or down it keeps the records on its buffer volume; the applications
+# never wait for it.
 apiVersion: template.openshift.io/v1
 kind: Template
 metadata:
@@ -139,10 +140,10 @@ parameters:
     description: CA bundle that signed the Elasticsearch certificate. The image's public bundle by default; /etc/alerts-bi-ca/ca-bundle.crt for a private CA.
     value: /etc/ssl/certs/ca-certificates.crt
   - name: LOGS_INDEX_PREFIX
-    description: Index names start with this, then -runs-, -admin- or -portal- and the UTC date.
+    description: The data streams are this followed by -runs, -admin and -portal.
     value: alerts-bi
   - name: LOGS_BUFFER_LIMIT
-    description: Most each of the three indices may hold on the buffer volume while Elasticsearch is unreachable; older records are dropped beyond it.
+    description: Most each of the three data streams may hold on the buffer volume while Elasticsearch is unreachable; older records are dropped beyond it.
     value: 512M
   - name: LOGS_RETRY_LIMIT
     description: Tries per chunk before it is dropped; retries back off to 15 minutes apart, so 60 spans roughly eight hours of Elasticsearch outage.
