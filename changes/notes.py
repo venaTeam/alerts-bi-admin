@@ -30,6 +30,8 @@ ENV_KEY = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", re.MULTI
 MIGRATION = re.compile(r"^(\d{3,})_\w+$")
 #: A template placeholder such as "<branch name>" left in a hand-written note.
 PLACEHOLDER = re.compile(r"<[A-Za-z][^<>\n]*\s[^<>\n]*>")
+#: The marker `new` drafts; a note may still mention a TODO in the code.
+TODO = re.compile(r"\bTODO:")
 FACT_LINE = re.compile(r"^- (Migrations|Settings|Dockerfile|CI|Packages):(.*)$", re.MULTILINE)
 
 
@@ -114,7 +116,11 @@ def facts(base: str, found: list[Change]) -> Facts:
             match = MIGRATION.match(pure.stem)
             if match and pure.stem not in result.migrations:
                 result.migrations.append(pure.stem)
-        if name in ("Dockerfile", "Containerfile", ".dockerignore") or name.endswith(".Dockerfile"):
+        if (
+            name.startswith(("Dockerfile", "Containerfile"))
+            or name.endswith(".Dockerfile")
+            or name == ".dockerignore"
+        ):
             result.dockerfile.append(change.path)
         if pure.parts[0] == ".github":
             result.ci.append(change.path)
@@ -236,7 +242,7 @@ def cmd_check(args: argparse.Namespace) -> None:
         )
     text = "\n".join(read(path) for path in notes)
     for path in notes:
-        if "TODO" in read(path):
+        if TODO.search(read(path)):
             problems.append(f"{path}: replace every TODO.")
         if PLACEHOLDER.search(read(path)):
             problems.append(f"{path}: replace every <...> placeholder from the template.")

@@ -7,6 +7,7 @@ Branch: feat/import-github-zips
 Adds `changes/`: every pull request now leaves a note that the private network's import agent
 reads, because GitHub ZIPs carry no commit messages. `changes/notes.py new` drafts the note's
 facts from the diff; the new CI job runs `changes/notes.py check` on pull requests.
+`tests/unit/test_change_notes.py` covers the script, and mypy now checks `changes/`.
 
 ## Deploy
 

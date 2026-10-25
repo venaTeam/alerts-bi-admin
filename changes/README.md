@@ -14,7 +14,9 @@ It writes the file below with the facts filled in from the diff with `main` (new
 `.env.example` keys, Dockerfile and CI changes, `poetry.lock` package versions) and TODO for
 what only the author knows. Replace every TODO, check the facts, and commit the note. CI runs
 `python changes/notes.py check` on every pull request and fails when the note is missing, still
-has a TODO, or contradicts the diff.
+has a TODO, or contradicts the diff. The comparison goes one way: it fails when the diff has a
+migration, setting, package, Dockerfile or CI change the note misses, not when a note says
+more than the diff shows.
 
 The format, if you write a note by hand (write "none" or "no change" instead of deleting a
 line):
