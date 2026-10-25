@@ -323,8 +323,9 @@ colour off on a terminal. Shared 0.1.9 holds the format and request logging, and
 
 With `LOG_FORWARD_URL` set, every record at `LOG_FORWARD_LEVEL` (default info) or above is
 also sent, as one JSON document, to the optional in-namespace Fluent Bit (`deploy/openshift/
-logging.yaml`, `fluent-bit.conf`), which writes the daily indices `<prefix>-runs-*` (everything a
-run does), `<prefix>-admin-*` (the console and commands) and `<prefix>-portal-*`. Each model
+logging.yaml`, `fluent-bit.conf`), which writes the data streams `<prefix>-runs` (everything a
+run does), `<prefix>-admin` (the console and commands) and `<prefix>-portal`; the Elasticsearch
+owner defines them and their date-based rollover (2026-10-25). Each model
 group writes one `llm.group` record listing its alerts with their outcome, so a run, a team or
 an alert (`alerts.application`, `alerts.key_field`) can be searched; those records reach the
 console only at `LOG_LEVEL=debug`. The sender never blocks: it buffers up to 16 MB, sends every
