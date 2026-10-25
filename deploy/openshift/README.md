@@ -773,12 +773,13 @@ daily names and, after a rollback to them (15.8), make one data stream per day),
 rollover that splits the backing indices by date, the retention and any Kibana views. Those are
 theirs, not this procedure's. A retried chunk does not duplicate records within one backing
 index; one still being retried when a data stream rolls over can store its records again in the
-new backing index, so counts across a rollover after an outage may include repeats. A name with no such template makes
-Elasticsearch create a plain index of that name on the first write instead, and a data stream
-cannot take that name until the index is deleted or reindexed; 15.4 checks for it. The
-applications send to the collector only when `LOG_FORWARD_URL` is set, never wait for it, and
-drop records (saying so on their console) when it is unreachable. A collector already deployed
-with daily `<prefix>-<stream>-YYYY.MM.DD` indices moves to the data streams with 15.8.
+new backing index, so counts across a rollover after an outage may include repeats. A name
+with no such template makes Elasticsearch create a plain index of that name on the first write
+instead, and a data stream cannot take that name until the index is deleted or reindexed; 15.4
+checks for it. The applications send to the collector only when `LOG_FORWARD_URL` is set, never
+wait for it, and drop records (saying so on their console) when it is unreachable. A collector
+already deployed with daily `<prefix>-<stream>-YYYY.MM.DD` indices moves to the data streams
+with 15.8.
 
 ```text
 admin pod (admin, run-worker) ─┐
