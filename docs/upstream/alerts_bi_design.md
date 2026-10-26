@@ -1516,11 +1516,17 @@ settings. Delete run now also accepts such a run, named by its latest submission
 transaction, locks and refusals apply, and it removes the run's submissions, analysis
 checkpoint and run-scoped model audit; shared prompt artifacts and caches remain. The console
 offers it on the failed submission's page, which the team page's run submissions and a
-multi-week run's failed week now link to (Open). That page also offers deleting a stored run
-whose rerun failed, with the stored run's own confirmation. A run that fails on changed
-settings tells the operator so: "The model settings changed since this week was first sent to
-the model. Delete this run, then run the week again." The per-run settings check itself is
-unchanged: one audit trail never mixes two batch layouts.
+multi-week run's unpublished failed week now link to (Open). That page also offers deleting a
+stored run whose rerun failed, with the stored run's own confirmation, but only when that
+attempt reran it (the stored run started before the attempt did) and it is unpublished: a stale
+failed attempt never offers deleting a later or published result. The never-stored
+confirmation is refused if the run has stored results by the time it is confirmed, because it
+did not describe deleting them. A run that fails on changed settings tells the operator so:
+"The model settings changed since this week was first sent to the model. Delete this run, then
+run the week again." A weekly-schedule, CLI or synchronous HTTP attempt leaves no submission to
+delete, so its message says to run the week from New runs first; that run fails the same way
+and its submission can then be deleted. The per-run settings check itself is unchanged: one
+audit trail never mixes two batch layouts.
 
 ### 7.13 LLM review quality, evaluation and durable audit
 

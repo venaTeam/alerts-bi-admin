@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "252dbb78aa34be4b18cc04b138f1b9ae683c689c",
+  "revision": "79bd5e1d46aa7be38586ecec6f0b9d0bee0a419e",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
-    "docs/upstream/alerts_bi_design.md": "dd2e97cd675d8a1c5b88164fc4d085b37cc242a6177765ebf998a758656b1d5a",
+    "docs/upstream/alerts_bi_design.md": "33d39aa8a097a6d957cb79ec73f1e37ab22fdf1047abe4443a5638edb558fa9a",
     "docs/upstream/alerts_bi_flow.md": "876b3c3b255d032694a9cde3fe75c7ead528fda6c3ea412846a7e7b6b08fa174",
     "docs/upstream/alerts_bi_implementation_plan.md": "7ff4b55614813cb1161c2e1d90c8c783b93c6a9c3f550fc30551edcc28059953",
     "docs/upstream/async-runs.md": "b0e8c066190978fab2855bcf44a18422eca22e300c9bedda06486d73fcae607a",
@@ -18,7 +18,7 @@
     "docs/upstream/mockups/team-operators/portal.html": "72cdb8c75878b9ca6cfabfe032928ce3f676d00350da9a14a211777973286a83",
     "docs/upstream/mockups/team-operators/README.md": "2158fafc4f11146489f9b5e78f62cc2cea7f8de862749100478b34f910435c94",
     "docs/upstream/openshift-deployment.md": "e59d8c9b5223f461729fc5664dfd71534f2ccbf2ab7e2c30e056d1d640d9d3dc",
-    "docs/upstream/outputs.md": "825c0b5c3246a0fa15557327be417f636a2c7279469c3ce083128a408ef55a13",
+    "docs/upstream/outputs.md": "0f77e512be4a7172529d7a6dec0ba49b8641ef9912deadf709777c257a7c9a5e",
     "docs/upstream/read-path-performance.md": "6db0e7bf73a2eb57c4706f6597634d8a36ed3b1d841ca8ac38e7a7ebbc4c7e2d",
     "docs/upstream/repository-separation-plan.md": "fe214a73e2e619b6525f36c7c3bce50ebd5a784c41add6c266936e8bcde5bf5c",
     "docs/upstream/runs-retirement.md": "16ff2388b37e8ae6f2385c52135126b2e12e5dbf37b50c20fb9562da94eca7f2",
