@@ -1,4 +1,9 @@
-"""Permanent deletion of a stored run and its own records, never shared caches."""
+"""Permanent deletion of a run and its own records, never shared caches.
+
+A run that failed before storing results has no ``runs`` row, but its submissions, analysis
+checkpoint and model audit remain under its id. Deleting them is the only way to run that week
+again with changed model settings, which the audit refuses under the same id.
+"""
 
 from __future__ import annotations
 
@@ -57,8 +62,15 @@ def delete_run(db: Database, run_id: str, *, shared_lock: bool = True) -> str:
             params,
         )
         if run is None:
+            # Never stored: the run's latest submission names the team.
+            run = db.query_one(
+                "SELECT TOP 1 team_id FROM run_jobs WITH (UPDLOCK, HOLDLOCK) "
+                "WHERE run_id=:run_id ORDER BY submitted_at DESC, job_id DESC",
+                params,
+            )
+        if run is None:
             raise DeletionRefused("No such run.")
-        if run["status"] == "running":
+        if run.get("status") == "running":
             raise DeletionRefused("This run is active. Try again when it finishes.")
         # Backfill and queued admission bypass the execution lock; the team's queue lock
         # makes this check and the job cleanup below atomic with respect to new queued rows.

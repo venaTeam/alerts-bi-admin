@@ -80,7 +80,11 @@ unknown revision has been applied. An explicit `--registry` takes precedence ove
 
 Delete run is an authenticated, CSRF-protected POST with explicit permanent-deletion
 confirmation. It removes the run's SQL results, publications, decisions, schedule rows and
-model audit transactionally. It retains shared caches and prompt artifacts. Runs write no
+model audit transactionally. It retains shared caches and prompt artifacts. A run that failed
+before storing results is deleted from its failed submission's page: that removes its
+submissions, analysis checkpoint and model audit, which is how a week runs again after a
+model setting such as `LLM_MAX_BATCH_SIZE` changes (its model audit refuses changed settings
+under the same run id). Runs write no
 report files. CLI exports are not tracked: CSVs written by `report` (default
 `out/<run id prefix>`) or any `--out`, including `alert_worklist.csv`, stay on that disk after
 deletion until removed by hand. The run's own pending, running or queued job and its model

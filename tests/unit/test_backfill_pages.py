@@ -173,3 +173,5 @@ def test_finished_weeks_panel_offers_retry_and_dismiss_without_polling() -> None
     assert "Finished with 1 failed" in html and "Retry failed week" in html
     assert 'action="/run-jobs/b/retry"' in html and "attempt 2" in html
     assert f'action="/backfills/{"f" * 32}/dismiss"' in html
+    # The failed week's own page is where a run that stored nothing is deleted.
+    assert 'href="/teams/checkout-api?tab=overview&amp;job_id=b">Open</a>' in html

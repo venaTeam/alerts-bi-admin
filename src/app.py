@@ -413,13 +413,28 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             runnable = set(pages.runnable_weeks(calendar, now))
             if selected_job is not None:
                 view = "job"
+                failed_job = selected_job["status"] == "failed"
                 content = pages.job_panel(
                     selected_job,
                     can_run=team_id in names,
                     runnable=pages.as_utc(selected_job["run_at"]) in runnable,
+                    deletable=failed_job,
                 )
-                if selected_job["status"] == "failed":
+                if failed_job:
                     preselect = pages.as_utc(selected_job["run_at"])
+                    # Deleting is how a week runs again under changed model settings. A rerun
+                    # of a stored week deletes its stored results too, so it gets their dialog.
+                    job_run_id = str(selected_job["run_id"])
+                    stored = db.query_one(
+                        "SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": job_run_id}
+                    )
+                    dialogs += (
+                        pages.delete_dialog(run_row(db, job_run_id), token)
+                        if stored
+                        else pages.delete_failed_dialog(
+                            selected_job, names.get(team_id) or team_id, token
+                        )
+                    )
             elif selected is None:
                 view = "empty"
                 content = pages.empty_team_panel(
@@ -639,6 +654,20 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     def team_path(team_id: str, run_id: str) -> str:
         return pages.team_url(team_id, run_id)
+
+    def deletion_page(db: Database, run_id: str) -> str:
+        """Where a refused deletion returns: the stored run, or a never-stored run's failure."""
+        run = db.query_one("SELECT team_id FROM runs WHERE run_id=:id", {"id": run_id})
+        if run is not None:
+            return team_path(str(run["team_id"]), run_id)
+        job = db.query_one(
+            "SELECT TOP 1 job_id, team_id FROM run_jobs WHERE run_id=:id "
+            "ORDER BY submitted_at DESC, job_id DESC",
+            {"id": run_id},
+        )
+        if job is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such run.")
+        return pages.team_url(str(job["team_id"]), job_id=str(job["job_id"]))
 
     @app.post("/teams/{team_id}/trigger")
     async def trigger(request: Request, team_id: str) -> Response:
@@ -1034,11 +1063,11 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     except WeeklyBusy:
                         shared_lock = False
                     with database() as db:
-                        run = run_row(db, run_id)
+                        page = deletion_page(db, run_id)
                         try:
                             team_id = delete_run(db, run_id, shared_lock=shared_lock)
                         except DeletionRefused as exc:
-                            return back(team_path(str(run["team_id"]), run_id), str(exc), True)
+                            return back(page, str(exc), True)
                     log.info(
                         "admin.deleted",
                         "Permanently deleted the run and its stored results",

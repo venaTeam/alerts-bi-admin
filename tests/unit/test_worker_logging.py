@@ -11,6 +11,7 @@ import pytest
 from alerts_bi_shared import logging_setup
 from alerts_bi_shared.logging_setup import configure_logging
 from src.engine.api import jobs
+from src.engine.db.llm_audit import ReviewSettingsChanged
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +61,40 @@ def test_the_failure_is_recorded_even_when_the_job_update_fails(
     err = capsys.readouterr().err
     assert "run.job_failed     The manual run failed after" in err
     assert "    RuntimeError: Elasticsearch is unreachable" in err
+
+
+def test_changed_model_settings_tell_the_operator_to_delete_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def changed_settings(*_args: Any, **_kwargs: Any) -> None:
+        raise ReviewSettingsChanged("settings changed")
+
+    finished: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(jobs, "load_registry", lambda *_: SimpleNamespace(file_sha256="r"))
+    monkeypatch.setattr(jobs, "execute_request", changed_settings)
+    monkeypatch.setattr(jobs, "committed_result", lambda *_: False)
+    monkeypatch.setattr(
+        jobs, "finish_job", lambda _db, _id, status, advice=None: finished.append((status, advice))
+    )
+    job = {
+        "job_id": "7c1e9a2f" + "0" * 24,
+        "team_id": "t1",
+        "run_id": "a" * 64,
+        "run_at": datetime(2026, 8, 24),
+        "llm_mode": "live",
+        "registry_sha256": "r",
+        "submitted_at": datetime(2026, 8, 24, 0, 0, 0),
+        "started_at": datetime(2026, 8, 24, 0, 0, 4),
+    }
+
+    for backfill in (None, "b" * 32):
+        jobs._run_job(SimpleNamespace(registry_path="x"), _Db(), {**job, "backfill_id": backfill})  # type: ignore[arg-type]
+
+    advice = (
+        "The model settings changed since this week was first sent to the model. "
+        "Delete this run, then run the week again."
+    )
+    assert finished == [("failed", advice), ("failed", advice)]
 
 
 def test_an_idle_worker_says_so_every_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:

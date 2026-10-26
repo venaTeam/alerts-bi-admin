@@ -24,6 +24,7 @@ from alerts_bi_shared.versions import APP_VERSION
 from fastapi import HTTPException
 
 from ..config import ApiSettings
+from ..db.llm_audit import ReviewSettingsChanged
 from ..run.orchestrator import compute_run_id
 from ..weekly.runner import (
     BACKFILL_YIELD_RESOURCE,
@@ -436,11 +437,15 @@ def _run_job(settings: ApiSettings, db: Database, job: dict[str, Any]) -> None:
     except Exception as exc:
         db.rollback()
         completed = committed_result(db, job)
-        advice = (
-            "Analysis failed. Check the service logs, then retry this week."
-            if job.get("backfill_id")
-            else "Analysis failed. Check the service logs, then start a new run to retry."
-        )
+        if isinstance(exc, ReviewSettingsChanged):
+            advice = (
+                "The model settings changed since this week was first sent to the model. "
+                "Delete this run, then run the week again."
+            )
+        elif job.get("backfill_id"):
+            advice = "Analysis failed. Check the service logs, then retry this week."
+        else:
+            advice = "Analysis failed. Check the service logs, then start a new run to retry."
         elapsed = time.monotonic() - clock
         # Record the failure before updating the job, so it survives a failed update.
         if completed:

@@ -6,6 +6,7 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from threading import Event
@@ -241,6 +242,86 @@ def present(run_id: str) -> bool:
             db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id})
             is not None
         )
+
+
+def test_a_failed_run_that_stored_nothing_is_deleted_to_run_with_new_model_settings(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model audit refuses a changed batch size under the same run id until deletion."""
+    first = submit(client, "settings-first").json()
+
+    def fail_before_storing(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("injected failure after the model review")
+
+    with monkeypatch.context() as patched:
+        patched.setattr(service, "persist_run", fail_before_storing)
+        assert jobs.work_once(ApiSettings(CONFIG, database=DB))
+    assert client.get(first["status_url"]).json()["status"] == "failed"
+    assert not present(first["run_id"])
+
+    smaller = replace(CONFIG, llm=replace(CONFIG.llm, max_batch_size=50))
+    second = submit(client, "settings-second").json()
+    assert second["run_id"] == first["run_id"]
+    assert jobs.work_once(ApiSettings(smaller, database=DB))
+    refused = client.get(second["status_url"]).json()
+    assert refused["status"] == "failed" and "Delete this run" in refused["error_summary"]
+    page = client.get(f"/teams/checkout-api?job_id={second['job_id']}").text
+    assert 'data-dialog="delete-run">Delete run' in page
+    assert f'action="/runs/{first["run_id"]}/delete"' in page
+
+    deleted = delete(client, first["run_id"])
+    assert deleted.status_code == 303 and "done=" in deleted.headers["location"]
+    params = {"id": first["run_id"]}
+    with connect(CONFIG.sql, DB) as db:
+        for table, column in (
+            ("llm_review_scopes", "scope_id"),
+            ("llm_review_batches", "scope_id"),
+            ("run_jobs", "run_id"),
+            ("run_analysis_checkpoints", "run_id"),
+        ):
+            assert db.query_one(
+                f"SELECT COUNT(*) AS n FROM {table} WHERE {column}=:id", params
+            ) == {"n": 0}
+        assert db.query_one("SELECT COUNT(*) AS n FROM llm_prompt_artifacts") != {"n": 0}
+    assert delete(client, first["run_id"]).status_code == 404
+
+    third = submit(client, "settings-third").json()
+    assert jobs.work_once(ApiSettings(smaller, database=DB))
+    assert client.get(third["status_url"]).json()["status"] == "completed"
+    with connect(CONFIG.sql, DB) as db:
+        scope = db.query_one(
+            "SELECT settings_json FROM llm_review_scopes WHERE scope_id=:id", params
+        )
+    assert scope is not None and '"max_batch_size":50' in scope["settings_json"]
+
+
+def test_a_failed_rerun_of_a_stored_week_offers_deleting_the_stored_run(
+    client: TestClient,
+) -> None:
+    first = submit(client, "stored-first").json()
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB))
+    assert present(first["run_id"])
+    smaller = replace(CONFIG, llm=replace(CONFIG.llm, max_batch_size=50))
+    rerun = submit(client, "stored-rerun").json()
+    assert jobs.work_once(ApiSettings(smaller, database=DB))
+    assert "Delete this run" in client.get(rerun["status_url"]).json()["error_summary"]
+    page = client.get(f"/teams/checkout-api?job_id={rerun['job_id']}").text
+    # The stored run's own dialog: its results go too.
+    assert 'data-dialog="delete-run">Delete run' in page and "its results, publications" in page
+    assert delete(client, first["run_id"]).status_code == 303 and not present(first["run_id"])
+    again = submit(client, "stored-again").json()
+    assert jobs.work_once(ApiSettings(smaller, database=DB))
+    assert client.get(again["status_url"]).json()["status"] == "completed"
+
+
+def test_refused_deletion_of_a_run_that_stored_nothing_returns_to_its_submission(
+    client: TestClient,
+) -> None:
+    row = submit(client, "pending-unstored").json()
+    response = delete(client, row["run_id"])
+    assert response.status_code == 303 and "error=" in response.headers["location"]
+    assert f"job_id={row['job_id']}" in response.headers["location"]
+    assert client.get(row["status_url"]).json()["status"] == "pending"
 
 
 def test_pending_job_does_not_block_deleting_another_run(client: TestClient) -> None:
