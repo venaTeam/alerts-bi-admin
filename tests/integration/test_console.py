@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Event
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from alerts_bi_operations.report.render import build_run_outputs
@@ -260,7 +261,7 @@ def test_empty_team_and_failed_run_remain_navigable(client: TestClient) -> None:
     assert f'action="/runs/{failed_id}/publish"' not in failed.text
 
 
-def test_form_and_json_trigger_share_gate(client: TestClient) -> None:
+def test_form_queues_and_sync_run_refuses_under_the_gate(client: TestClient) -> None:
     from src.engine.api.jobs import execution_lock
 
     with connect(CONFIG.sql, DB) as db, execution_lock(db):
@@ -271,12 +272,16 @@ def test_form_and_json_trigger_share_gate(client: TestClient) -> None:
             "llm": "fake",
             "submission_key": "locked",
         }
+        # Since 2026-10-26 the form's job waits its turn; synchronous POST /runs still refuses.
         form = client.post(f"/teams/{TEAM}/trigger", data=data)
-        assert form.status_code == 303 and "error=" in form.headers["location"]
+        assert form.status_code == 303 and "done=Run+queued" in form.headers["location"]
         api = client.post(
             "/runs", headers={"X-CSRF-Token": csrf}, json={"team": TEAM, "llm": "fake"}
         )
         assert api.status_code == 409
+    job_id = parse_qs(urlsplit(form.headers["location"]).query)["job_id"][0]
+    removed = client.post(f"/run-jobs/{job_id}/cancel", data={"csrf": token(client)})
+    assert "done=Run+removed+from+the+queue" in removed.headers["location"]
 
 
 def test_ui_trigger_runs_real_engine_and_stays_unpublished(client: TestClient) -> None:

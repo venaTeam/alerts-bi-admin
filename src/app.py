@@ -46,12 +46,13 @@ from .engine.api.backfill import (
     job_backfill,
     latest_backfill,
     parse_weeks,
+    published_weeks,
     retry_backfill,
     selectable_weeks,
     submit_backfill,
     week_rows,
 )
-from .engine.api.jobs import get_job, submit_job, team_jobs
+from .engine.api.jobs import cancel_queued_job, get_job, submit_job, team_jobs
 from .engine.api.negotiation import wants_html
 from .engine.api.routers.runs import router as runs_router
 from .engine.api.schemas import BackfillOut, HealthOut, RunJobOut, RunRequest, TeamsOut
@@ -374,6 +375,13 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 if backfill_row
                 else []
             )
+            failed_weeks = [
+                pages.as_utc(week["run_at"])
+                for week in backfill_weeks
+                if week["status"] == "failed"
+            ]
+            # Retry refuses a published week, so the panel offers retry by the same rule.
+            published_failed = set(published_weeks(db, team_id, failed_weeks))
             calendar = queries.backfill_calendar(db, team_id, selectable_weeks(now)[0])
             selected_job: dict[str, Any] | None = None
             if job_id:
@@ -416,6 +424,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 failed_job = selected_job["status"] == "failed"
                 content = pages.job_panel(
                     selected_job,
+                    token=token,
                     can_run=team_id in names,
                     runnable=pages.as_utc(selected_job["run_at"]) in runnable,
                     deletable=failed_job,
@@ -573,9 +582,11 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 view=view,
                 job=selected_job,
                 jobs=pages.jobs_panel(
-                    jobs, shown=str(selected_job["job_id"]) if selected_job else None
+                    jobs, shown=str(selected_job["job_id"]) if selected_job else None, token=token
                 ),
-                backfill=pages.backfill_panel(team_id, backfill_row, backfill_weeks, token)
+                backfill=pages.backfill_panel(
+                    team_id, backfill_row, backfill_weeks, token, published=published_failed
+                )
                 if backfill_row
                 else "",
                 new_runs=pages.new_runs_dialog(
@@ -723,12 +734,15 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             run_id=job.get("run_id"),
             job_id=job["job_id"],
         )
-        return back(
-            pages.team_url(team_id, job_id=job["job_id"]),
-            "Run accepted. It starts before the next queued week. You can leave this page."
-            if job["status"] == "queued"
-            else "Run accepted. You can leave this page and return later.",
-        )
+        # A resubmitted form (the browser's Back button) returns the job it created earlier.
+        message = {
+            "queued": "Run queued. It starts when the runs ahead of it finish. "
+            "You can leave this page.",
+            "completed": "This form was already submitted, and that run has finished.",
+            "failed": "This form was already submitted, and that run failed.",
+            "cancelled": "This form was already submitted, and that run was removed from the queue.",
+        }.get(str(job["status"]), "Run accepted. You can leave this page and return later.")
+        return back(pages.team_url(team_id, job_id=job["job_id"]), message)
 
     def job_status(row: dict[str, Any]) -> dict[str, Any]:
         result = {
@@ -761,7 +775,10 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         responses={
             400: {"description": "Invalid ASCII submission key or unknown team"},
             403: {"description": "Same-site CSRF token required"},
-            409: {"description": "Another operation is active or the key has different options"},
+            409: {
+                "description": "The team's week is already queued, pending or running, the run "
+                "is published, the team's queue is busy, or the key has different options"
+            },
         },
         openapi_extra={
             "parameters": [
@@ -949,8 +966,26 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.post("/run-jobs/{job_id}/cancel")
     async def cancel_week(request: Request, job_id: str) -> Response:
+        # Removes one queued backfill week, or one queued New run outside a backfill.
         with database() as db:
-            backfill_id = job_backfill(db, job_id)
+            job = get_job(db, job_id)
+        if not job.get("backfill_id"):
+            await form(request)
+            path = pages.team_url(str(job["team_id"]))
+
+            def cancel() -> bool:
+                with database() as db:
+                    return cancel_queued_job(db, job)
+
+            if not await run_in_threadpool(cancel):
+                return back(
+                    path,
+                    "Only a queued run can be removed. This one is already with the worker and "
+                    "runs to completion, or was already removed.",
+                    True,
+                )
+            return back(path, "Run removed from the queue.")
+        backfill_id = str(job["backfill_id"])
 
         def act() -> tuple[dict[str, Any], str, bool]:
             with database() as db:

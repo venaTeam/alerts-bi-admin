@@ -66,7 +66,12 @@ def test_acceptance_is_durable_idempotent_and_does_not_execute(client: TestClien
     assert first.headers["location"] == row["status_url"]
     assert submit(client, "accepted").json()["job_id"] == row["job_id"]
     assert submit(client, "accepted", {**BODY, "llm": "off"}).status_code == 409
-    assert submit(client, "another").status_code == 409
+    duplicate = submit(client, "another")
+    assert duplicate.status_code == 409
+    assert "Already queued or running for this team" in duplicate.text
+    # Another week waits behind the pending job instead of being refused.
+    other_week = submit(client, "other-week", {**BODY, "run_at": "2026-08-17T00:00:00Z"})
+    assert other_week.status_code == 202 and other_week.json()["status"] == "queued"
     page = client.get("/teams/checkout-api?job_id=" + row["job_id"])
     assert page.status_code == 200 and "Waiting for the worker" in page.text
     assert "connect-src 'self'" in page.headers["content-security-policy"]
@@ -144,7 +149,9 @@ def test_lock_protects_live_worker_and_status_stays_readable(client: TestClient)
         db.commit()
         assert client.get(row["status_url"]).json()["status"] == "running"
         assert submit(client, "live-lock").json()["job_id"] == row["job_id"]
-        assert submit(client, "blocked-live").status_code == 409
+        blocked = submit(client, "blocked-live")
+        assert blocked.status_code == 409
+        assert "Already queued or running for this team" in blocked.text
         assert jobs.work_once(ApiSettings(CONFIG, database=DB)) is False
         assert jobs.get_job(db, row["job_id"])["status"] == "running"
 
@@ -511,7 +518,9 @@ def test_slow_worker_keeps_status_and_navigation_responsive(
                 ]
                 == row["job_id"]
             )
-            assert submit(client, "busy-slow-worker").status_code == 409
+            # Another week waits its turn instead of being refused (since 2026-10-26).
+            queued = submit(client, "busy-slow-worker")
+            assert queued.status_code == 202 and queued.json()["status"] == "queued"
         finally:
             release.set()
         assert future.result(timeout=120)

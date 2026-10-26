@@ -18,8 +18,34 @@ SELECT job_id, team_id, run_id, status, submitted_at, started_at,
 FROM run_jobs WHERE active_slot = 1;
 ```
 
+Since 2026-10-26 a New run submitted while another run is in progress waits as a queued row
+outside any backfill, so a stopped or stalled worker also shows as aging queued rows. When an
+operator reports that a New run never started, check those too:
+
+```sql
+SELECT job_id, team_id, run_id, run_at, submitted_at,
+       DATEDIFF(SECOND, submitted_at, SYSUTCDATETIME()) AS waiting_seconds
+FROM run_jobs WHERE status = 'queued' AND backfill_id IS NULL
+ORDER BY submitted_at;
+```
+
+Queued rows that age while no row holds `active_slot = 1` mean the worker is not claiming
+work, but not necessarily that it is unhealthy: a CLI run, report, deletion or the weekly
+schedule holds the execution lock without a job row, and a weekly invocation covering every
+enrolled team can hold it for a long time. While it claims nothing, a running worker logs
+`worker.idle` every 15 minutes with the reason. The reason "jobs wait for the execution lock (a
+CLI run, report, weekly job or deletion)" means the rows are waiting their turn; find the
+lock's holder before acting. The reason "backfill weeks wait while the weekly job runs" also
+means waiting their turn, for queued New runs as well: a weekly invocation that waited for a
+backfill week holds `alerts-bi-backfill-yield` until its whole run finishes. No `worker.idle`
+event for more than about 15 minutes, while no row holds the active slot, means the worker is
+stopped or stalled. Rows that age behind a long running job are also waiting their turn.
+
 Inspect the run-worker container's restart count and recent run.job_submitted,
-run.job_started, run.job_finished and run.job_failed events.
+run.job_started, run.job_finished and run.job_failed events. run.job_cancelled records a
+queued New run removed from the team page, and run.job_skipped (a warning) records a claimed
+job that was not run because its week was published while it waited; its error summary
+tells the operator to withdraw the week to run it again.
 Check ES/SQL/model availability and positive finite ES_REQUEST_TIMEOUT_MS, LLM_TIMEOUT_MS
 and SQL_REQUEST_TIMEOUT_MS settings. SQL's millisecond value is converted to whole seconds:
 use at least 1000 so it does not become the driver's unlimited zero timeout. Defaults are
@@ -81,7 +107,8 @@ any kind; an older worker ignores queued rows and leaves them queued indefinitel
 submissions by taking the `alerts-bi-admin` Route out of service while the current pod and its
 run-worker keep running. Cancel or finish active backfills from the team workspace, then let
 the current worker complete every remaining queued job, including New runs that were queued
-behind a backfill week (they do not belong to the backfill, so its Cancel does not remove them).
+behind another run (they do not belong to a backfill, so a backfill's Cancel does not remove
+them; since 2026-10-26 each has its own Remove on the team page).
 If draining is impossible, stop all writers, pass the locked-session checks above, and fail the
 remaining queued rows with a status older versions recognize:
 

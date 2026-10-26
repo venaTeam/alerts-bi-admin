@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 from src import pages
 from src.engine.api.backfill import parse_weeks, selectable_weeks, week_rows
+from src.engine.api.jobs import PUBLISHED_WHILE_WAITING
 
 NOW = datetime(2026, 10, 14, 10, 42, tzinfo=UTC)
 
@@ -175,3 +176,27 @@ def test_finished_weeks_panel_offers_retry_and_dismiss_without_polling() -> None
     assert f'action="/backfills/{"f" * 32}/dismiss"' in html
     # The failed week's own page is where a run that stored nothing is deleted.
     assert 'href="/teams/checkout-api?tab=overview&amp;job_id=b">Open</a>' in html
+
+
+def test_a_published_failed_week_offers_no_retry_until_it_is_withdrawn() -> None:
+    skipped = week("c", "2026-08-17", "failed", error_summary=PUBLISHED_WHILE_WAITING)
+    failed = week("b", "2026-08-10", "failed", error_summary="Analysis failed.")
+    published = {at("2026-08-17")}
+
+    def panel(weeks: list[dict[str, object]], published: set[datetime]) -> str:
+        return pages.backfill_panel("checkout-api", BACKFILL, weeks, "token", published=published)
+
+    html = panel([failed, skipped], published)
+    assert "Finished with 2 failed" in html and "published while the run waited" in html
+    assert 'action="/run-jobs/b/retry"' in html and 'action="/run-jobs/c/retry"' not in html
+    assert "Retry failed week<" in html and "Retry failed weeks" not in html
+    alone = panel([skipped], published)
+    assert "/retry" not in alone and "Dismiss" in alone
+    # Withdrawing the week, as the message says, makes it retryable again.
+    withdrawn = panel([skipped], set())
+    assert 'action="/run-jobs/c/retry"' in withdrawn and "Retry failed week<" in withdrawn
+    # A week that failed for another reason and was published later is not retryable either.
+    later = panel([week("d", "2026-08-17", "failed", error_summary="Analysis failed.")], published)
+    assert "/retry" not in later and "Published since. Withdraw it to run it again." in later
+    # A published week is not deleted from a failed attempt; it opens only while unpublished.
+    assert ">Open</a>" not in later and ">Open</a>" in withdrawn

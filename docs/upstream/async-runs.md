@@ -10,8 +10,15 @@ execution with results displayed when complete, and removal of generated per-run
 This amendment supersedes synchronous browser triggering. The subsequent accepted request removes standalone HTML output entirely, including on-demand rendering.
 The 2026-10-14 [backfill contract](backfill.md) adds the `queued` and `cancelled` job states, a
 worker claim order, queueing of manual submissions while a backfill is in progress, and a weekly
-wait for the current backfill week. Statements below that no queue exists apply only while no
-backfill is in progress.
+wait for the current backfill week. Statements below that no queue exists applied only while no
+backfill was in progress; since 2026-10-26 they no longer apply to job submissions.
+
+**Amended 2026-10-26** (design "New runs queue while another run is in progress"): a busy job
+submission is queued whether or not a backfill is in progress, a second job for a week the team
+already has queued, pending or running is refused with 409, a submission also waits behind
+manual jobs already queued, a claimed job whose run was published while it waited fails without
+running, and a queued manual job can be removed. The refusals of busy job submissions below
+apply only to synchronous `POST /runs`.
 
 ## HTTP and UI contract
 
@@ -32,12 +39,14 @@ backfill is in progress.
   Completion of the job selected through `job_id` opens its completed run. Other selections
   retain their URL/filter state when refreshed. Returning later reads current state from SQL.
   Failed jobs offer the existing New run action to retry (since 2026-10-19 the New runs
-  dialog with one week; see design section "Operator console redesign"). Connectivity failure is presented
+  dialog with one week; see design section "Operator console redesign"; since 2026-10-26 a job
+  skipped because its week was published offers it only after the week is withdrawn). Connectivity failure is presented
   separately from analysis failure and polling retries automatically. No progress percentage is invented.
 - `POST /runs` retains synchronous execution, returning a JSON summary and three CSV links.
   Standalone HTML responses and the `scorecard` field are removed, including for `Accept: text/html`.
   Amended 2026-10-17: the `out_dir` field and `X-Alerts-BI-Out-Dir` header are removed.
-  Both operator API paths share the durable manual-execution gate. Busy submissions return 409;
+  Both operator API paths share the durable manual-execution gate. Busy submissions return 409
+  (since 2026-10-26 only `POST /runs`; a busy job submission is queued);
   validation retains existing 400/422 behavior. Authentication and CSRF failures remain 401/403.
 
 ## Execution, recovery and compatibility
@@ -56,10 +65,14 @@ recovery. The execution connection owns that lock across LLM-journal and persist
 An active-slot constraint also prevents more than one pending/running job. The idle worker
 checks that slot without taking execution locks, then rechecks/claims under the locks.
 Submission deliberately refuses active manual/CLI/report/weekly operations with 409; it
-does not create a queue behind them. Removing admission locks would violate this contract. The process-local
+does not create a queue behind them. (Amended 2026-10-26: it now accepts the job as `queued`
+behind them, holding no slot; admission still takes the execution lock when it is free, and
+otherwise inserts under the team's queue lock.) Removing admission locks would violate this
+contract. The process-local
 gate remains a compatibility guard. The existing alerts-bi-weekly SQL session lock on its
 own connection protects the entire worker lifecycle from manual CLI runs, standalone reports,
-weekly scheduling and permanent deletion of the job's own run. Admission also refuses a busy scheduler lock.
+weekly scheduling and permanent deletion of the job's own run. Admission also refused a busy
+scheduler lock; since 2026-10-26 it queues the job behind it.
 The durable pending/running slot reserves execution even after a worker's SQL sessions
 close: CLI runs, weekly runs, reports and acceptance verification check the slot while
 holding the shared lock and refuse until the worker completes or reconciles it. The
@@ -124,7 +137,9 @@ Run one UI/worker pod with the Recreate strategy; the shipped YAML and canonical
 match. Docker Compose remains the existing local mock dependency stack: developers start
 the separate worker command from the README. It does not deploy either application.
 Submission, start and terminal transitions emit run.job_submitted, run.job_started and
-run.job_finished logs with job/run identity; raw keys and model payloads are excluded.
+run.job_finished logs with job/run identity; raw keys and model payloads are excluded. Since
+2026-10-26, removing a queued manual job emits run.job_cancelled, and a claimed job whose week
+was published while it waited emits a run.job_skipped warning instead of starting.
 Whole-run deletion intentionally removes its terminal job records, as part of the approved
 permanent deletion contract, and remains audited through the existing admin.deleted event.
 Since 2026-10-26 a failed submission whose run never stored results is deleted the same way

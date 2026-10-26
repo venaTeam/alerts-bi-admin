@@ -1,5 +1,15 @@
 # Alerts BI — Runtime Flow
 
+## New runs queue while another run is in progress — accepted 2026-10-26
+
+A New run submitted while any run is in progress is accepted as queued instead of refused, and
+the worker runs it when the runs ahead of it finish, before the next backfill week. A second
+submission for a week the team already has queued, pending or running is refused, and a new
+submission waits behind New runs already queued. A queued run can be removed from the team page
+until it starts; one whose week was published while it waited is marked failed without running.
+Synchronous `POST /runs`, CLI runs, reports and the weekly retry are unchanged. See design
+section "New runs queue while another run is in progress".
+
 ## Decisions page needs-a-decision view — accepted 2026-10-20
 
 The global Decisions page opens on the findings of currently published weeks that have no
@@ -78,7 +88,8 @@ Manual HTTP/API and CLI runs share the existing SQL session execution lock with 
 scheduling and deletion, from before scanning through persistence and report writing.
 Standalone CLI reports hold it before run-id/team lookup through the final file write.
 Model-off runs hold it too. Its separate connection survives data commits; contention is
-refused promptly and errors release the lock. Updated CLI clients and the app roll out together.
+refused promptly (since 2026-10-26 a contending job submission is queued instead; see the top of
+this document) and errors release the lock. Updated CLI clients and the app roll out together.
 
 ## Source ownership amendment — 2026-10-12
 

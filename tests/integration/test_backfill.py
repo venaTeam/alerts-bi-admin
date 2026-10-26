@@ -1,9 +1,11 @@
-"""Operator backfill admission, queue order and console flow on real SQL Server (docs/backfill.md)."""
+"""The run job queue on real SQL Server: backfill admission, single runs queued while another
+runs, queue order, removal, published weeks and the console flow (docs/backfill.md and design
+"New runs queue while another run is in progress")."""
 
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
@@ -13,7 +15,9 @@ from typing import Any
 
 import pytest
 from alerts_bi_operations.review.publication import publish_run
+from alerts_bi_shared import logging_setup
 from alerts_bi_shared.db.connection import Database, connect
+from alerts_bi_shared.logging_setup import configure_logging
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from src.app import build_admin
@@ -105,6 +109,16 @@ def executed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, datetime]]:
 
     monkeypatch.setattr(jobs, "execute_request", fake)
     return calls
+
+
+@pytest.fixture
+def worker_log(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> Callable[[], str]:
+    """The console log records written since the last call (design "Console log format")."""
+    monkeypatch.setattr(logging_setup, "_settings", None)
+    configure_logging("worker", level="info", fmt="console", color=False, capture_libraries=False)
+    return lambda: "".join(capsys.readouterr())
 
 
 def queued_weeks(api: ApiSettings, backfill_id: str) -> list[dict[str, Any]]:
@@ -218,11 +232,258 @@ def test_worker_runs_manual_work_before_the_next_week_then_oldest_first(
         assert db.query_one("SELECT job_id FROM run_jobs WHERE active_slot=1") is None
 
 
-def test_manual_submission_without_backfill_is_still_refused_while_busy(api: ApiSettings) -> None:
-    jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "one")
-    with pytest.raises(HTTPException) as busy:
-        jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "two")
-    assert busy.value.status_code == 409
+def test_manual_submission_without_backfill_queues_while_busy(
+    api: ApiSettings, executed: list[tuple[str, datetime]]
+) -> None:
+    """Since 2026-10-26 a busy submission queues instead of being refused (docs/backfill.md)."""
+    first = jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "one")
+    assert first["status"] == "pending"
+    other_team = jobs.submit_job(
+        api, RunRequest(team="payments-core", run_at=at("2026-08-24"), llm="fake"), "two"
+    )
+    other_week = jobs.submit_job(
+        api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="off"), "three"
+    )
+    assert other_team["status"] == other_week["status"] == "queued"
+    assert other_team["active_slot"] is None and other_week["active_slot"] is None
+    # The same team and week again would rerun it and replace the first result.
+    for key, request in (
+        ("four", RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake")),
+        ("five", RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="off")),
+    ):
+        with pytest.raises(HTTPException) as duplicate:
+            jobs.submit_job(api, request, key)
+        assert duplicate.value.status_code == 409
+        assert "Already queued or running for this team" in duplicate.value.detail
+        # The pending job cannot be removed, so the advice is only to wait.
+        assert duplicate.value.detail.endswith("Wait for it to finish.")
+    with pytest.raises(HTTPException) as queued_duplicate:
+        jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "six")
+    assert queued_duplicate.value.status_code == 409
+    assert queued_duplicate.value.detail.endswith("or remove it from the queue.")
+    while jobs.work_once(api):
+        pass
+    assert executed == [
+        (TEAM, datetime(2026, 8, 24)),
+        ("payments-core", datetime(2026, 8, 24)),
+        (TEAM, datetime(2026, 8, 17)),
+    ]
+    # Once the week has run, it can be submitted again.
+    again = jobs.submit_job(
+        api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "seven"
+    )
+    assert again["status"] == "pending"
+
+
+def test_manual_submission_queues_behind_a_run_without_a_job(
+    api: ApiSettings, executed: list[tuple[str, datetime]]
+) -> None:
+    """A CLI run, report, weekly run or deletion holds the shared lock without a job record."""
+    with runner.schedule_lock(CONFIG, DB):
+        held = jobs.submit_job(
+            api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "behind-lock"
+        )
+        assert held["status"] == "queued" and held["active_slot"] is None
+        assert jobs.work_once(api) is False
+    assert jobs.work_once(api) is True
+    assert executed == [(TEAM, datetime(2026, 8, 24))]
+    with connect(CONFIG.sql, DB) as db:
+        assert jobs.get_job(db, held["job_id"])["status"] == "completed"
+
+
+def test_a_submission_waits_behind_runs_already_queued(
+    api: ApiSettings, executed: list[tuple[str, datetime]]
+) -> None:
+    """Between the lock's release and the worker's next poll, a newer run cannot go first."""
+    with runner.schedule_lock(CONFIG, DB):
+        older = jobs.submit_job(
+            api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "older"
+        )
+    # The lock and the slot are free, but the older run has not been claimed yet.
+    newer = jobs.submit_job(
+        api, RunRequest(team="payments-core", run_at=at("2026-08-24"), llm="fake"), "newer"
+    )
+    assert older["status"] == newer["status"] == "queued"
+    while jobs.work_once(api):
+        pass
+    assert executed == [(TEAM, datetime(2026, 8, 24)), ("payments-core", datetime(2026, 8, 24))]
+
+
+def test_a_week_published_while_queued_is_skipped_without_reading_alerts(
+    api: ApiSettings, executed: list[tuple[str, datetime]], worker_log: Callable[[], str]
+) -> None:
+    with runner.schedule_lock(CONFIG, DB):
+        job = jobs.submit_job(
+            api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "published-later"
+        )
+    assert job["status"] == "queued"
+    # Meanwhile the weekly schedule stores and publishes the same run.
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=str(job["run_id"]),
+                    run_at=datetime(2026, 8, 24),
+                    window_start=datetime(2026, 8, 17),
+                    window_end=datetime(2026, 8, 24),
+                )
+            ),
+        )
+        publish_run(db, str(job["run_id"]), allow_gap=True)
+    assert jobs.work_once(api) is True
+    assert executed == []
+    with connect(CONFIG.sql, DB) as db:
+        skipped = jobs.get_job(db, job["job_id"])
+        assert db.query_one("SELECT job_id FROM run_jobs WHERE active_slot=1") is None
+    assert skipped["status"] == "failed" and skipped["active_slot"] is None
+    assert skipped["error_summary"] == jobs.PUBLISHED_WHILE_WAITING
+    log = worker_log()
+    assert "run.job_skipped" in log and "run.job_started" not in log
+
+
+def test_retrying_a_backfill_whose_only_failed_week_is_published_is_refused(
+    api: ApiSettings,
+) -> None:
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "only", now=NOW)
+    (week,) = queued_weeks(api, row["backfill_id"])
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=str(week["run_id"]),
+                    run_at=datetime(2026, 8, 17),
+                    window_start=datetime(2026, 8, 10),
+                    window_end=datetime(2026, 8, 17),
+                )
+            ),
+        )
+        publish_run(db, str(week["run_id"]), allow_gap=True)
+    assert jobs.work_once(api) is True
+    with pytest.raises(HTTPException) as refused:
+        backfill.retry_backfill(api, row["backfill_id"], now=NOW)
+    assert refused.value.status_code == 409
+    assert refused.value.detail == (
+        "Every failed week is published now. Withdraw a week to run it again."
+    )
+
+
+def test_retrying_failed_weeks_leaves_out_a_week_published_while_queued(
+    client: TestClient, api: ApiSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = backfill.submit_backfill(
+        api, TEAM, [at("2026-08-10"), at("2026-08-17")], "fake", "mixed", now=NOW
+    )
+    older, newer = queued_weeks(api, row["backfill_id"])
+    # The weekly schedule publishes the newer week's run before the worker reaches it.
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=str(newer["run_id"]),
+                    run_at=datetime(2026, 8, 17),
+                    window_start=datetime(2026, 8, 10),
+                    window_end=datetime(2026, 8, 17),
+                )
+            ),
+        )
+        publish_run(db, str(newer["run_id"]), allow_gap=True)
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Test failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs, "execute_request", fail)
+        assert jobs.work_once(api) and jobs.work_once(api)
+    failed = {str(job["job_id"]): job for job in queued_weeks(api, row["backfill_id"])}
+    assert failed[str(newer["job_id"])]["error_summary"] == jobs.PUBLISHED_WHILE_WAITING
+    assert failed[str(older["job_id"])]["status"] == "failed"
+    # The panel offers retry by the same rule: only for the week that is not published.
+    page = client.get(f"/teams/{TEAM}").text
+    assert f'action="/run-jobs/{older["job_id"]}/retry"' in page
+    assert f'action="/run-jobs/{newer["job_id"]}/retry"' not in page
+    assert "Retry failed week<" in page
+    with pytest.raises(HTTPException) as locked:
+        backfill.retry_backfill(api, row["backfill_id"], str(newer["job_id"]), now=NOW)
+    assert locked.value.status_code == 409 and "Published weeks are locked" in locked.value.detail
+    # Retrying every failed week retries the other one instead of refusing both.
+    _, count = backfill.retry_backfill(api, row["backfill_id"], now=NOW)
+    assert count == 1
+    with connect(CONFIG.sql, DB) as db:
+        latest = backfill.week_rows(backfill.backfill_jobs(db, row["backfill_id"]))
+    assert [(week["run_at"], week["status"]) for week in latest] == [
+        (datetime(2026, 8, 10), "queued"),
+        (datetime(2026, 8, 17), "failed"),
+    ]
+
+
+def test_a_retry_with_the_same_key_gets_its_own_job_not_a_duplicate_refusal(
+    api: ApiSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake")
+    first = jobs.submit_job(api, request, "same-key")
+    actual = jobs._existing_submission
+    lookups = 0
+
+    def committed_after_two_lookups(*args: Any) -> dict[str, Any] | None:
+        # The first lookup and the recheck under the lock ran before the first commit.
+        nonlocal lookups
+        lookups += 1
+        return None if lookups <= 2 else actual(*args)
+
+    monkeypatch.setattr(jobs, "_existing_submission", committed_after_two_lookups)
+    again = jobs.submit_job(api, request, "same-key")
+    assert again["job_id"] == first["job_id"] and lookups == 3
+
+
+def test_manual_submission_is_refused_for_a_week_a_backfill_queued(api: ApiSettings) -> None:
+    backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "queued-week", now=NOW)
+    with pytest.raises(HTTPException) as refused:
+        jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="off"), "same")
+    assert refused.value.status_code == 409
+    assert "Already queued or running for this team" in refused.value.detail
+    other = jobs.submit_job(
+        api, RunRequest(team="payments-core", run_at=at("2026-08-17"), llm="fake"), "other"
+    )
+    assert other["status"] == "pending"
+
+
+def test_console_removes_a_queued_run_but_not_one_that_started(
+    client: TestClient,
+    api: ApiSettings,
+    executed: list[tuple[str, datetime]],
+    worker_log: Callable[[], str],
+) -> None:
+    first = jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "a")
+    queued = jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "b")
+    assert queued["status"] == "queued"
+    page = client.get(f"/teams/{TEAM}?job_id={queued['job_id']}").text
+    assert "is queued" in page and f'action="/run-jobs/{queued["job_id"]}/cancel"' in page
+    removed = post(client, f"/run-jobs/{queued['job_id']}/cancel")
+    assert removed.status_code == 303
+    assert "done=Run+removed+from+the+queue" in removed.headers["location"]
+    refused = post(client, f"/run-jobs/{first['job_id']}/cancel")
+    assert "error=Only+a+queued+run+can+be+removed" in refused.headers["location"]
+    again = post(client, f"/run-jobs/{queued['job_id']}/cancel")
+    assert "error=" in again.headers["location"]
+    assert client.post(f"/run-jobs/{queued['job_id']}/cancel", data={}).status_code == 403
+    with connect(CONFIG.sql, DB) as db:
+        cancelled = jobs.get_job(db, queued["job_id"])
+        assert cancelled["status"] == "cancelled" and cancelled["active_slot"] is None
+        assert jobs.get_job(db, first["job_id"])["status"] == "pending"
+    assert "run.job_cancelled" in worker_log()
+    while jobs.work_once(api):
+        pass
+    assert executed == [(TEAM, datetime(2026, 8, 24))]
+    finished = post(client, f"/run-jobs/{first['job_id']}/cancel")
+    assert "error=Only+a+queued+run+can+be+removed" in finished.headers["location"]
+    # A cancelled week no longer counts as queued, so it can be submitted again.
+    resubmitted = jobs.submit_job(
+        api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "c"
+    )
+    assert resubmitted["status"] == "pending"
 
 
 def hold_applock(resource: str) -> ExitStack:
@@ -435,9 +696,6 @@ def test_deletion_cannot_remove_a_week_queued_while_it_runs(
                 )
             ),
         )
-    if admission == "manual":
-        # A queued backfill week keeps a backfill in progress, so a busy manual run queues.
-        backfill.submit_backfill(api, TEAM, [at("2026-08-24")], "fake", "other", now=NOW)
     paused, release = Event(), Event()
 
     def delete() -> str:
@@ -600,7 +858,7 @@ def test_queued_manual_status_is_public_and_shown_in_the_workspace(
     assert response.status_code == 202, response.text
     assert response.json()["status"] == "queued"
     page = client.get(f"/teams/{TEAM}").text
-    assert "Queued. It starts before the next week of a multi-week run." in page
+    assert "Queued. It starts when the runs ahead of it finish." in page
 
 
 def test_interrupted_week_fails_and_asks_to_retry_the_week(api: ApiSettings) -> None:
