@@ -27,15 +27,14 @@ that such a run wait its turn instead, and approved these rules:
   retrying a published week on its own is still refused. The backfill panel follows the same
   rule: a failed week offers Retry week, and counts toward Retry failed weeks, only while it is
   not published, so a withdrawn week can be retried again.
-* **A same-key retry gets its own job.** An identical submission (same key and options) that
-  commits while another waits for the team's queue lock is returned to the waiting one rather
-  than refused as a duplicate week.
 * **One active job per team and week.** A manual submission for a week the team already has
-  queued, pending or running is refused with 409 ("Already queued or running for this team"),
-  busy or not, as backfill admission already does. A second job would run the week again and
-  replace the first result under the same deterministic run ID. Retrying with the same
-  submission key still returns the same job. The week can be submitted again once its job
-  completes, fails or is removed.
+  queued, pending or running is refused with 409 ("Already queued or running for this team:
+  <week>. Wait for it to finish.", adding "or remove it from the queue" when that job is still
+  queued), busy or not, as backfill admission already does. A second
+  job would run the week again and replace the first result under the same deterministic run
+  ID. Retrying with the same submission key and options still returns the existing job, also
+  when two identical submissions race and one commits while the other waits for the team's
+  queue lock. The week can be submitted again once its job completes, fails or is removed.
 * **A queued run can be removed.** `POST /run-jobs/{job_id}/cancel` also removes a queued
   manual job, which becomes `cancelled` ("Cancelled before it started."). A job the worker has
   claimed runs to completion and the console says so. The team page offers Remove on a queued
@@ -53,9 +52,10 @@ when the runs ahead of it finish, instead of referring to multi-week runs.
 `console-http.json` the queueing rule.
 
 Rollback: an earlier image with migration 014 still runs queued manual jobs, but cannot remove
-them and refuses busy submissions again. Rolling back past 014 keeps the existing rule: leave no
-queued job of any kind ([the worker runbook](manual-worker-runbook.md)). No deployment is
-authorized by this amendment.
+them, again refuses busy submissions when no backfill is in progress, accepts a second job for a
+week already queued, and runs a week published while it waited until persistence refuses it.
+Rolling back past 014 keeps the existing rule: leave no queued job of any kind ([the worker
+runbook](manual-worker-runbook.md)). No deployment is authorized by this amendment.
 
 ## Team operators on the team page — accepted 2026-10-21
 
@@ -369,8 +369,8 @@ scoring, prompt text, CSV outputs, portal views and the shared/operations librar
   published week again only after it is withdrawn. Live, fake or off applies to every week,
   live by default. One selected week is submitted exactly as the former New run: a manual job
   with the same submission key, busy refusal and queuing during a backfill (since 2026-10-26 a
-  busy submission is always queued; see "New runs queue while another run is in progress"). Two to twelve weeks
-  are submitted exactly as the former backfill: one team, one active backfill, oldest first,
+  busy submission is always queued; see "New runs queue while another run is in progress").
+  Two to twelve weeks are submitted exactly as the former backfill: one team, one active backfill, oldest first,
   completed unpublished. `POST /teams/{team_id}/trigger` accepts repeated `week` dates (or the
   former `run_at`) and dispatches on their count; `POST /teams/{team_id}/backfill` remains for
   compatibility. The JSON trigger, CLI and API still run any Monday week, including a published
@@ -1349,7 +1349,7 @@ This is a convenience wrapper, not the deferred frontend of section 7.4. It exis
 * It performs no analysis of its own. Every endpoint loads the registry, calls the same `execute_run` and `persist_run` the command line calls, or renders a stored run from committed SQL rows. There is no second code path that could drift from the CLI.
 * A run still names one team and never defaults to all of them; an absent team is an error rather than a fan-out.
 * `run_at` is still captured once per run, and the four approved output files are still written exactly as the CLI writes them. Reports are still rendered only from committed SQL.
-* Runs are serialized. Two concurrent requests for one team and clock derive the same deterministic `run_id` and would race to replace each other's rows, so a second concurrent run is refused with `409` rather than queued. (Amended 2026-10-26: this still holds for synchronous `POST /runs`; a busy job submission through the console or `POST /run-jobs` is queued, and a second job for a team's queued or running week is refused. See "New runs queue while another run is in progress".)
+* Runs are serialized. Two concurrent requests for one team and clock derive the same deterministic `run_id` and would race to replace each other's rows, so a second concurrent run is refused with `409` rather than queued. (Amended 2026-10-26: this still holds for synchronous `POST /runs`; a busy job submission through the console or `POST /run-jobs` is queued, and a second job for a week the team already has queued, pending or running is refused. See "New runs queue while another run is in progress".)
 
 It is built on FastAPI over uvicorn (2026-08-30), as the `alerts_bi.api` package: an application factory, routers grouped by purpose, one service module holding everything that touches the pipeline, the Pydantic wire contract, and the two pages it renders itself. Its settings are configuration and live with the rest of it, in `alerts_bi.config.api`; the lock that serializes runs is runtime state and lives with the code that runs them. The request and response shapes are declared as Pydantic models, so validation happens before a handler runs and the OpenAPI document at `/openapi.json` is generated from the code rather than maintained beside it. The run endpoint is a synchronous `def`, so its minutes of blocking Elasticsearch and SQL work are dispatched to the thread pool instead of stalling the event loop. When the interactive frontend of section 7.4 is designed, this is the seam it grows from.
 

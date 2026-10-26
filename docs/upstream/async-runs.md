@@ -39,7 +39,8 @@ apply only to synchronous `POST /runs`.
   Completion of the job selected through `job_id` opens its completed run. Other selections
   retain their URL/filter state when refreshed. Returning later reads current state from SQL.
   Failed jobs offer the existing New run action to retry (since 2026-10-19 the New runs
-  dialog with one week; see design section "Operator console redesign"). Connectivity failure is presented
+  dialog with one week; see design section "Operator console redesign"; since 2026-10-26 a job
+  skipped because its week was published offers it only after the week is withdrawn). Connectivity failure is presented
   separately from analysis failure and polling retries automatically. No progress percentage is invented.
 - `POST /runs` retains synchronous execution, returning a JSON summary and three CSV links.
   Standalone HTML responses and the `scorecard` field are removed, including for `Accept: text/html`.
@@ -66,7 +67,8 @@ checks that slot without taking execution locks, then rechecks/claims under the 
 Submission deliberately refuses active manual/CLI/report/weekly operations with 409; it
 does not create a queue behind them. (Amended 2026-10-26: it now accepts the job as `queued`
 behind them, holding no slot; admission still takes the execution lock when it is free, and
-otherwise inserts under the team's queue lock.) Removing admission locks would violate this contract. The process-local
+otherwise inserts under the team's queue lock.) Removing admission locks would violate this
+contract. The process-local
 gate remains a compatibility guard. The existing alerts-bi-weekly SQL session lock on its
 own connection protects the entire worker lifecycle from manual CLI runs, standalone reports,
 weekly scheduling and permanent deletion of the job's own run. Admission also refused a busy
