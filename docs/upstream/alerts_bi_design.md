@@ -1508,9 +1508,9 @@ deletion as the 2026-10-13 clarification requires.
 **Amended 2026-10-26: a failed run that never stored results can be deleted.** A run's model
 audit (section 7.13) records its prompt version, model version and settings, including the
 batch cap, under the run id, and refuses a later attempt whose settings differ. The run id
-does not include those settings, so after an operator changes `LLM_MAX_BATCH_SIZE` (or the
-deployment, output cap or prompt version), every further attempt of a week already sent to
-the model fails. A stored run could already be deleted; a run that failed before storing
+includes the prompt and model versions but not those settings, so after an operator changes
+`LLM_MAX_BATCH_SIZE` (or the output cap, or the deployment when a model revision is set),
+every further attempt of a week already sent to the model fails. A stored run could already be deleted; a run that failed before storing
 results has no `runs` row, so it could not, and its week could only run again under the old
 settings. Delete run now also accepts such a run, named by its latest submission. The same
 transaction, locks and refusals apply, and it removes the run's submissions, analysis
