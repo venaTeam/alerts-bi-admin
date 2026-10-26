@@ -99,7 +99,7 @@
       "status_url",
       "result_url"
     ],
-    "concurrency": "One active manual job; SQL session lock and active slot constraint; busy returns 409, except that while a backfill is in progress a busy submission is accepted as queued (queued and cancelled jobs hold no slot)"
+    "concurrency": "One active job; SQL session lock and active slot constraint; since 2026-10-26 a busy submission is accepted as queued whether or not a backfill is in progress (queued and cancelled jobs hold no slot); a submission for a week the team already has queued, pending or running returns 409; POST /run-jobs/{job_id}/cancel removes a queued manual job"
   },
   "exports": [
     "daily_metrics.csv",
@@ -115,7 +115,7 @@
     "model_mode": "live, fake or off for every week; live by default",
     "admission": "Browser form with same-site CSRF and a per-form submission key unique across all clients; one run_backfills row and one queued run_jobs row per week in one transaction; no execution lock; every run job insert and run deletion take the team's transaction-scoped queue lock alerts-bi-queue:{team_id}",
     "claim_order": "Orphan reconciliation, pending job, queued manual jobs by submission, then backfill weeks by backfill submission and oldest week first",
-    "manual_priority": "While a backfill is in progress a manual submission that finds the slot or execution lock busy is accepted as queued",
+    "manual_priority": "A manual submission that finds the slot or execution lock busy is accepted as queued (during a backfill since 2026-10-14, at any time since 2026-10-26) and runs before the next backfill week",
     "weekly_priority": "A weekly invocation blocked during a backfill holds SQL session lock alerts-bi-backfill-yield and waits up to three hours, polling every 30 seconds",
     "status_route": "GET /backfills/{backfill_id} returns BackfillOut"
   }

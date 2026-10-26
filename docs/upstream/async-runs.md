@@ -13,6 +13,11 @@ worker claim order, queueing of manual submissions while a backfill is in progre
 wait for the current backfill week. Statements below that no queue exists apply only while no
 backfill is in progress.
 
+**Amended 2026-10-26** (design "New runs queue while another run is in progress"): a busy job
+submission is queued whether or not a backfill is in progress, a second job for a week the team
+already has queued, pending or running is refused with 409, and a queued manual job can be
+removed. The refusals of busy job submissions below apply only to synchronous `POST /runs`.
+
 ## HTTP and UI contract
 
 - Browser `POST /teams/{team_id}/trigger` validates identity, same-site CSRF and run options,
@@ -37,7 +42,8 @@ backfill is in progress.
 - `POST /runs` retains synchronous execution, returning a JSON summary and three CSV links.
   Standalone HTML responses and the `scorecard` field are removed, including for `Accept: text/html`.
   Amended 2026-10-17: the `out_dir` field and `X-Alerts-BI-Out-Dir` header are removed.
-  Both operator API paths share the durable manual-execution gate. Busy submissions return 409;
+  Both operator API paths share the durable manual-execution gate. Busy submissions return 409
+  (since 2026-10-26 only `POST /runs`; a busy job submission is queued);
   validation retains existing 400/422 behavior. Authentication and CSRF failures remain 401/403.
 
 ## Execution, recovery and compatibility
@@ -56,7 +62,9 @@ recovery. The execution connection owns that lock across LLM-journal and persist
 An active-slot constraint also prevents more than one pending/running job. The idle worker
 checks that slot without taking execution locks, then rechecks/claims under the locks.
 Submission deliberately refuses active manual/CLI/report/weekly operations with 409; it
-does not create a queue behind them. Removing admission locks would violate this contract. The process-local
+does not create a queue behind them. (Amended 2026-10-26: it now accepts the job as `queued`
+behind them, holding no slot; admission still takes the execution lock when it is free, and
+otherwise inserts under the team's queue lock.) Removing admission locks would violate this contract. The process-local
 gate remains a compatibility guard. The existing alerts-bi-weekly SQL session lock on its
 own connection protects the entire worker lifecycle from manual CLI runs, standalone reports,
 weekly scheduling and permanent deletion of the job's own run. Admission also refuses a busy scheduler lock.

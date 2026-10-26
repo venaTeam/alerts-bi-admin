@@ -84,6 +84,12 @@ While a backfill has queued, pending or running weeks, a manual submission that 
 execution lock busy is accepted as `queued` and runs before the next backfill week. The JSON
 status reports `queued` until the worker claims it.
 
+**Amended 2026-10-26** (design "New runs queue while another run is in progress"): a manual
+submission that finds the slot or execution lock busy is queued whether or not a backfill is in
+progress, so the 409 while busy no longer applies. A manual submission for a week the team
+already has queued, pending or running is refused, as for backfill admission, and a queued
+manual job can be removed with `POST /run-jobs/{job_id}/cancel`.
+
 When a weekly invocation finds the shared lock or slot busy while a backfill is in progress, it
 holds the SQL session lock `alerts-bi-backfill-yield` and polls every 30 seconds for up to three
 hours. While that lock is held the worker claims no further backfill weeks, so the weekly run
@@ -117,7 +123,7 @@ weeks have no completed run and when the oldest leaves retention.
 | `POST /backfills/{backfill_id}/cancel` | Cancel all queued weeks |
 | `POST /backfills/{backfill_id}/retry` | Retry every failed week |
 | `POST /backfills/{backfill_id}/dismiss` | Hide a finished backfill |
-| `POST /run-jobs/{job_id}/cancel` | Remove one queued week |
+| `POST /run-jobs/{job_id}/cancel` | Remove one queued week, or (since 2026-10-26) one queued manual run |
 | `POST /run-jobs/{job_id}/retry` | Retry one failed backfill week |
 
 None requires an identity since 2026-10-19 (design "Admin console without login"); POSTs require
@@ -132,8 +138,9 @@ a queue index, and replaces the run job state check so `queued` and `cancelled` 
 slot. Applied revisions 001–013 are unchanged. Deployment applies 014 through the existing
 migration init container before the UI and worker start; UI and worker must run the same image.
 Before rolling back to an image without migration 014, stop new submissions and leave no queued
-job of any kind: a New run accepted during a backfill is queued outside that backfill, so
-cancelling backfills does not remove it. Cancel or finish active backfills, let the current
+job of any kind: a New run accepted while another run was in progress (during a backfill or,
+since 2026-10-26, at any time) is queued outside any backfill, so cancelling backfills does not
+remove it. Cancel or finish active backfills, remove or let the current
 worker run the remaining queued manual jobs, or terminalize them with the worker runbook's
 procedure. An older worker ignores queued rows and leaves them queued indefinitely. The additive
 schema can remain installed.

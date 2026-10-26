@@ -711,7 +711,7 @@
             "description": "Same-site CSRF token required"
           },
           "409": {
-            "description": "Another operation is active or the key has different options"
+            "description": "The team's week is already queued or running, the run is published, or the key has different options"
           },
           "422": {
             "description": "Validation Error",

@@ -1,5 +1,47 @@
 # Alerts BI — Design Document
 
+## New runs queue while another run is in progress — accepted 2026-10-26
+
+Runs execute one at a time across all teams. Until now a New run submitted while another run
+was in progress was refused with 409 unless a backfill was running, so an operator had to wait
+for an unrelated team's run to finish and submit again. On 2026-10-26 the product owner asked
+that such a run wait its turn instead, and approved these rules:
+
+* **A busy submission is queued.** A manual job submission (the New runs dialog with one week,
+  or `POST /run-jobs`) that finds the active slot taken or the shared execution lock held is
+  accepted as `queued` and holds no slot, whether or not a backfill is in progress, and whatever
+  holds the lock: a job, a CLI run or report, the weekly schedule or a deletion. The worker
+  claims queued manual jobs in submission order after a pending job and before backfill weeks,
+  as [the backfill contract](backfill.md) already defines. This supersedes the refusal of busy
+  submissions in [async-runs.md](async-runs.md), backfill.md and the redesign's "busy refusal"
+  for one selected week.
+* **One active job per team and week.** A manual submission for a week the team already has
+  queued, pending or running is refused with 409 ("Already queued or running for this team"),
+  busy or not, as backfill admission already does. A second job would run the week again and
+  replace the first result under the same deterministic run ID. Retrying with the same
+  submission key still returns the same job. The week can be submitted again once its job
+  completes, fails or is removed.
+* **A queued run can be removed.** `POST /run-jobs/{job_id}/cancel` also removes a queued
+  manual job, which becomes `cancelled` ("Cancelled before it started."). A job the worker has
+  claimed runs to completion and the console says so. The team page offers Remove on a queued
+  run's panel and in Run submissions. Nothing about who removed it is recorded.
+* **The weekly retry is unchanged.** A weekly invocation that finds the lock or slot busy without
+  an active backfill still refuses at once and the next daily invocation retries; queued manual
+  jobs do not start the backfill wait.
+
+Synchronous `POST /runs`, CLI runs and reports, and acceptance verification still refuse while
+busy (409 or a busy message), because each waits for its own result. The claim order, execution
+locks, active-slot constraint, deletion rules, migrations (no new revision), CSV outputs, portal
+views and shared/operations libraries are unchanged. The queued status text says the run starts
+when the runs ahead of it finish, instead of referring to multi-week runs.
+`contracts/console-openapi.json` records the new 409 description of `POST /run-jobs` and
+`console-http.json` the queueing rule.
+
+Rollback: an earlier image with migration 014 still runs queued manual jobs, but cannot remove
+them and refuses busy submissions again. Rolling back past 014 keeps the existing rule: leave no
+queued job of any kind ([the worker runbook](manual-worker-runbook.md)). No deployment is
+authorized by this amendment.
+
 ## Team operators on the team page — accepted 2026-10-21
 
 On 2026-10-21 the product owner asked that the team page in both the admin console and the
@@ -311,7 +353,8 @@ scoring, prompt text, CSV outputs, portal views and the shared/operations librar
   queued or running, expired and incomplete weeks are not listed, so the console runs a
   published week again only after it is withdrawn. Live, fake or off applies to every week,
   live by default. One selected week is submitted exactly as the former New run: a manual job
-  with the same submission key, busy refusal and queuing during a backfill. Two to twelve weeks
+  with the same submission key, busy refusal and queuing during a backfill (since 2026-10-26 a
+  busy submission is always queued; see "New runs queue while another run is in progress"). Two to twelve weeks
   are submitted exactly as the former backfill: one team, one active backfill, oldest first,
   completed unpublished. `POST /teams/{team_id}/trigger` accepts repeated `week` dates (or the
   former `run_at`) and dispatches on their count; `POST /teams/{team_id}/backfill` remains for
@@ -1291,7 +1334,7 @@ This is a convenience wrapper, not the deferred frontend of section 7.4. It exis
 * It performs no analysis of its own. Every endpoint loads the registry, calls the same `execute_run` and `persist_run` the command line calls, or renders a stored run from committed SQL rows. There is no second code path that could drift from the CLI.
 * A run still names one team and never defaults to all of them; an absent team is an error rather than a fan-out.
 * `run_at` is still captured once per run, and the four approved output files are still written exactly as the CLI writes them. Reports are still rendered only from committed SQL.
-* Runs are serialized. Two concurrent requests for one team and clock derive the same deterministic `run_id` and would race to replace each other's rows, so a second concurrent run is refused with `409` rather than queued.
+* Runs are serialized. Two concurrent requests for one team and clock derive the same deterministic `run_id` and would race to replace each other's rows, so a second concurrent run is refused with `409` rather than queued. (Amended 2026-10-26: this still holds for synchronous `POST /runs`; a busy job submission through the console or `POST /run-jobs` is queued, and a second job for a team's queued or running week is refused. See "New runs queue while another run is in progress".)
 
 It is built on FastAPI over uvicorn (2026-08-30), as the `alerts_bi.api` package: an application factory, routers grouped by purpose, one service module holding everything that touches the pipeline, the Pydantic wire contract, and the two pages it renders itself. Its settings are configuration and live with the rest of it, in `alerts_bi.config.api`; the lock that serializes runs is runtime state and lives with the code that runs them. The request and response shapes are declared as Pydantic models, so validation happens before a handler runs and the OpenAPI document at `/openapi.json` is generated from the code rather than maintained beside it. The run endpoint is a synchronous `def`, so its minutes of blocking Elasticsearch and SQL work are dispatched to the thread pool instead of stalling the event loop. When the interactive frontend of section 7.4 is designed, this is the seam it grows from.
 
@@ -1421,7 +1464,8 @@ writing, including with model assessment disabled. Standalone CLI `report` holds
 lock before run-id/team lookup through the final file write, preventing reports from
 reappearing after deletion succeeds. The lock uses its own connection, so
 data-connection commits and model-audit lock release cannot end this protection early.
-Contending HTTP runs/deletion return 409; the CLI fails with a busy message. Both success
+Contending HTTP runs/deletion return 409 (since 2026-10-26 a contending job submission is
+queued instead); the CLI fails with a busy message. Both success
 and failure release the lock. Roll out updated manual CLI clients alongside the app;
 an older CLI that does not take the shared lock cannot coordinate with deletion.
 

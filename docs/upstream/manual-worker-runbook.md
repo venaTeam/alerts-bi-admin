@@ -81,7 +81,8 @@ any kind; an older worker ignores queued rows and leaves them queued indefinitel
 submissions by taking the `alerts-bi-admin` Route out of service while the current pod and its
 run-worker keep running. Cancel or finish active backfills from the team workspace, then let
 the current worker complete every remaining queued job, including New runs that were queued
-behind a backfill week (they do not belong to the backfill, so its Cancel does not remove them).
+behind another run (they do not belong to a backfill, so a backfill's Cancel does not remove
+them; since 2026-10-26 each has its own Remove on the team page).
 If draining is impossible, stop all writers, pass the locked-session checks above, and fail the
 remaining queued rows with a status older versions recognize:
 

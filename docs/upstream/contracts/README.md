@@ -82,3 +82,10 @@ modifying 001–019. It recreates `portal_reviews` with two trailing columns, `v
 registry entry; sql-views.json records them. Earlier columns, other views, CSV outputs, console
 routes and shared/operations interfaces are unchanged. Deploy admin before the portal: the
 portal's readiness probe requires both columns.
+
+The 2026-10-26 queue amendment (design "New runs queue while another run is in progress")
+queues a busy `POST /run-jobs` or one-week console submission instead of refusing it, refuses
+a second job for a week the team already has queued, pending or running, and lets
+`POST /run-jobs/{job_id}/cancel` remove a queued manual job. console-http.json records the rule
+and console-openapi.json the new 409 description of `POST /run-jobs`. Routes, job states,
+migrations, views, CSV outputs and shared/operations interfaces are unchanged.
