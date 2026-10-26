@@ -4,8 +4,9 @@
 
 A New run submitted while any run is in progress is accepted as queued instead of refused, and
 the worker runs it when the runs ahead of it finish, before the next backfill week. A second
-submission for a week the team already has queued, pending or running is refused. A queued run
-can be removed from the team page until it starts. Synchronous `POST /runs`, CLI runs, reports
+submission for a week the team already has queued, pending or running is refused, and a new
+submission waits behind runs already queued. A queued run can be removed from the team page
+until it starts; one whose week was published while it waited is marked failed without running. Synchronous `POST /runs`, CLI runs, reports
 and the weekly retry are unchanged. See design section "New runs queue while another run is in
 progress".
 

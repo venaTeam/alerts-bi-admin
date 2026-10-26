@@ -99,7 +99,7 @@
       "status_url",
       "result_url"
     ],
-    "concurrency": "One active job; SQL session lock and active slot constraint; since 2026-10-26 a busy submission is accepted as queued whether or not a backfill is in progress (queued and cancelled jobs hold no slot); a submission for a week the team already has queued, pending or running returns 409; POST /run-jobs/{job_id}/cancel removes a queued manual job"
+    "concurrency": "One active job; SQL session lock and active slot constraint; since 2026-10-26 a busy submission is accepted as queued whether or not a backfill is in progress (queued and cancelled jobs hold no slot); a submission also queues while an older manual job is queued; a submission for a week the team already has queued, pending or running returns 409; a claimed job whose run is published fails without running; POST /run-jobs/{job_id}/cancel removes a queued manual job"
   },
   "exports": [
     "daily_metrics.csv",

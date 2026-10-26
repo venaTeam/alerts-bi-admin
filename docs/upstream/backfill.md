@@ -88,7 +88,9 @@ status reports `queued` until the worker claims it.
 submission that finds the slot or execution lock busy is queued whether or not a backfill is in
 progress, so the 409 while busy no longer applies. A manual submission for a week the team
 already has queued, pending or running is refused, as for backfill admission, and a queued
-manual job can be removed with `POST /run-jobs/{job_id}/cancel`.
+manual job can be removed with `POST /run-jobs/{job_id}/cancel`. A submission also queues
+while an older manual job is queued, so it cannot start first. A claimed job, manual or
+backfill week, whose run was published while it waited is marked failed without running.
 
 When a weekly invocation finds the shared lock or slot busy while a backfill is in progress, it
 holds the SQL session lock `alerts-bi-backfill-yield` and polls every 30 seconds for up to three

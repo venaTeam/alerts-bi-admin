@@ -12,9 +12,17 @@ that such a run wait its turn instead, and approved these rules:
   accepted as `queued` and holds no slot, whether or not a backfill is in progress, and whatever
   holds the lock: a job, a CLI run or report, the weekly schedule or a deletion. The worker
   claims queued manual jobs in submission order after a pending job and before backfill weeks,
-  as [the backfill contract](backfill.md) already defines. This supersedes the refusal of busy
+  as [the backfill contract](backfill.md) already defines. A submission that finds the slot and
+  lock free still queues while an older manual job is queued, so a run submitted between the
+  worker's polls cannot start before it. This supersedes the refusal of busy
   submissions in [async-runs.md](async-runs.md), backfill.md and the redesign's "busy refusal"
   for one selected week.
+* **A week published while its job waited is not run.** The weekly schedule can store and
+  publish the same run (same team, week, registry and model) while a job for it is queued. When
+  the worker claims a job, manual or backfill week, whose run is published, it marks the job
+  failed ("Not run: this week was published while the run waited. Withdraw it to run it
+  again.") without reading Elasticsearch, instead of reading the whole week and then being
+  refused by persistence while every other team waits.
 * **One active job per team and week.** A manual submission for a week the team already has
   queued, pending or running is refused with 409 ("Already queued or running for this team"),
   busy or not, as backfill admission already does. A second job would run the week again and

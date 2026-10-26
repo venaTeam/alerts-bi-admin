@@ -3,12 +3,14 @@
 ## New runs queue while another run is in progress — accepted 2026-10-26
 
 Admin `jobs.submit_job` accepts a busy submission as `queued` whether or not a backfill is in
-progress; `_admit` refuses, under the team's queue lock, a week the team already has queued,
-pending or running. `jobs.cancel_queued_job` cancels a still-queued manual job, and
+progress, and also while an older manual job is queued; `_admit` refuses, under the team's
+queue lock, a week the team already has queued, pending or running. `_run_job` fails a claimed
+job whose run is published (`PUBLISHED_WHILE_WAITING`) before any Elasticsearch read. `jobs.cancel_queued_job` cancels a still-queued manual job, and
 `POST /run-jobs/{job_id}/cancel` dispatches to it for jobs outside a backfill. The team page
 offers Remove on queued runs. No migration, library or portal change. Verify queueing behind a
-job and behind a lock without a job, the duplicate-week refusal, submission-order execution, and
-removal of a queued but not a started run, in tests and in the browser.
+job, behind a lock without a job and behind an unclaimed queued job, the duplicate-week refusal
+(including a week a backfill queued), submission-order execution, skipping a week published
+while queued, and removal of a queued but not a started run, in tests and in the browser.
 
 ## Decisions page needs-a-decision view — accepted 2026-10-20
 
