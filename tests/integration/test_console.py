@@ -261,7 +261,7 @@ def test_empty_team_and_failed_run_remain_navigable(client: TestClient) -> None:
     assert f'action="/runs/{failed_id}/publish"' not in failed.text
 
 
-def test_form_and_json_trigger_share_gate(client: TestClient) -> None:
+def test_form_queues_and_sync_run_refuses_under_the_gate(client: TestClient) -> None:
     from src.engine.api.jobs import execution_lock
 
     with connect(CONFIG.sql, DB) as db, execution_lock(db):

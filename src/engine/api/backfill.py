@@ -42,6 +42,7 @@ __all__ = [
     "get_backfill",
     "latest_backfill",
     "parse_weeks",
+    "published_weeks",
     "retry_backfill",
     "selectable_weeks",
     "submit_backfill",
@@ -170,6 +171,9 @@ def _active_backfill(db: Database, team_id: str, other_than: str | None = None) 
 
 
 def published_weeks(db: Database, team_id: str, weeks: Sequence[datetime]) -> list[datetime]:
+    """The window ends among ``weeks`` that have a current publication for the team."""
+    if not weeks:
+        return []
     placeholders, params = _in_list(weeks)
     rows = db.query(
         "SELECT DISTINCT window_end FROM review_publications WHERE team_id=:team "
@@ -412,7 +416,10 @@ def retry_backfill(
     *,
     now: datetime | None = None,
 ) -> tuple[dict[str, Any], int]:
-    """Queue a new attempt for each failed week (or one), refusing the whole request."""
+    """Queue a new attempt for each failed week not published now (or for one week).
+
+    Otherwise the whole request is refused and nothing is stored.
+    """
     with connect(settings.config.sql, settings.target_database) as db:
         backfill = get_backfill(db, backfill_id)
         team_id = str(backfill["team_id"])
@@ -489,8 +496,8 @@ def dismiss_backfill(db: Database, backfill_id: str) -> dict[str, Any]:
 
 
 def job_backfill(db: Database, job_id: str) -> str:
-    """The backfill a job belongs to, refusing manual submissions."""
+    """The backfill a job belongs to, refusing to retry a manual submission."""
     job = get_job(db, job_id)
     if not job.get("backfill_id"):
-        raise HTTPException(409, "Only backfill weeks can be removed or retried here.")
+        raise HTTPException(409, "Only backfill weeks can be retried here.")
     return str(job["backfill_id"])

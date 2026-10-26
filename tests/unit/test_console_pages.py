@@ -365,6 +365,29 @@ def test_new_runs_with_one_week_submits_a_manual_job(
     assert run_at.replace(tzinfo=None) == datetime(2026, 10, 12)
 
 
+@pytest.mark.parametrize(
+    ("status", "flash"),
+    [
+        ("pending", "done=Run+accepted."),
+        ("queued", "done=Run+queued."),
+        ("completed", "done=This+form+was+already+submitted%2C+and+that+run+has+finished."),
+        ("failed", "done=This+form+was+already+submitted%2C+and+that+run+failed."),
+        ("cancelled", "that+run+was+removed+from+the+queue."),
+    ],
+)
+def test_a_resubmitted_form_says_what_became_of_its_run(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, status: str, flash: str
+) -> None:
+    # The same submission key returns the job the form created earlier, in whatever state.
+    monkeypatch.setattr(console, "submit_job", lambda *_: {"job_id": "a" * 32, "status": status})
+    response = client.post(
+        "/teams/checkout-api/trigger",
+        data=form(week="2026-10-12", llm="fake", weeks_form="1", submission_key="k1"),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303 and flash in response.headers["location"]
+
+
 def test_new_runs_with_several_weeks_submits_a_backfill(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

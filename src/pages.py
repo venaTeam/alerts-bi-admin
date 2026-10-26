@@ -694,7 +694,8 @@ def _backfill_row(
             else "Waiting for the worker"
         )
     elif status == "queued":
-        detail = "Next to run" if next_up else "Waits for the week above"
+        # Queued single runs of any team go first, so "next" is only within this backfill.
+        detail = "Next of these weeks" if next_up else "Waits for the week above"
         action = _post_button(f"/run-jobs/{job}/cancel", token, "Remove", "abi-btn small")
     elif status == "failed":
         detail = str(week.get("error_summary") or "Analysis failed.")

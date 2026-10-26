@@ -2,14 +2,15 @@
 
 The session lock lives on the execution connection, surviving journal/persistence commits.
 A new worker can recover running jobs only after the previous session released its lock.
-Queued jobs (backfill weeks, and manual runs accepted while another run is in progress) hold
-no slot; the worker claims them one at a time after pending work (docs/backfill.md).
+Queued jobs (backfill weeks, and manual runs accepted while another run is in progress or an
+older manual run is queued) hold no slot; the worker claims them one at a time after pending
+work (docs/backfill.md).
 """
 
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from typing import Any
@@ -36,6 +37,7 @@ from .service import close_client, execute_request, latest_week_end, select_clie
 
 LOCK_RESOURCE = "alerts-bi-manual-run"
 ACTIVE_STATES = ("queued", "pending", "running")
+_ACTIVE_SQL = "(" + ", ".join(f"'{state}'" for state in ACTIVE_STATES) + ")"
 QUEUE_LOCK_PREFIX = "alerts-bi-queue:"
 PUBLISHED_WHILE_WAITING = (
     "Not run: this week was published while the run waited. Withdraw it to run it again."
@@ -102,7 +104,8 @@ def lock_team_queue(db: Database, team_id: str, timeout_ms: int = 10000) -> bool
     """Hold the team's queue lock until the current transaction ends.
 
     Every run job insert and run deletion takes it, so a deletion cannot remove a queued
-    week or run accepted after its own checks (backfill admission bypasses the execution lock).
+    week or run accepted after its own checks (backfill admission, and manual admission while
+    the execution lock is busy, bypass the execution lock).
     """
     row = db.query_one(
         "SET NOCOUNT ON; DECLARE @result INT; "
@@ -196,15 +199,19 @@ def _admit(
     ):
         raise HTTPException(409, "This run is published. Withdraw it before running it again.")
     # A second job for the same week would run it again and replace the first result.
-    if db.query_one(
-        "SELECT TOP 1 job_id FROM run_jobs WHERE team_id=:team AND run_at=:at "
-        "AND status IN ('queued', 'pending', 'running')",
+    active = db.query_one(
+        "SELECT TOP 1 status FROM run_jobs WHERE team_id=:team AND run_at=:at "
+        f"AND status IN {_ACTIVE_SQL}",
         {"team": body.team, "at": run_at.replace(tzinfo=None)},
-    ):
+    )
+    if active:
         week = format_week(window.window_start, window.run_at)
-        raise HTTPException(
-            409, f"Already queued or running for this team: {week}. Wait for it to finish."
+        advice = (
+            "Wait for it to finish, or remove it from the queue."
+            if active["status"] == "queued"
+            else "Wait for it to finish."
         )
+        raise HTTPException(409, f"Already queued or running for this team: {week}. {advice}")
     job_id = uuid4().hex
     db.execute(
         "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,request_hash,team_id,"
@@ -233,7 +240,7 @@ def _admit(
         week=f"{run_at:%Y-%m-%d}",
         placement="next for the worker"
         if status == "pending"
-        else "queued behind the run in progress",
+        else "queued behind the runs ahead of it, before any remaining backfill weeks",
         llm=body.llm,
         status=status,
         job_id=job_id,
@@ -262,11 +269,7 @@ def submit_job(settings: ApiSettings, body: RunRequest, idempotency_key: str) ->
                     return existing
                 # Wait behind the active job and behind manual runs already queued, so a
                 # submission between the worker's polls cannot start before an older one.
-                waiting = db.query_one(
-                    "SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1 "
-                    "OR (status='queued' AND backfill_id IS NULL)"
-                )
-                status = "queued" if waiting else "pending"
+                status = "queued" if _active_or_queued_manual(db) else "pending"
                 return _admit(settings, db, body, idempotency_key, key_hash, request_hash, status)
         except ExecutionBusy:
             db.rollback()
@@ -293,15 +296,14 @@ def submit_job(settings: ApiSettings, body: RunRequest, idempotency_key: str) ->
             raise
 
 
-def cancel_queued_job(db: Database, job_id: str) -> tuple[dict[str, Any], bool]:
+def cancel_queued_job(db: Database, job: Mapping[str, Any]) -> bool:
     """Remove one queued manual run; a run the worker already claimed runs to completion."""
-    job = get_job(db, job_id)
     # The worker claims only a still-queued row, so this update and a claim cannot both win.
     cancelled = db.query(
         "UPDATE run_jobs SET status='cancelled',completed_at=:now,error_summary=:message "
         "OUTPUT inserted.job_id WHERE job_id=:id AND status='queued' AND backfill_id IS NULL",
         {
-            "id": job_id,
+            "id": job["job_id"],
             "now": datetime.now(UTC).replace(tzinfo=None),
             "message": "Cancelled before it started.",
         },
@@ -312,11 +314,11 @@ def cancel_queued_job(db: Database, job_id: str) -> tuple[dict[str, Any], bool]:
             "run.job_cancelled",
             "Removed the queued manual run for the week ending {week}",
             week=f"{job['run_at']:%Y-%m-%d}",
-            job_id=job_id,
+            job_id=job["job_id"],
             team_id=job["team_id"],
             run_id=job["run_id"],
         )
-    return job, bool(cancelled)
+    return bool(cancelled)
 
 
 def finish_job(db: Database, job_id: str, state: str, error: str | None = None) -> None:
@@ -353,11 +355,19 @@ def _may_claim_backfill(db: Database) -> bool:
     return row is not None and int(row["free"]) == 1
 
 
+def _active_or_queued_manual(db: Database) -> bool:
+    """Does a job hold the active slot, or a manual run wait in the queue?"""
+    return (
+        db.query_one(
+            "SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1 "
+            "OR (status='queued' AND backfill_id IS NULL)"
+        )
+        is not None
+    )
+
+
 def _has_work(db: Database) -> bool:
-    if db.query_one(
-        "SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1 "
-        "OR (status='queued' AND backfill_id IS NULL)"
-    ):
+    if _active_or_queued_manual(db):
         return True
     queued = db.query_one(
         "SELECT TOP 1 job_id FROM run_jobs WHERE status='queued' AND backfill_id IS NOT NULL"

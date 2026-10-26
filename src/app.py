@@ -381,9 +381,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 if week["status"] == "failed"
             ]
             # Retry refuses a published week, so the panel offers retry by the same rule.
-            published_failed = (
-                set(published_weeks(db, team_id, failed_weeks)) if failed_weeks else set()
-            )
+            published_failed = set(published_weeks(db, team_id, failed_weeks))
             calendar = queries.backfill_calendar(db, team_id, selectable_weeks(now)[0])
             selected_job: dict[str, Any] | None = None
             if job_id:
@@ -707,12 +705,15 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             run_id=job.get("run_id"),
             job_id=job["job_id"],
         )
-        return back(
-            pages.team_url(team_id, job_id=job["job_id"]),
-            "Run queued. It starts when the runs ahead of it finish. You can leave this page."
-            if job["status"] == "queued"
-            else "Run accepted. You can leave this page and return later.",
-        )
+        # A resubmitted form (the browser's Back button) returns the job it created earlier.
+        message = {
+            "queued": "Run queued. It starts when the runs ahead of it finish. "
+            "You can leave this page.",
+            "completed": "This form was already submitted, and that run has finished.",
+            "failed": "This form was already submitted, and that run failed.",
+            "cancelled": "This form was already submitted, and that run was removed from the queue.",
+        }.get(str(job["status"]), "Run accepted. You can leave this page and return later.")
+        return back(pages.team_url(team_id, job_id=job["job_id"]), message)
 
     def job_status(row: dict[str, Any]) -> dict[str, Any]:
         result = {
@@ -746,8 +747,8 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             400: {"description": "Invalid ASCII submission key or unknown team"},
             403: {"description": "Same-site CSRF token required"},
             409: {
-                "description": "The team's week is already queued or running, the run is "
-                "published, or the key has different options"
+                "description": "The team's week is already queued, pending or running, the run "
+                "is published, the team's queue is busy, or the key has different options"
             },
         },
         openapi_extra={
@@ -945,12 +946,13 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
             def cancel() -> bool:
                 with database() as db:
-                    return cancel_queued_job(db, job_id)[1]
+                    return cancel_queued_job(db, job)
 
             if not await run_in_threadpool(cancel):
                 return back(
                     path,
-                    "Only a queued run can be removed. This one has started or was already removed.",
+                    "Only a queued run can be removed. This one is already with the worker and "
+                    "runs to completion, or was already removed.",
                     True,
                 )
             return back(path, "Run removed from the queue.")

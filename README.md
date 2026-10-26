@@ -176,13 +176,14 @@ as a single manual run. Only completed weeks inside the 84-day Elasticsearch ret
 listed, and published weeks are locked. Migration 014
 adds the backfill table and the `queued`/`cancelled` job states; queued weeks hold no slot,
 so other writers are only refused while a week actually runs. Since 2026-10-26 a single run
-submitted while another run, report, weekly run or deletion is in progress is queued rather
-than refused, and Remove takes it out of the queue until it starts; a second submission for a
-week the team already has queued or running is refused with 409. The same worker claims queued
-manual runs in submission order before the next backfill week, and a run whose week is
-published while it waits is marked failed without reading Elasticsearch. A weekly invocation that finds a backfill week
-running waits up to three hours, keeping the worker off further weeks until it has run.
-Cancel removes only queued weeks; a failed week can be retried. See docs/upstream/backfill.md.
+submitted while another run, report, weekly run or deletion is in progress, or while an older
+single run is queued, is queued rather than refused, and Remove takes it out of the queue until
+it starts; a second submission for a week the team already has queued, pending or running is
+refused with 409. The same worker claims queued manual runs in submission order before the
+next backfill week, and a run whose week is published while it waits is marked failed without
+reading Elasticsearch. A weekly invocation that finds a backfill week running waits up to
+three hours, keeping the worker off further weeks until it has run. Cancel removes only queued
+weeks; a failed week can be retried while it is not published. See docs/upstream/backfill.md.
 
 Explicit `report`, `run --out`, `weekly --out` and acceptance output directories contain
 three CSV exports. Standalone HTML

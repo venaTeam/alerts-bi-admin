@@ -1,9 +1,11 @@
-"""Operator backfill admission, queue order and console flow on real SQL Server (docs/backfill.md)."""
+"""The run job queue on real SQL Server: backfill admission, single runs queued while another
+runs, queue order, removal, published weeks and the console flow (docs/backfill.md and design
+"New runs queue while another run is in progress")."""
 
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
@@ -13,7 +15,9 @@ from typing import Any
 
 import pytest
 from alerts_bi_operations.review.publication import publish_run
+from alerts_bi_shared import logging_setup
 from alerts_bi_shared.db.connection import Database, connect
+from alerts_bi_shared.logging_setup import configure_logging
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from src.app import build_admin
@@ -105,6 +109,16 @@ def executed(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, datetime]]:
 
     monkeypatch.setattr(jobs, "execute_request", fake)
     return calls
+
+
+@pytest.fixture
+def worker_log(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> Callable[[], str]:
+    """The console log records written since the last call (design "Console log format")."""
+    monkeypatch.setattr(logging_setup, "_settings", None)
+    configure_logging("worker", level="info", fmt="console", color=False, capture_libraries=False)
+    return lambda: "".join(capsys.readouterr())
 
 
 def queued_weeks(api: ApiSettings, backfill_id: str) -> list[dict[str, Any]]:
@@ -241,9 +255,12 @@ def test_manual_submission_without_backfill_queues_while_busy(
             jobs.submit_job(api, request, key)
         assert duplicate.value.status_code == 409
         assert "Already queued or running for this team" in duplicate.value.detail
+        # The pending job cannot be removed, so the advice is only to wait.
+        assert duplicate.value.detail.endswith("Wait for it to finish.")
     with pytest.raises(HTTPException) as queued_duplicate:
         jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "six")
     assert queued_duplicate.value.status_code == 409
+    assert queued_duplicate.value.detail.endswith("or remove it from the queue.")
     while jobs.work_once(api):
         pass
     assert executed == [
@@ -293,7 +310,7 @@ def test_a_submission_waits_behind_runs_already_queued(
 
 
 def test_a_week_published_while_queued_is_skipped_without_reading_alerts(
-    api: ApiSettings, executed: list[tuple[str, datetime]]
+    api: ApiSettings, executed: list[tuple[str, datetime]], worker_log: Callable[[], str]
 ) -> None:
     with runner.schedule_lock(CONFIG, DB):
         job = jobs.submit_job(
@@ -321,6 +338,35 @@ def test_a_week_published_while_queued_is_skipped_without_reading_alerts(
         assert db.query_one("SELECT job_id FROM run_jobs WHERE active_slot=1") is None
     assert skipped["status"] == "failed" and skipped["active_slot"] is None
     assert skipped["error_summary"] == jobs.PUBLISHED_WHILE_WAITING
+    log = worker_log()
+    assert "run.job_skipped" in log and "run.job_started" not in log
+
+
+def test_retrying_a_backfill_whose_only_failed_week_is_published_is_refused(
+    api: ApiSettings,
+) -> None:
+    row = backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "only", now=NOW)
+    (week,) = queued_weeks(api, row["backfill_id"])
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=str(week["run_id"]),
+                    run_at=datetime(2026, 8, 17),
+                    window_start=datetime(2026, 8, 10),
+                    window_end=datetime(2026, 8, 17),
+                )
+            ),
+        )
+        publish_run(db, str(week["run_id"]), allow_gap=True)
+    assert jobs.work_once(api) is True
+    with pytest.raises(HTTPException) as refused:
+        backfill.retry_backfill(api, row["backfill_id"], now=NOW)
+    assert refused.value.status_code == 409
+    assert refused.value.detail == (
+        "Every failed week is published now. Withdraw a week to run it again."
+    )
 
 
 def test_retrying_failed_weeks_leaves_out_a_week_published_while_queued(
@@ -405,7 +451,10 @@ def test_manual_submission_is_refused_for_a_week_a_backfill_queued(api: ApiSetti
 
 
 def test_console_removes_a_queued_run_but_not_one_that_started(
-    client: TestClient, api: ApiSettings, executed: list[tuple[str, datetime]]
+    client: TestClient,
+    api: ApiSettings,
+    executed: list[tuple[str, datetime]],
+    worker_log: Callable[[], str],
 ) -> None:
     first = jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "a")
     queued = jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "b")
@@ -424,9 +473,12 @@ def test_console_removes_a_queued_run_but_not_one_that_started(
         cancelled = jobs.get_job(db, queued["job_id"])
         assert cancelled["status"] == "cancelled" and cancelled["active_slot"] is None
         assert jobs.get_job(db, first["job_id"])["status"] == "pending"
+    assert "run.job_cancelled" in worker_log()
     while jobs.work_once(api):
         pass
     assert executed == [(TEAM, datetime(2026, 8, 24))]
+    finished = post(client, f"/run-jobs/{first['job_id']}/cancel")
+    assert "error=Only+a+queued+run+can+be+removed" in finished.headers["location"]
     # A cancelled week no longer counts as queued, so it can be submitted again.
     resubmitted = jobs.submit_job(
         api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="fake"), "c"
