@@ -169,16 +169,22 @@ def _active_backfill(db: Database, team_id: str, other_than: str | None = None) 
     return str(row["backfill_id"]) if row else None
 
 
-def _refuse_locked_weeks(db: Database, team_id: str, weeks: Sequence[datetime]) -> None:
+def _published_weeks(db: Database, team_id: str, weeks: Sequence[datetime]) -> list[datetime]:
     placeholders, params = _in_list(weeks)
-    published = db.query(
+    rows = db.query(
         "SELECT DISTINCT window_end FROM review_publications WHERE team_id=:team "
         f"AND withdrawn_at IS NULL AND window_end IN ({placeholders}) ORDER BY window_end",
         {"team": team_id, **params},
     )
+    return [_utc(row["window_end"]) for row in rows]
+
+
+def _refuse_locked_weeks(db: Database, team_id: str, weeks: Sequence[datetime]) -> None:
+    published = _published_weeks(db, team_id, weeks)
     if published:
-        names = ", ".join(label(_utc(row["window_end"])) for row in published)
+        names = ", ".join(label(end) for end in published)
         raise HTTPException(409, f"Published weeks are locked: {names}. Withdraw them first.")
+    placeholders, params = _in_list(weeks)
     active = db.query(
         "SELECT DISTINCT run_at FROM run_jobs WHERE team_id=:team "
         f"AND status IN {_ACTIVE_SQL} AND run_at IN ({placeholders}) ORDER BY run_at",
@@ -415,6 +421,15 @@ def retry_backfill(
         ]
         if job_id is not None:
             failed = [row for row in failed if row["job_id"] == job_id]
+        elif failed:
+            # Retrying every failed week leaves out weeks published since they failed (the
+            # worker skips a week published while it waits), instead of refusing them all.
+            published = set(_published_weeks(db, team_id, [_utc(row["run_at"]) for row in failed]))
+            failed = [row for row in failed if _utc(row["run_at"]) not in published]
+            if not failed:
+                raise HTTPException(
+                    409, "Every failed week is published now. Withdraw a week to run it again."
+                )
         if not failed:
             raise HTTPException(409, "Only the latest failed attempt of a week can be retried.")
         weeks = [_utc(row["run_at"]) for row in failed]

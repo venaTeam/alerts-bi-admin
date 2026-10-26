@@ -323,6 +323,70 @@ def test_a_week_published_while_queued_is_skipped_without_reading_alerts(
     assert skipped["error_summary"] == jobs.PUBLISHED_WHILE_WAITING
 
 
+def test_retrying_failed_weeks_leaves_out_a_week_published_while_queued(
+    api: ApiSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    row = backfill.submit_backfill(
+        api, TEAM, [at("2026-08-10"), at("2026-08-17")], "fake", "mixed", now=NOW
+    )
+    older, newer = queued_weeks(api, row["backfill_id"])
+    # The weekly schedule publishes the newer week's run before the worker reaches it.
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=str(newer["run_id"]),
+                    run_at=datetime(2026, 8, 17),
+                    window_start=datetime(2026, 8, 10),
+                    window_end=datetime(2026, 8, 17),
+                )
+            ),
+        )
+        publish_run(db, str(newer["run_id"]), allow_gap=True)
+
+    def fail(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("Test failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(jobs, "execute_request", fail)
+        assert jobs.work_once(api) and jobs.work_once(api)
+    failed = {str(job["job_id"]): job for job in queued_weeks(api, row["backfill_id"])}
+    assert failed[str(newer["job_id"])]["error_summary"] == jobs.PUBLISHED_WHILE_WAITING
+    assert failed[str(older["job_id"])]["status"] == "failed"
+    with pytest.raises(HTTPException) as locked:
+        backfill.retry_backfill(api, row["backfill_id"], str(newer["job_id"]), now=NOW)
+    assert locked.value.status_code == 409 and "Published weeks are locked" in locked.value.detail
+    # Retrying every failed week retries the other one instead of refusing both.
+    _, count = backfill.retry_backfill(api, row["backfill_id"], now=NOW)
+    assert count == 1
+    with connect(CONFIG.sql, DB) as db:
+        latest = backfill.week_rows(backfill.backfill_jobs(db, row["backfill_id"]))
+    assert [(week["run_at"], week["status"]) for week in latest] == [
+        (datetime(2026, 8, 10), "queued"),
+        (datetime(2026, 8, 17), "failed"),
+    ]
+
+
+def test_a_retry_with_the_same_key_gets_its_own_job_not_a_duplicate_refusal(
+    api: ApiSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake")
+    first = jobs.submit_job(api, request, "same-key")
+    actual = jobs._existing_submission
+    lookups = 0
+
+    def committed_after_two_lookups(*args: Any) -> dict[str, Any] | None:
+        # The first lookup and the recheck under the lock ran before the first commit.
+        nonlocal lookups
+        lookups += 1
+        return None if lookups <= 2 else actual(*args)
+
+    monkeypatch.setattr(jobs, "_existing_submission", committed_after_two_lookups)
+    again = jobs.submit_job(api, request, "same-key")
+    assert again["job_id"] == first["job_id"] and lookups == 3
+
+
 def test_manual_submission_is_refused_for_a_week_a_backfill_queued(api: ApiSettings) -> None:
     backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "queued-week", now=NOW)
     with pytest.raises(HTTPException) as refused:

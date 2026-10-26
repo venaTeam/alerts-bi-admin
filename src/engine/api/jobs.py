@@ -270,6 +270,16 @@ def submit_job(settings: ApiSettings, body: RunRequest, idempotency_key: str) ->
                 return _admit(settings, db, body, idempotency_key, key_hash, request_hash, status)
         except ExecutionBusy:
             db.rollback()
+        except HTTPException as exc:
+            db.rollback()
+            # The recheck above reads committed rows only, so an identical submission queued
+            # without the lock may commit while this one waits for the team's queue lock and
+            # then count as a duplicate week. A retry with the same key gets that row.
+            if exc.status_code == 409:
+                existing = _existing_submission(db, key_hash, request_hash)
+                if existing:
+                    return existing
+            raise
         # A job, CLI run, report, weekly run or deletion holds the execution lock. Queue this
         # run behind it; a queued row holds no slot, so admission needs no execution lock.
         try:

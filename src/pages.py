@@ -662,6 +662,11 @@ def backfill_signature(weeks: Sequence[Mapping[str, Any]]) -> str:
 _GLYPHS = {"completed": "✓", "failed": "!", "running": "", "queued": "", "cancelled": ""}
 
 
+def _skipped_as_published(job: Mapping[str, Any]) -> bool:
+    """The worker failed it without running because its week was published while it waited."""
+    return job.get("error_summary") == PUBLISHED_WHILE_WAITING
+
+
 def _backfill_row(
     team_id: str, week: Mapping[str, Any], index: int, total: int, token: str, next_up: bool
 ) -> str:
@@ -687,7 +692,8 @@ def _backfill_row(
         action = _post_button(f"/run-jobs/{job}/cancel", token, "Remove", "abi-btn small")
     elif status == "failed":
         detail = str(week.get("error_summary") or "Analysis failed.")
-        action = _post_button(f"/run-jobs/{job}/retry", token, "Retry week", "abi-btn small")
+        if not _skipped_as_published(week):
+            action = _post_button(f"/run-jobs/{job}/retry", token, "Retry week", "abi-btn small")
     else:
         detail = str(week.get("error_summary") or "Cancelled before it started.")
     attempts = int(week.get("attempts", 1))
@@ -732,8 +738,11 @@ def backfill_panel(
             f"Cancel {count['queued']} queued {weeks_label}",
             "abi-btn small",
         )
-    if not active and count["failed"]:
-        retry = "Retry failed week" if count["failed"] == 1 else "Retry failed weeks"
+    retryable = sum(
+        1 for week in weeks if week["status"] == "failed" and not _skipped_as_published(week)
+    )
+    if not active and retryable:
+        retry = "Retry failed week" if retryable == 1 else "Retry failed weeks"
         actions += _post_button(base + "/retry", token, retry, "abi-btn small")
     if not active:
         actions += _post_button(base + "/dismiss", token, "Dismiss", "abi-btn small")
@@ -938,7 +947,7 @@ def job_panel(
     if status == "failed":
         outcome = (
             "The published week is unchanged."
-            if job.get("error_summary") == PUBLISHED_WHILE_WAITING
+            if _skipped_as_published(job)
             else "Nothing was published."
         )
         return (
