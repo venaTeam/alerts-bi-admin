@@ -8,7 +8,7 @@ starts one week as a manual run or several weeks as a backfill.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -668,7 +668,13 @@ def _skipped_as_published(job: Mapping[str, Any]) -> bool:
 
 
 def _backfill_row(
-    team_id: str, week: Mapping[str, Any], index: int, total: int, token: str, next_up: bool
+    team_id: str,
+    week: Mapping[str, Any],
+    index: int,
+    total: int,
+    token: str,
+    next_up: bool,
+    published: bool,
 ) -> str:
     end = _utc(week["run_at"])
     status = str(week["status"])
@@ -692,8 +698,11 @@ def _backfill_row(
         action = _post_button(f"/run-jobs/{job}/cancel", token, "Remove", "abi-btn small")
     elif status == "failed":
         detail = str(week.get("error_summary") or "Analysis failed.")
-        if not _skipped_as_published(week):
+        if not published:
             action = _post_button(f"/run-jobs/{job}/retry", token, "Retry week", "abi-btn small")
+        elif not _skipped_as_published(week):
+            # Retry refuses a published week; the skip message already says what to do.
+            detail += " · Published since. Withdraw it to run it again."
     else:
         detail = str(week.get("error_summary") or "Cancelled before it started.")
     attempts = int(week.get("attempts", 1))
@@ -708,9 +717,18 @@ def _backfill_row(
 
 
 def backfill_panel(
-    team_id: str, backfill: Mapping[str, Any], weeks: Sequence[Mapping[str, Any]], token: str
+    team_id: str,
+    backfill: Mapping[str, Any],
+    weeks: Sequence[Mapping[str, Any]],
+    token: str,
+    *,
+    published: Collection[datetime] = (),
 ) -> str:
-    """Progress of the team's newest shown multi-week run, above the selected week."""
+    """Progress of the team's newest shown multi-week run, above the selected week.
+
+    ``published`` holds the window ends of failed weeks that are published now: retry refuses
+    them, so neither their row nor the panel offers it.
+    """
     if not weeks:
         return ""
     base = "/backfills/" + quote(str(backfill["backfill_id"]), safe="")
@@ -739,7 +757,7 @@ def backfill_panel(
             "abi-btn small",
         )
     retryable = sum(
-        1 for week in weeks if week["status"] == "failed" and not _skipped_as_published(week)
+        1 for week in weeks if week["status"] == "failed" and _utc(week["run_at"]) not in published
     )
     if not active and retryable:
         retry = "Retry failed week" if retryable == 1 else "Retry failed weeks"
@@ -767,7 +785,13 @@ def backfill_panel(
     )
     rows = "".join(
         _backfill_row(
-            team_id, week, index, total, token, index == first_queued and not count["running"]
+            team_id,
+            week,
+            index,
+            total,
+            token,
+            index == first_queued and not count["running"],
+            _utc(week["run_at"]) in published,
         )
         for index, week in enumerate(weeks)
     )

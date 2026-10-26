@@ -324,7 +324,7 @@ def test_a_week_published_while_queued_is_skipped_without_reading_alerts(
 
 
 def test_retrying_failed_weeks_leaves_out_a_week_published_while_queued(
-    api: ApiSettings, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, api: ApiSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     row = backfill.submit_backfill(
         api, TEAM, [at("2026-08-10"), at("2026-08-17")], "fake", "mixed", now=NOW
@@ -354,6 +354,11 @@ def test_retrying_failed_weeks_leaves_out_a_week_published_while_queued(
     failed = {str(job["job_id"]): job for job in queued_weeks(api, row["backfill_id"])}
     assert failed[str(newer["job_id"])]["error_summary"] == jobs.PUBLISHED_WHILE_WAITING
     assert failed[str(older["job_id"])]["status"] == "failed"
+    # The panel offers retry by the same rule: only for the week that is not published.
+    page = client.get(f"/teams/{TEAM}").text
+    assert f'action="/run-jobs/{older["job_id"]}/retry"' in page
+    assert f'action="/run-jobs/{newer["job_id"]}/retry"' not in page
+    assert "Retry failed week<" in page
     with pytest.raises(HTTPException) as locked:
         backfill.retry_backfill(api, row["backfill_id"], str(newer["job_id"]), now=NOW)
     assert locked.value.status_code == 409 and "Published weeks are locked" in locked.value.detail

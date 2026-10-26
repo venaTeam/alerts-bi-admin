@@ -169,7 +169,7 @@ def _active_backfill(db: Database, team_id: str, other_than: str | None = None) 
     return str(row["backfill_id"]) if row else None
 
 
-def _published_weeks(db: Database, team_id: str, weeks: Sequence[datetime]) -> list[datetime]:
+def published_weeks(db: Database, team_id: str, weeks: Sequence[datetime]) -> list[datetime]:
     placeholders, params = _in_list(weeks)
     rows = db.query(
         "SELECT DISTINCT window_end FROM review_publications WHERE team_id=:team "
@@ -180,7 +180,7 @@ def _published_weeks(db: Database, team_id: str, weeks: Sequence[datetime]) -> l
 
 
 def _refuse_locked_weeks(db: Database, team_id: str, weeks: Sequence[datetime]) -> None:
-    published = _published_weeks(db, team_id, weeks)
+    published = published_weeks(db, team_id, weeks)
     if published:
         names = ", ".join(label(end) for end in published)
         raise HTTPException(409, f"Published weeks are locked: {names}. Withdraw them first.")
@@ -424,7 +424,7 @@ def retry_backfill(
         elif failed:
             # Retrying every failed week leaves out weeks published since they failed (the
             # worker skips a week published while it waits), instead of refusing them all.
-            published = set(_published_weeks(db, team_id, [_utc(row["run_at"]) for row in failed]))
+            published = set(published_weeks(db, team_id, [_utc(row["run_at"]) for row in failed]))
             failed = [row for row in failed if _utc(row["run_at"]) not in published]
             if not failed:
                 raise HTTPException(

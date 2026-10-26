@@ -46,6 +46,7 @@ from .engine.api.backfill import (
     job_backfill,
     latest_backfill,
     parse_weeks,
+    published_weeks,
     retry_backfill,
     selectable_weeks,
     submit_backfill,
@@ -374,6 +375,15 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 if backfill_row
                 else []
             )
+            failed_weeks = [
+                pages.as_utc(week["run_at"])
+                for week in backfill_weeks
+                if week["status"] == "failed"
+            ]
+            # Retry refuses a published week, so the panel offers retry by the same rule.
+            published_failed = (
+                set(published_weeks(db, team_id, failed_weeks)) if failed_weeks else set()
+            )
             calendar = queries.backfill_calendar(db, team_id, selectable_weeks(now)[0])
             selected_job: dict[str, Any] | None = None
             if job_id:
@@ -561,7 +571,9 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 jobs=pages.jobs_panel(
                     jobs, shown=str(selected_job["job_id"]) if selected_job else None, token=token
                 ),
-                backfill=pages.backfill_panel(team_id, backfill_row, backfill_weeks, token)
+                backfill=pages.backfill_panel(
+                    team_id, backfill_row, backfill_weeks, token, published=published_failed
+                )
                 if backfill_row
                 else "",
                 new_runs=pages.new_runs_dialog(
