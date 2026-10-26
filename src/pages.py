@@ -8,7 +8,7 @@ starts one week as a manual run or several weeks as a backfill.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -31,6 +31,7 @@ from alerts_bi_shared.ui.html import h
 
 from .assets import CONSOLE_CSS
 from .engine.api.backfill import selectable_weeks
+from .engine.api.jobs import PUBLISHED_WHILE_WAITING
 from .engine.api.service import latest_week_end
 from .engine.weekly.plan import RETENTION_DAYS
 
@@ -99,7 +100,7 @@ document.querySelectorAll('[data-new-runs]').forEach(form => {
 });
 const JOB_TEXT = {
  pending: 'Waiting for the worker. You can leave this page.',
- queued: 'Queued. It starts before the next week of a multi-week run. You can leave this page.',
+ queued: 'Queued. It starts when the runs ahead of it finish. You can leave this page.',
  running: 'Analysis running. You can leave this page.'
 };
 let backfillPolling = false;
@@ -158,7 +159,7 @@ WEEK = timedelta(days=7)
 ACTIVE_JOB = ("pending", "queued", "running")
 JOB_MESSAGES = {
     "pending": "Waiting for the worker. You can leave this page.",
-    "queued": "Queued. It starts before the next week of a multi-week run. You can leave this page.",
+    "queued": "Queued. It starts when the runs ahead of it finish. You can leave this page.",
     "running": "Analysis running. You can leave this page.",
 }
 DECISION_HINTS = {
@@ -661,8 +662,19 @@ def backfill_signature(weeks: Sequence[Mapping[str, Any]]) -> str:
 _GLYPHS = {"completed": "✓", "failed": "!", "running": "", "queued": "", "cancelled": ""}
 
 
+def _skipped_as_published(job: Mapping[str, Any]) -> bool:
+    """The worker failed it without running because its week was published while it waited."""
+    return job.get("error_summary") == PUBLISHED_WHILE_WAITING
+
+
 def _backfill_row(
-    team_id: str, week: Mapping[str, Any], index: int, total: int, token: str, next_up: bool
+    team_id: str,
+    week: Mapping[str, Any],
+    index: int,
+    total: int,
+    token: str,
+    next_up: bool,
+    published: bool,
 ) -> str:
     end = _utc(week["run_at"])
     status = str(week["status"])
@@ -682,11 +694,16 @@ def _backfill_row(
             else "Waiting for the worker"
         )
     elif status == "queued":
-        detail = "Next to run" if next_up else "Waits for the week above"
+        # Queued single runs of any team go first, so "next" is only within this backfill.
+        detail = "Next of these weeks" if next_up else "Waits for the week above"
         action = _post_button(f"/run-jobs/{job}/cancel", token, "Remove", "abi-btn small")
     elif status == "failed":
         detail = str(week.get("error_summary") or "Analysis failed.")
-        action = _post_button(f"/run-jobs/{job}/retry", token, "Retry week", "abi-btn small")
+        if not published:
+            action = _post_button(f"/run-jobs/{job}/retry", token, "Retry week", "abi-btn small")
+        elif not _skipped_as_published(week):
+            # Retry refuses a published week; the skip message already says what to do.
+            detail += " · Published since. Withdraw it to run it again."
     else:
         detail = str(week.get("error_summary") or "Cancelled before it started.")
     attempts = int(week.get("attempts", 1))
@@ -701,9 +718,18 @@ def _backfill_row(
 
 
 def backfill_panel(
-    team_id: str, backfill: Mapping[str, Any], weeks: Sequence[Mapping[str, Any]], token: str
+    team_id: str,
+    backfill: Mapping[str, Any],
+    weeks: Sequence[Mapping[str, Any]],
+    token: str,
+    *,
+    published: Collection[datetime] = (),
 ) -> str:
-    """Progress of the team's newest shown multi-week run, above the selected week."""
+    """Progress of the team's newest shown multi-week run, above the selected week.
+
+    ``published`` holds the window ends of failed weeks that are published now: retry refuses
+    them, so neither their row nor the panel offers it.
+    """
     if not weeks:
         return ""
     base = "/backfills/" + quote(str(backfill["backfill_id"]), safe="")
@@ -731,8 +757,11 @@ def backfill_panel(
             f"Cancel {count['queued']} queued {weeks_label}",
             "abi-btn small",
         )
-    if not active and count["failed"]:
-        retry = "Retry failed week" if count["failed"] == 1 else "Retry failed weeks"
+    retryable = sum(
+        1 for week in weeks if week["status"] == "failed" and _utc(week["run_at"]) not in published
+    )
+    if not active and retryable:
+        retry = "Retry failed week" if retryable == 1 else "Retry failed weeks"
         actions += _post_button(base + "/retry", token, retry, "abi-btn small")
     if not active:
         actions += _post_button(base + "/dismiss", token, "Dismiss", "abi-btn small")
@@ -757,7 +786,13 @@ def backfill_panel(
     )
     rows = "".join(
         _backfill_row(
-            team_id, week, index, total, token, index == first_queued and not count["running"]
+            team_id,
+            week,
+            index,
+            total,
+            token,
+            index == first_queued and not count["running"],
+            _utc(week["run_at"]) in published,
         )
         for index, week in enumerate(weeks)
     )
@@ -916,7 +951,16 @@ def _run_again(end: datetime, *, can_run: bool, runnable: bool) -> str:
     )
 
 
-def job_panel(job: Mapping[str, Any], *, can_run: bool = True, runnable: bool = True) -> str:
+def _remove_queued(job: Mapping[str, Any], token: str) -> str:
+    """Take a queued manual run out of the queue; nothing to offer once it has started."""
+    if str(job["status"]) != "queued" or not token:
+        return ""
+    return _post_button(f"/run-jobs/{job['job_id']}/cancel", token, "Remove", "abi-btn small")
+
+
+def job_panel(
+    job: Mapping[str, Any], *, token: str = "", can_run: bool = True, runnable: bool = True
+) -> str:
     """The selected manual submission while it waits or runs, or after it failed."""
     week = _job_week(job)
     status = str(job["status"])
@@ -926,22 +970,36 @@ def job_panel(job: Mapping[str, Any], *, can_run: bool = True, runnable: bool = 
         f"<div><dt>Model</dt><dd>{h(str(job.get('llm_mode') or '—').capitalize())}</dd></div></dl>"
     )
     if status == "failed":
+        outcome = (
+            "The published week is unchanged."
+            if _skipped_as_published(job)
+            else "Nothing was published."
+        )
         return (
             f'<section class="abi-panel" aria-labelledby="step-title"><h2 id="step-title">The run of {h(week)} failed</h2>'
             f'<p class="abi-message">{h(job.get("error_summary") or "Analysis failed.")}</p>{facts}'
-            '<div class="abi-panel-foot"><span class="abi-small abi-muted">Nothing was published.</span>'
+            f'<div class="abi-panel-foot"><span class="abi-small abi-muted">{outcome}</span>'
             f"{_run_again(job['run_at'], can_run=can_run, runnable=runnable)}</div></section>"
         )
+    if status == "queued":
+        heading = f"{week} is queued"
+        intro = (
+            "Runs go one at a time across all teams, so this one waits for the runs ahead of it."
+        )
+        progress = ""
+    else:
+        heading = f"Analyzing {week}"
+        intro = "Reading the week's alerts and checking them against the rules and the model."
+        progress = '<div class="abi-indeterminate" aria-hidden="true"><span></span></div>'
     return (
         f'<section class="abi-panel" aria-labelledby="step-title" data-job-url="/run-jobs/{h(job["job_id"])}" data-job-state="{h(status)}">'
-        f'<h2 id="step-title">Analyzing {h(week)}</h2>'
-        '<p class="abi-sub">Reading the week\'s alerts and checking them against the rules and the model.</p>'
-        '<div class="abi-indeterminate" aria-hidden="true"><span></span></div>'
-        f'{facts}<div class="abi-panel-foot"><p role="status" aria-live="polite" class="abi-small abi-muted">{h(JOB_MESSAGES.get(status, ""))}</p></div></section>'
+        f'<h2 id="step-title">{h(heading)}</h2><p class="abi-sub">{h(intro)}</p>{progress}'
+        f'{facts}<div class="abi-panel-foot"><p role="status" aria-live="polite" class="abi-small abi-muted">{h(JOB_MESSAGES.get(status, ""))}</p>'
+        f"{_remove_queued(job, token)}</div></section>"
     )
 
 
-def jobs_panel(jobs: Sequence[Mapping[str, Any]], shown: str | None = None) -> str:
+def jobs_panel(jobs: Sequence[Mapping[str, Any]], shown: str | None = None, token: str = "") -> str:
     """Other manual submissions that are active or failed, polled while active."""
     rows = []
     for job in jobs:
@@ -962,7 +1020,7 @@ def jobs_panel(jobs: Sequence[Mapping[str, Any]], shown: str | None = None) -> s
         rows.append(
             f'<li{attrs}><div class="abi-item"><span class="abi-item-main"><span class="abi-item-title">{h(_job_week(job))}</span>'
             f'<span class="abi-item-sub" role="status" aria-live="polite">{h(message)}</span></span>'
-            f"{badge(status)}</div></li>"
+            f"{badge(status)}{_remove_queued(job, token)}</div></li>"
         )
         if len(rows) == 5:
             break

@@ -26,6 +26,9 @@ def test_a_malformed_es_url_does_not_stop_the_worker_starting() -> None:
 
 
 class _Db:
+    def query_one(self, *_args: Any, **_kwargs: Any) -> None:
+        return None  # The run is not published.
+
     def rollback(self) -> None:
         pass
 

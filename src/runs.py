@@ -68,7 +68,7 @@ def delete_run(db: Database, run_id: str, *, shared_lock: bool = True) -> str:
             "SELECT TOP 1 job_id FROM run_jobs WHERE run_id=:run_id AND status='queued'", params
         ):
             raise DeletionRefused(
-                "A queued run would recreate this week. Cancel it before deleting."
+                "A queued run would recreate this week. Remove it from the queue before deleting."
             )
         db.execute(
             "DELETE a FROM llm_review_attempts a JOIN llm_review_batches b ON b.cycle_id=a.cycle_id "

@@ -10,4 +10,4 @@ weekly wait for a running backfill week, the new console routes and migration 01
 views, shared/operations interfaces, CSV outputs and deterministic identifiers are unchanged.
 Merge design and admin together; deploy only with separate authorization. Rolling the app back
 leaves the additive revision installed; first stop new submissions and drain or terminalize
-every queued job, including New runs queued behind a backfill (see the worker runbook).
+every queued job, including New runs queued behind another run (see the worker runbook).

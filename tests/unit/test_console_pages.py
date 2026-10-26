@@ -13,6 +13,7 @@ from src import pages
 from src.app import build_admin
 from src.auth import csrf_token
 from src.config import AdminSettings, load_config
+from src.engine.api.jobs import PUBLISHED_WHILE_WAITING
 
 START, END = datetime(2026, 10, 5), datetime(2026, 10, 12)
 RUN = "1" * 64
@@ -364,6 +365,29 @@ def test_new_runs_with_one_week_submits_a_manual_job(
     assert run_at.replace(tzinfo=None) == datetime(2026, 10, 12)
 
 
+@pytest.mark.parametrize(
+    ("status", "flash"),
+    [
+        ("pending", "done=Run+accepted."),
+        ("queued", "done=Run+queued."),
+        ("completed", "done=This+form+was+already+submitted%2C+and+that+run+has+finished."),
+        ("failed", "done=This+form+was+already+submitted%2C+and+that+run+failed."),
+        ("cancelled", "that+run+was+removed+from+the+queue."),
+    ],
+)
+def test_a_resubmitted_form_says_what_became_of_its_run(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, status: str, flash: str
+) -> None:
+    # The same submission key returns the job the form created earlier, in whatever state.
+    monkeypatch.setattr(console, "submit_job", lambda *_: {"job_id": "a" * 32, "status": status})
+    response = client.post(
+        "/teams/checkout-api/trigger",
+        data=form(week="2026-10-12", llm="fake", weeks_form="1", submission_key="k1"),
+        follow_redirects=False,
+    )
+    assert response.status_code == 303 and flash in response.headers["location"]
+
+
 def test_new_runs_with_several_weeks_submits_a_backfill(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -416,6 +440,29 @@ def test_run_again_buttons_appear_only_where_new_runs_exists() -> None:
     job = {"job_id": "a" * 32, "run_at": END, "status": "failed", "error_summary": "Boom"}
     assert 'data-dialog="new-runs"' in pages.job_panel(job)
     assert 'data-dialog="new-runs"' not in pages.job_panel(job, can_run=False)
+
+
+def test_only_a_queued_run_offers_remove() -> None:
+    cancel = f'action="/run-jobs/{"a" * 32}/cancel"'
+    job = {"job_id": "a" * 32, "run_at": END, "status": "queued", "llm_mode": "fake"}
+    queued = pages.job_panel(job, token="t")
+    assert "is queued" in queued and cancel in queued and "abi-indeterminate" not in queued
+    assert "Queued. It starts when the runs ahead of it finish." in queued
+    assert "multi-week" not in queued and "multi-week" not in pages.SCRIPT
+    assert cancel in pages.jobs_panel([job], token="t")
+    assert cancel not in pages.job_panel(job)
+    for status in ("pending", "running"):
+        active = pages.job_panel(job | {"status": status}, token="t")
+        assert "Analyzing" in active and "abi-indeterminate" in active and cancel not in active
+        assert cancel not in pages.jobs_panel([job | {"status": status}], token="t")
+
+
+def test_a_run_skipped_because_its_week_was_published_says_so() -> None:
+    job = {"job_id": "a" * 32, "run_at": END, "status": "failed"}
+    skipped = pages.job_panel(job | {"error_summary": PUBLISHED_WHILE_WAITING})
+    assert "published while the run waited" in skipped
+    assert "The published week is unchanged." in skipped and "Nothing was published" not in skipped
+    assert "Nothing was published." in pages.job_panel(job | {"error_summary": "Boom"})
 
 
 def test_run_again_names_its_week_and_explains_when_it_cannot_run() -> None:

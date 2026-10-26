@@ -34,7 +34,7 @@ and migration 014 are unchanged.
    as for any manual rerun, persistence replaces the earlier run only when its deterministic
    identity (registry and model versions) is unchanged, otherwise both runs remain.
 4. **Cancel removes only queued weeks.** The running week finishes, completed weeks stay, and a
-   failed week can be retried on its own.
+   failed week can be retried on its own (while it is not published; amended 2026-10-26).
 5. **One team per backfill**, started from that team's workspace.
 6. **Publishing stays manual.** Backfilled weeks complete unpublished and are published one at a
    time with the existing publication rules.
@@ -84,6 +84,18 @@ While a backfill has queued, pending or running weeks, a manual submission that 
 execution lock busy is accepted as `queued` and runs before the next backfill week. The JSON
 status reports `queued` until the worker claims it.
 
+**Amended 2026-10-26** (design "New runs queue while another run is in progress"): a manual
+submission that finds the slot or execution lock busy is queued whether or not a backfill is in
+progress, so the 409 while busy no longer applies. A manual submission for a week the team
+already has queued, pending or running is refused, as for backfill admission, and a queued
+manual job can be removed with `POST /run-jobs/{job_id}/cancel`. A submission also queues
+while an older manual job is queued, so it cannot start first. A claimed job, manual or
+backfill week, whose run was published while it waited is marked failed without running.
+Retrying all failed weeks leaves out weeks that are published now instead of refusing the whole
+request (one published week on its own is still refused). A failed week that is published now
+offers no Retry week and is not counted for Retry failed weeks, whatever it failed with; once
+withdrawn it can be retried again.
+
 When a weekly invocation finds the shared lock or slot busy while a backfill is in progress, it
 holds the SQL session lock `alerts-bi-backfill-yield` and polls every 30 seconds for up to three
 hours. While that lock is held the worker claims no further backfill weeks, so the weekly run
@@ -93,7 +105,8 @@ the next daily invocation retries. Without an active backfill the weekly refusal
 Cancelling a backfill marks its queued weeks cancelled and records the operator and time. A
 single queued week can also be removed. A failed backfill week can be retried: a new queued job
 joins the same backfill with a freshly captured registry hash and run ID. Retry is refused when
-the week is now published or active, or when another backfill for the team is active. A finished
+the week is now published or active, or when another backfill for the team is active (since
+2026-10-26, retrying every failed week leaves published weeks out instead). A finished
 backfill can be dismissed from the workspace; retrying it later restores it. Run deletion is refused while a queued job targets
 that run; the existing active-slot refusal and job-record removal are unchanged.
 
@@ -102,7 +115,8 @@ that run; the existing active-slot refusal and job-record removal are unchanged.
 An active backfill always appears above the team's runs, even one dismissed before a retry or
 older than a finished backfill; otherwise the newest finished backfill that is not dismissed does:
 completed/running/queued/failed/cancelled counts, a progress bar of completed weeks, each week's
-status and actions (open the run, remove a queued week, retry a failed week), and cancel, retry
+status and actions (open the run, remove a queued week, retry a failed week that is not
+published now), and cancel, retry
 and dismiss actions. While weeks are active the page polls `GET /backfills/{backfill_id}` every
 three seconds, pauses while hidden, and reloads when a week changes state. No duration estimate
 is shown. Runs created by a backfill show the source "Backfill". A banner shows how many retained
@@ -115,9 +129,9 @@ weeks have no completed run and when the oldest leaves retention.
 | `POST /teams/{team_id}/backfill` | Accept a backfill (browser form) |
 | `GET /backfills/{backfill_id}` | JSON backfill state for polling |
 | `POST /backfills/{backfill_id}/cancel` | Cancel all queued weeks |
-| `POST /backfills/{backfill_id}/retry` | Retry every failed week |
+| `POST /backfills/{backfill_id}/retry` | Retry every failed week (since 2026-10-26, every one not published now) |
 | `POST /backfills/{backfill_id}/dismiss` | Hide a finished backfill |
-| `POST /run-jobs/{job_id}/cancel` | Remove one queued week |
+| `POST /run-jobs/{job_id}/cancel` | Remove one queued week, or (since 2026-10-26) one queued manual run |
 | `POST /run-jobs/{job_id}/retry` | Retry one failed backfill week |
 
 None requires an identity since 2026-10-19 (design "Admin console without login"); POSTs require
@@ -132,8 +146,9 @@ a queue index, and replaces the run job state check so `queued` and `cancelled` 
 slot. Applied revisions 001–013 are unchanged. Deployment applies 014 through the existing
 migration init container before the UI and worker start; UI and worker must run the same image.
 Before rolling back to an image without migration 014, stop new submissions and leave no queued
-job of any kind: a New run accepted during a backfill is queued outside that backfill, so
-cancelling backfills does not remove it. Cancel or finish active backfills, let the current
+job of any kind: a New run accepted while another run was in progress (during a backfill or,
+since 2026-10-26, at any time) is queued outside any backfill, so cancelling backfills does not
+remove it. Cancel or finish active backfills, remove or let the current
 worker run the remaining queued manual jobs, or terminalize them with the worker runbook's
 procedure. An older worker ignores queued rows and leaves them queued indefinitely. The additive
 schema can remain installed.
