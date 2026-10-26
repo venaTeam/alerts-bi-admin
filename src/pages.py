@@ -99,7 +99,7 @@ document.querySelectorAll('[data-new-runs]').forEach(form => {
 });
 const JOB_TEXT = {
  pending: 'Waiting for the worker. You can leave this page.',
- queued: 'Queued. It starts before the next week of a multi-week run. You can leave this page.',
+ queued: 'Queued. It starts when the runs ahead of it finish. You can leave this page.',
  running: 'Analysis running. You can leave this page.'
 };
 let backfillPolling = false;
@@ -158,7 +158,7 @@ WEEK = timedelta(days=7)
 ACTIVE_JOB = ("pending", "queued", "running")
 JOB_MESSAGES = {
     "pending": "Waiting for the worker. You can leave this page.",
-    "queued": "Queued. It starts before the next week of a multi-week run. You can leave this page.",
+    "queued": "Queued. It starts when the runs ahead of it finish. You can leave this page.",
     "running": "Analysis running. You can leave this page.",
 }
 DECISION_HINTS = {
@@ -916,7 +916,16 @@ def _run_again(end: datetime, *, can_run: bool, runnable: bool) -> str:
     )
 
 
-def job_panel(job: Mapping[str, Any], *, can_run: bool = True, runnable: bool = True) -> str:
+def _remove_queued(job: Mapping[str, Any], token: str) -> str:
+    """Take a queued manual run out of the queue; nothing to offer once it has started."""
+    if str(job["status"]) != "queued" or not token:
+        return ""
+    return _post_button(f"/run-jobs/{job['job_id']}/cancel", token, "Remove", "abi-btn small")
+
+
+def job_panel(
+    job: Mapping[str, Any], *, token: str = "", can_run: bool = True, runnable: bool = True
+) -> str:
     """The selected manual submission while it waits or runs, or after it failed."""
     week = _job_week(job)
     status = str(job["status"])
@@ -932,16 +941,25 @@ def job_panel(job: Mapping[str, Any], *, can_run: bool = True, runnable: bool = 
             '<div class="abi-panel-foot"><span class="abi-small abi-muted">Nothing was published.</span>'
             f"{_run_again(job['run_at'], can_run=can_run, runnable=runnable)}</div></section>"
         )
+    if status == "queued":
+        heading = f"{week} is queued"
+        intro = (
+            "Runs go one at a time across all teams, so this one waits for the runs ahead of it."
+        )
+        progress = ""
+    else:
+        heading = f"Analyzing {week}"
+        intro = "Reading the week's alerts and checking them against the rules and the model."
+        progress = '<div class="abi-indeterminate" aria-hidden="true"><span></span></div>'
     return (
         f'<section class="abi-panel" aria-labelledby="step-title" data-job-url="/run-jobs/{h(job["job_id"])}" data-job-state="{h(status)}">'
-        f'<h2 id="step-title">Analyzing {h(week)}</h2>'
-        '<p class="abi-sub">Reading the week\'s alerts and checking them against the rules and the model.</p>'
-        '<div class="abi-indeterminate" aria-hidden="true"><span></span></div>'
-        f'{facts}<div class="abi-panel-foot"><p role="status" aria-live="polite" class="abi-small abi-muted">{h(JOB_MESSAGES.get(status, ""))}</p></div></section>'
+        f'<h2 id="step-title">{h(heading)}</h2><p class="abi-sub">{h(intro)}</p>{progress}'
+        f'{facts}<div class="abi-panel-foot"><p role="status" aria-live="polite" class="abi-small abi-muted">{h(JOB_MESSAGES.get(status, ""))}</p>'
+        f"{_remove_queued(job, token)}</div></section>"
     )
 
 
-def jobs_panel(jobs: Sequence[Mapping[str, Any]], shown: str | None = None) -> str:
+def jobs_panel(jobs: Sequence[Mapping[str, Any]], shown: str | None = None, token: str = "") -> str:
     """Other manual submissions that are active or failed, polled while active."""
     rows = []
     for job in jobs:
@@ -962,7 +980,7 @@ def jobs_panel(jobs: Sequence[Mapping[str, Any]], shown: str | None = None) -> s
         rows.append(
             f'<li{attrs}><div class="abi-item"><span class="abi-item-main"><span class="abi-item-title">{h(_job_week(job))}</span>'
             f'<span class="abi-item-sub" role="status" aria-live="polite">{h(message)}</span></span>'
-            f"{badge(status)}</div></li>"
+            f"{badge(status)}{_remove_queued(job, token)}</div></li>"
         )
         if len(rows) == 5:
             break

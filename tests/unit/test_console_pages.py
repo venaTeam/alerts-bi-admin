@@ -418,6 +418,21 @@ def test_run_again_buttons_appear_only_where_new_runs_exists() -> None:
     assert 'data-dialog="new-runs"' not in pages.job_panel(job, can_run=False)
 
 
+def test_only_a_queued_run_offers_remove() -> None:
+    cancel = f'action="/run-jobs/{"a" * 32}/cancel"'
+    job = {"job_id": "a" * 32, "run_at": END, "status": "queued", "llm_mode": "fake"}
+    queued = pages.job_panel(job, token="t")
+    assert "is queued" in queued and cancel in queued and "abi-indeterminate" not in queued
+    assert "Queued. It starts when the runs ahead of it finish." in queued
+    assert "multi-week" not in queued and "multi-week" not in pages.SCRIPT
+    assert cancel in pages.jobs_panel([job], token="t")
+    assert cancel not in pages.job_panel(job)
+    for status in ("pending", "running"):
+        active = pages.job_panel(job | {"status": status}, token="t")
+        assert "Analyzing" in active and "abi-indeterminate" in active and cancel not in active
+        assert cancel not in pages.jobs_panel([job | {"status": status}], token="t")
+
+
 def test_run_again_names_its_week_and_explains_when_it_cannot_run() -> None:
     # admin#16 review: the shared dialog must retry the failed week even after another
     # opener changed the selection, so the retry opener carries its own week.

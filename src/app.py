@@ -51,7 +51,7 @@ from .engine.api.backfill import (
     submit_backfill,
     week_rows,
 )
-from .engine.api.jobs import get_job, submit_job, team_jobs
+from .engine.api.jobs import cancel_queued_job, get_job, submit_job, team_jobs
 from .engine.api.negotiation import wants_html
 from .engine.api.routers.runs import router as runs_router
 from .engine.api.schemas import BackfillOut, HealthOut, RunJobOut, RunRequest, TeamsOut
@@ -415,6 +415,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 view = "job"
                 content = pages.job_panel(
                     selected_job,
+                    token=token,
                     can_run=team_id in names,
                     runnable=pages.as_utc(selected_job["run_at"]) in runnable,
                 )
@@ -558,7 +559,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                 view=view,
                 job=selected_job,
                 jobs=pages.jobs_panel(
-                    jobs, shown=str(selected_job["job_id"]) if selected_job else None
+                    jobs, shown=str(selected_job["job_id"]) if selected_job else None, token=token
                 ),
                 backfill=pages.backfill_panel(team_id, backfill_row, backfill_weeks, token)
                 if backfill_row
@@ -696,7 +697,7 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         )
         return back(
             pages.team_url(team_id, job_id=job["job_id"]),
-            "Run accepted. It starts before the next queued week. You can leave this page."
+            "Run queued. It starts when the runs ahead of it finish. You can leave this page."
             if job["status"] == "queued"
             else "Run accepted. You can leave this page and return later.",
         )
@@ -732,7 +733,10 @@ def build_admin(settings: AdminSettings) -> FastAPI:
         responses={
             400: {"description": "Invalid ASCII submission key or unknown team"},
             403: {"description": "Same-site CSRF token required"},
-            409: {"description": "Another operation is active or the key has different options"},
+            409: {
+                "description": "The team's week is already queued or running, the run is "
+                "published, or the key has different options"
+            },
         },
         openapi_extra={
             "parameters": [
@@ -920,8 +924,25 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     @app.post("/run-jobs/{job_id}/cancel")
     async def cancel_week(request: Request, job_id: str) -> Response:
+        # Removes one queued backfill week, or one queued New run outside a backfill.
         with database() as db:
-            backfill_id = job_backfill(db, job_id)
+            job = get_job(db, job_id)
+        if not job.get("backfill_id"):
+            await form(request)
+            path = pages.team_url(str(job["team_id"]))
+
+            def cancel() -> bool:
+                with database() as db:
+                    return cancel_queued_job(db, job_id)[1]
+
+            if not await run_in_threadpool(cancel):
+                return back(
+                    path,
+                    "Only a queued run can be removed. This one has started or was already removed.",
+                    True,
+                )
+            return back(path, "Run removed from the queue.")
+        backfill_id = str(job["backfill_id"])
 
         def act() -> tuple[dict[str, Any], str, bool]:
             with database() as db:

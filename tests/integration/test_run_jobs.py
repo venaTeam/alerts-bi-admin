@@ -430,7 +430,9 @@ def test_slow_worker_keeps_status_and_navigation_responsive(
                 ]
                 == row["job_id"]
             )
-            assert submit(client, "busy-slow-worker").status_code == 409
+            # Another week waits its turn instead of being refused (since 2026-10-26).
+            queued = submit(client, "busy-slow-worker")
+            assert queued.status_code == 202 and queued.json()["status"] == "queued"
         finally:
             release.set()
         assert future.result(timeout=120)

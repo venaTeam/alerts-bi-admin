@@ -2,7 +2,7 @@
 
 The session lock lives on the execution connection, surviving journal/persistence commits.
 A new worker can recover running jobs only after the previous session released its lock.
-Queued jobs (backfill weeks, and manual runs accepted while a backfill is in progress) hold
+Queued jobs (backfill weeks, and manual runs accepted while another run is in progress) hold
 no slot; the worker claims them one at a time after pending work (docs/backfill.md).
 """
 
@@ -20,6 +20,7 @@ from alerts_bi_operations.registry import RegistryError, load_registry, select_t
 from alerts_bi_shared.db.connection import Database, connect
 from alerts_bi_shared.hashing import sha256_text
 from alerts_bi_shared.logging_setup import log, log_context
+from alerts_bi_shared.ui.explain import format_week
 from alerts_bi_shared.versions import APP_VERSION
 from fastapi import HTTPException
 
@@ -28,7 +29,6 @@ from ..run.orchestrator import compute_run_id
 from ..weekly.runner import (
     BACKFILL_YIELD_RESOURCE,
     WeeklyBusy,
-    backfill_in_progress,
     schedule_lock,
 )
 from .schemas import RunRequest
@@ -192,6 +192,16 @@ def _admit(
         {"id": run_id},
     ):
         raise HTTPException(409, "This run is published. Withdraw it before running it again.")
+    # A second job for the same week would run it again and replace the first result.
+    if db.query_one(
+        "SELECT TOP 1 job_id FROM run_jobs WHERE team_id=:team AND run_at=:at "
+        "AND status IN ('queued', 'pending', 'running')",
+        {"team": body.team, "at": run_at.replace(tzinfo=None)},
+    ):
+        week = format_week(window.window_start, window.run_at)
+        raise HTTPException(
+            409, f"Already queued or running for this team: {week}. Wait for it to finish."
+        )
     job_id = uuid4().hex
     db.execute(
         "INSERT INTO run_jobs (job_id,idempotency_key,idempotency_key_hash,requested_by,request_hash,team_id,"
@@ -220,7 +230,7 @@ def _admit(
         week=f"{run_at:%Y-%m-%d}",
         placement="next for the worker"
         if status == "pending"
-        else "queued ahead of the remaining backfill weeks",
+        else "queued behind the run in progress",
         llm=body.llm,
         status=status,
         job_id=job_id,
@@ -251,16 +261,12 @@ def submit_job(settings: ApiSettings, body: RunRequest, idempotency_key: str) ->
                 try:
                     refuse_active_job(db)
                 except ExecutionBusy:
-                    if not backfill_in_progress(db):
-                        raise
                     status = "queued"
                 return _admit(settings, db, body, idempotency_key, key_hash, request_hash, status)
         except ExecutionBusy:
             db.rollback()
-            if not backfill_in_progress(db):
-                raise
-        # A backfill week holds the execution lock. Queue this run ahead of the remaining
-        # weeks; a queued row holds no slot, so admission needs no execution lock.
+        # A job, CLI run, report, weekly run or deletion holds the execution lock. Queue this
+        # run behind it; a queued row holds no slot, so admission needs no execution lock.
         try:
             return _admit(settings, db, body, idempotency_key, key_hash, request_hash, "queued")
         except Exception:
@@ -270,6 +276,32 @@ def submit_job(settings: ApiSettings, body: RunRequest, idempotency_key: str) ->
             if existing:
                 return existing
             raise
+
+
+def cancel_queued_job(db: Database, job_id: str) -> tuple[dict[str, Any], bool]:
+    """Remove one queued manual run; a run the worker already claimed runs to completion."""
+    job = get_job(db, job_id)
+    # The worker claims only a still-queued row, so this update and a claim cannot both win.
+    cancelled = db.query(
+        "UPDATE run_jobs SET status='cancelled',completed_at=:now,error_summary=:message "
+        "OUTPUT inserted.job_id WHERE job_id=:id AND status='queued' AND backfill_id IS NULL",
+        {
+            "id": job_id,
+            "now": datetime.now(UTC).replace(tzinfo=None),
+            "message": "Cancelled before it started.",
+        },
+    )
+    db.commit()
+    if cancelled:
+        log.info(
+            "run.job_cancelled",
+            "Removed the queued manual run for the week ending {week}",
+            week=f"{job['run_at']:%Y-%m-%d}",
+            job_id=job_id,
+            team_id=job["team_id"],
+            run_id=job["run_id"],
+        )
+    return job, bool(cancelled)
 
 
 def finish_job(db: Database, job_id: str, state: str, error: str | None = None) -> None:

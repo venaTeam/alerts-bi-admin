@@ -698,7 +698,8 @@ Rollback means redeploying the previous release with its own files and image.
   The previous manifests or `previous/objects.yaml` bring back the access Role, RoleBinding and
   the ServiceAccount's OAuth redirect annotation; the recreated Service makes OpenShift issue
   `alerts-bi-admin-tls` again.
-- **Queued runs** (from the backfill feature) must be finished or cancelled before rolling back
+- **Queued runs** (backfill weeks, and single runs submitted while another run was in progress)
+  must be finished or cancelled before rolling back
   to an image that predates migration 014; `docs/upstream/manual-worker-runbook.md` has the steps.
 - **Scheduler**: suspend `alerts-bi-weekly` before re-enabling any old scheduler.
 
