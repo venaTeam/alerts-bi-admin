@@ -31,6 +31,7 @@ from alerts_bi_shared.ui.html import h
 
 from .assets import CONSOLE_CSS
 from .engine.api.backfill import selectable_weeks
+from .engine.api.jobs import PUBLISHED_WHILE_WAITING
 from .engine.api.service import latest_week_end
 from .engine.weekly.plan import RETENTION_DAYS
 
@@ -935,10 +936,15 @@ def job_panel(
         f"<div><dt>Model</dt><dd>{h(str(job.get('llm_mode') or '—').capitalize())}</dd></div></dl>"
     )
     if status == "failed":
+        outcome = (
+            "The published week is unchanged."
+            if job.get("error_summary") == PUBLISHED_WHILE_WAITING
+            else "Nothing was published."
+        )
         return (
             f'<section class="abi-panel" aria-labelledby="step-title"><h2 id="step-title">The run of {h(week)} failed</h2>'
             f'<p class="abi-message">{h(job.get("error_summary") or "Analysis failed.")}</p>{facts}'
-            '<div class="abi-panel-foot"><span class="abi-small abi-muted">Nothing was published.</span>'
+            f'<div class="abi-panel-foot"><span class="abi-small abi-muted">{outcome}</span>'
             f"{_run_again(job['run_at'], can_run=can_run, runnable=runnable)}</div></section>"
         )
     if status == "queued":

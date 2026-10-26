@@ -37,6 +37,9 @@ from .service import close_client, execute_request, latest_week_end, select_clie
 LOCK_RESOURCE = "alerts-bi-manual-run"
 ACTIVE_STATES = ("queued", "pending", "running")
 QUEUE_LOCK_PREFIX = "alerts-bi-queue:"
+PUBLISHED_WHILE_WAITING = (
+    "Not run: this week was published while the run waited. Withdraw it to run it again."
+)
 
 
 class ExecutionBusy(HTTPException):
@@ -257,11 +260,13 @@ def submit_job(settings: ApiSettings, body: RunRequest, idempotency_key: str) ->
                 existing = _existing_submission(db, key_hash, request_hash)
                 if existing:
                     return existing
-                status = "pending"
-                try:
-                    refuse_active_job(db)
-                except ExecutionBusy:
-                    status = "queued"
+                # Wait behind the active job and behind manual runs already queued, so a
+                # submission between the worker's polls cannot start before an older one.
+                waiting = db.query_one(
+                    "SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1 "
+                    "OR (status='queued' AND backfill_id IS NULL)"
+                )
+                status = "queued" if waiting else "pending"
                 return _admit(settings, db, body, idempotency_key, key_hash, request_hash, status)
         except ExecutionBusy:
             db.rollback()
@@ -447,6 +452,22 @@ def _run_job(settings: ApiSettings, db: Database, job: dict[str, Any]) -> None:
     queued = (
         (job["started_at"] - submitted).total_seconds() if isinstance(submitted, datetime) else 0
     )
+    if db.query_one(
+        "SELECT run_id FROM review_publications WHERE run_id=:id AND withdrawn_at IS NULL",
+        {"id": job["run_id"]},
+    ):
+        # Published while it waited (by the weekly schedule, say). Persistence would refuse it
+        # only after a full Elasticsearch read, holding the one slot every team waits for.
+        finish_job(db, str(job["job_id"]), "failed", PUBLISHED_WHILE_WAITING)
+        log.warn(
+            "run.job_skipped",
+            "Skipped the {kind} for the week ending {week}: the week was published while it "
+            "waited {queued:dur} in the queue",
+            kind=kind,
+            week=f"{job['run_at']:%Y-%m-%d}",
+            queued=queued,
+        )
+        return
     log.info(
         "run.job_started",
         "Started the {kind} for the week ending {week} after {queued:dur} in the queue",

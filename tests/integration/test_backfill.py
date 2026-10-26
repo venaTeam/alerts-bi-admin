@@ -274,6 +274,67 @@ def test_manual_submission_queues_behind_a_run_without_a_job(
         assert jobs.get_job(db, held["job_id"])["status"] == "completed"
 
 
+def test_a_submission_waits_behind_runs_already_queued(
+    api: ApiSettings, executed: list[tuple[str, datetime]]
+) -> None:
+    """Between the lock's release and the worker's next poll, a newer run cannot go first."""
+    with runner.schedule_lock(CONFIG, DB):
+        older = jobs.submit_job(
+            api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "older"
+        )
+    # The lock and the slot are free, but the older run has not been claimed yet.
+    newer = jobs.submit_job(
+        api, RunRequest(team="payments-core", run_at=at("2026-08-24"), llm="fake"), "newer"
+    )
+    assert older["status"] == newer["status"] == "queued"
+    while jobs.work_once(api):
+        pass
+    assert executed == [(TEAM, datetime(2026, 8, 24)), ("payments-core", datetime(2026, 8, 24))]
+
+
+def test_a_week_published_while_queued_is_skipped_without_reading_alerts(
+    api: ApiSettings, executed: list[tuple[str, datetime]]
+) -> None:
+    with runner.schedule_lock(CONFIG, DB):
+        job = jobs.submit_job(
+            api, RunRequest(team=TEAM, run_at=at("2026-08-24"), llm="fake"), "published-later"
+        )
+    assert job["status"] == "queued"
+    # Meanwhile the weekly schedule stores and publishes the same run.
+    with connect(CONFIG.sql, DB) as db:
+        persist_run(
+            db,
+            PersistencePayload(
+                run=sample_run(
+                    run_id=str(job["run_id"]),
+                    run_at=datetime(2026, 8, 24),
+                    window_start=datetime(2026, 8, 17),
+                    window_end=datetime(2026, 8, 24),
+                )
+            ),
+        )
+        publish_run(db, str(job["run_id"]), allow_gap=True)
+    assert jobs.work_once(api) is True
+    assert executed == []
+    with connect(CONFIG.sql, DB) as db:
+        skipped = jobs.get_job(db, job["job_id"])
+        assert db.query_one("SELECT job_id FROM run_jobs WHERE active_slot=1") is None
+    assert skipped["status"] == "failed" and skipped["active_slot"] is None
+    assert skipped["error_summary"] == jobs.PUBLISHED_WHILE_WAITING
+
+
+def test_manual_submission_is_refused_for_a_week_a_backfill_queued(api: ApiSettings) -> None:
+    backfill.submit_backfill(api, TEAM, [at("2026-08-17")], "fake", "queued-week", now=NOW)
+    with pytest.raises(HTTPException) as refused:
+        jobs.submit_job(api, RunRequest(team=TEAM, run_at=at("2026-08-17"), llm="off"), "same")
+    assert refused.value.status_code == 409
+    assert "Already queued or running for this team" in refused.value.detail
+    other = jobs.submit_job(
+        api, RunRequest(team="payments-core", run_at=at("2026-08-17"), llm="fake"), "other"
+    )
+    assert other["status"] == "pending"
+
+
 def test_console_removes_a_queued_run_but_not_one_that_started(
     client: TestClient, api: ApiSettings, executed: list[tuple[str, datetime]]
 ) -> None:
@@ -514,9 +575,6 @@ def test_deletion_cannot_remove_a_week_queued_while_it_runs(
                 )
             ),
         )
-    if admission == "manual":
-        # A queued backfill week keeps a backfill in progress, so a busy manual run queues.
-        backfill.submit_backfill(api, TEAM, [at("2026-08-24")], "fake", "other", now=NOW)
     paused, release = Event(), Event()
 
     def delete() -> str:

@@ -13,6 +13,7 @@ from src import pages
 from src.app import build_admin
 from src.auth import csrf_token
 from src.config import AdminSettings, load_config
+from src.engine.api.jobs import PUBLISHED_WHILE_WAITING
 
 START, END = datetime(2026, 10, 5), datetime(2026, 10, 12)
 RUN = "1" * 64
@@ -431,6 +432,14 @@ def test_only_a_queued_run_offers_remove() -> None:
         active = pages.job_panel(job | {"status": status}, token="t")
         assert "Analyzing" in active and "abi-indeterminate" in active and cancel not in active
         assert cancel not in pages.jobs_panel([job | {"status": status}], token="t")
+
+
+def test_a_run_skipped_because_its_week_was_published_says_so() -> None:
+    job = {"job_id": "a" * 32, "run_at": END, "status": "failed"}
+    skipped = pages.job_panel(job | {"error_summary": PUBLISHED_WHILE_WAITING})
+    assert "published while the run waited" in skipped
+    assert "The published week is unchanged." in skipped and "Nothing was published" not in skipped
+    assert "Nothing was published." in pages.job_panel(job | {"error_summary": "Boom"})
 
 
 def test_run_again_names_its_week_and_explains_when_it_cannot_run() -> None:
