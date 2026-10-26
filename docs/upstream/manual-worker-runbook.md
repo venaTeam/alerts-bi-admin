@@ -29,8 +29,14 @@ FROM run_jobs WHERE status = 'queued' AND backfill_id IS NULL
 ORDER BY submitted_at;
 ```
 
-Queued rows that age while no row holds `active_slot = 1` point to a worker that is not
-claiming work; rows that age behind a long running job are waiting their turn.
+Queued rows that age while no row holds `active_slot = 1` mean the worker is not claiming
+work, but not necessarily that it is unhealthy: a CLI run, report, deletion or the weekly
+schedule holds the execution lock without a job row, and a weekly invocation covering every
+enrolled team can hold it for a long time. While it claims nothing, a running worker logs
+`worker.idle` every 15 minutes with the reason. "Jobs wait for the execution lock (a CLI run,
+report, weekly job or deletion)" means the rows are waiting their turn; find the lock's holder
+before acting. No recent `worker.idle` event means the worker is stopped or stalled. Rows that
+age behind a long running job are also waiting their turn.
 
 Inspect the run-worker container's restart count and recent run.job_submitted,
 run.job_started, run.job_finished and run.job_failed events. run.job_cancelled records a

@@ -22,9 +22,11 @@ that such a run wait its turn instead, and approved these rules:
   the worker claims a job, manual or backfill week, whose run is published, it marks the job
   failed ("Not run: this week was published while the run waited. Withdraw it to run it
   again.") without reading Elasticsearch, instead of reading the whole week and then being
-  refused by persistence while every other team waits. Its panel or backfill row offers no
-  retry, and retrying all of a backfill's failed weeks leaves out weeks that are published now
-  instead of refusing the whole request; retrying a published week on its own is still refused.
+  refused by persistence while every other team waits. Retrying all of a backfill's failed
+  weeks leaves out weeks that are published now instead of refusing the whole request, and
+  retrying a published week on its own is still refused. The backfill panel follows the same
+  rule: a failed week offers Retry week, and counts toward Retry failed weeks, only while it is
+  not published, so a withdrawn week can be retried again.
 * **A same-key retry gets its own job.** An identical submission (same key and options) that
   commits while another waits for the team's queue lock is returned to the waiting one rather
   than refused as a duplicate week.
