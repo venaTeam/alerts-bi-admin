@@ -481,6 +481,35 @@ def test_run_again_names_its_week_and_explains_when_it_cannot_run() -> None:
         assert "This week can no longer be started here" in html
 
 
+def test_a_failed_run_that_stored_nothing_can_be_deleted_from_its_submission() -> None:
+    job = {
+        "job_id": "a" * 32,
+        "run_id": "b" * 64,
+        "run_at": END,
+        "status": "failed",
+        "error_summary": "Boom",
+    }
+    assert 'data-dialog="delete-run"' not in pages.job_panel(job)
+    assert 'data-dialog="delete-run">Delete run' in pages.job_panel(job, deletable=True)
+    # An attempt skipped because the week was published is not a way to delete that week.
+    skipped = job | {"error_summary": PUBLISHED_WHILE_WAITING}
+    assert 'data-dialog="delete-run"' not in pages.job_panel(skipped, deletable=True)
+    dialog = pages.delete_failed_dialog(job, "Checkout API", "token")
+    assert 'id="delete-run"' in dialog and f'action="/runs/{"b" * 64}/delete"' in dialog
+    assert "Checkout API · " in dialog and "model review record" in dialog
+    assert "current model settings" in dialog and "publications" not in dialog
+    assert 'name="confirm_delete" value="1" required' in dialog
+    # Only this confirmation is refused once the run stores results.
+    assert 'name="unstored" value="1"' in dialog
+    stored = run(status="completed")
+    assert 'name="unstored"' not in pages.delete_dialog(stored, "token")
+    # The team page's submissions list leads to that failed submission, not to waiting ones.
+    listed = pages.jobs_panel([{**job, "team_id": "checkout-api"}])
+    assert f'href="/teams/checkout-api?tab=overview&amp;job_id={"a" * 32}">Open</a>' in listed
+    waiting = {**job, "team_id": "checkout-api", "status": "queued"}
+    assert ">Open</a>" not in pages.jobs_panel([waiting])
+
+
 def test_new_runs_script_tolerates_a_dialog_without_weeks() -> None:
     # Polling setup follows the dialog code, so a missing element must not stop the script.
     assert "if (count) count.textContent" in pages.SCRIPT

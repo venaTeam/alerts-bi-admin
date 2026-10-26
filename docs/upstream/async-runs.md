@@ -142,6 +142,8 @@ run.job_finished logs with job/run identity; raw keys and model payloads are exc
 was published while it waited emits a run.job_skipped warning instead of starting.
 Whole-run deletion intentionally removes its terminal job records, as part of the approved
 permanent deletion contract, and remains audited through the existing admin.deleted event.
+Since 2026-10-26 a failed submission whose run never stored results is deleted the same way
+from its own page, which the team page's submissions list links to (design section 7.12).
 
 Use [the worker incident runbook](manual-worker-runbook.md) for prolonged running age,
 lost worker processes and rollback. Per-request SQL/ES/model timeouts already exist; there

@@ -174,6 +174,8 @@ def test_finished_weeks_panel_offers_retry_and_dismiss_without_polling() -> None
     assert "Finished with 1 failed" in html and "Retry failed week" in html
     assert 'action="/run-jobs/b/retry"' in html and "attempt 2" in html
     assert f'action="/backfills/{"f" * 32}/dismiss"' in html
+    # The failed week's own page is where a run that stored nothing is deleted.
+    assert 'href="/teams/checkout-api?tab=overview&amp;job_id=b">Open</a>' in html
 
 
 def test_a_published_failed_week_offers_no_retry_until_it_is_withdrawn() -> None:
@@ -196,3 +198,5 @@ def test_a_published_failed_week_offers_no_retry_until_it_is_withdrawn() -> None
     # A week that failed for another reason and was published later is not retryable either.
     later = panel([week("d", "2026-08-17", "failed", error_summary="Analysis failed.")], published)
     assert "/retry" not in later and "Published since. Withdraw it to run it again." in later
+    # A published week is not deleted from a failed attempt; it opens only while unpublished.
+    assert ">Open</a>" not in later and ">Open</a>" in withdrawn

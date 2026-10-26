@@ -214,7 +214,12 @@ Admin's `POST /runs/{run_id}/delete` requires same-site form CSRF and
 all its GET report and download routes then return 404. The redirect selects the team
 without the deleted run id. SQL views and CSV columns are unchanged. See design section
 7.12 for retained shared caches and scheduler recreation; runs write no files to clean up.
-CSVs an operator exported with the CLI stay on that operator's disk after deletion.
+CSVs an operator exported with the CLI stay on that operator's disk after deletion. Since
+2026-10-26 the route also accepts the id of a run that failed before storing results; it
+removes that run's submissions, analysis checkpoint and model audit. A refusal for such a
+run redirects to its latest submission (`job_id`), and an id with neither a stored run nor
+a submission returns 404. The confirmation for such a run also posts `unstored=1`, which
+refuses the deletion if the run has stored results by then.
 
 The response is always a JSON summary, including for `Accept: text/html`:
 

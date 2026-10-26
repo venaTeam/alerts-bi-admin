@@ -700,7 +700,11 @@ def _backfill_row(
     elif status == "failed":
         detail = str(week.get("error_summary") or "Analysis failed.")
         if not published:
-            action = _post_button(f"/run-jobs/{job}/retry", token, "Retry week", "abi-btn small")
+            # The failed week's own page offers Delete run, how it runs under new settings.
+            url = team_url(team_id, job_id=str(week["job_id"]))
+            action = f'<a class="abi-btn small" href="{h(url)}">Open</a>' + _post_button(
+                f"/run-jobs/{job}/retry", token, "Retry week", "abi-btn small"
+            )
         elif not _skipped_as_published(week):
             # Retry refuses a published week; the skip message already says what to do.
             detail += " · Published since. Withdraw it to run it again."
@@ -959,9 +963,18 @@ def _remove_queued(job: Mapping[str, Any], token: str) -> str:
 
 
 def job_panel(
-    job: Mapping[str, Any], *, token: str = "", can_run: bool = True, runnable: bool = True
+    job: Mapping[str, Any],
+    *,
+    token: str = "",
+    can_run: bool = True,
+    runnable: bool = True,
+    deletable: bool = False,
 ) -> str:
-    """The selected manual submission while it waits or runs, or after it failed."""
+    """The selected manual submission while it waits or runs, or after it failed.
+
+    ``deletable`` offers Delete run after a failure, except one skipped because its week was
+    published; the page supplies the matching dialog.
+    """
     week = _job_week(job)
     status = str(job["status"])
     facts = (
@@ -970,16 +983,19 @@ def job_panel(
         f"<div><dt>Model</dt><dd>{h(str(job.get('llm_mode') or '—').capitalize())}</dd></div></dl>"
     )
     if status == "failed":
-        outcome = (
-            "The published week is unchanged."
-            if _skipped_as_published(job)
-            else "Nothing was published."
+        skipped = _skipped_as_published(job)
+        outcome = "The published week is unchanged." if skipped else "Nothing was published."
+        delete = (
+            '<button type="button" class="abi-link danger" data-dialog="delete-run">Delete run</button>'
+            if deletable and not skipped
+            else ""
         )
         return (
             f'<section class="abi-panel" aria-labelledby="step-title"><h2 id="step-title">The run of {h(week)} failed</h2>'
             f'<p class="abi-message">{h(job.get("error_summary") or "Analysis failed.")}</p>{facts}'
             f'<div class="abi-panel-foot"><span class="abi-small abi-muted">{outcome}</span>'
-            f"{_run_again(job['run_at'], can_run=can_run, runnable=runnable)}</div></section>"
+            f'<span class="abi-actions">{delete}'
+            f"{_run_again(job['run_at'], can_run=can_run, runnable=runnable)}</span></div></section>"
         )
     if status == "queued":
         heading = f"{week} is queued"
@@ -1017,10 +1033,16 @@ def jobs_panel(jobs: Sequence[Mapping[str, Any]], shown: str | None = None, toke
             if active
             else str(job.get("error_summary") or "Analysis failed. Start it again from New runs.")
         )
+        # A failed submission's own page is where a run that stored nothing is deleted.
+        open_link = (
+            f'<a class="abi-btn small" href="{h(team_url(str(job["team_id"]), job_id=str(job["job_id"])))}">Open</a>'
+            if status == "failed"
+            else ""
+        )
         rows.append(
             f'<li{attrs}><div class="abi-item"><span class="abi-item-main"><span class="abi-item-title">{h(_job_week(job))}</span>'
             f'<span class="abi-item-sub" role="status" aria-live="polite">{h(message)}</span></span>'
-            f"{badge(status)}{_remove_queued(job, token)}</div></li>"
+            f"{badge(status)}{open_link}{_remove_queued(job, token)}</div></li>"
         )
         if len(rows) == 5:
             break
@@ -1372,12 +1394,37 @@ def withdraw_dialog(run: Mapping[str, Any], token: str) -> str:
 
 
 def delete_dialog(run: Mapping[str, Any], token: str) -> str:
-    run_id = str(run["run_id"])
+    return _delete_dialog(
+        str(run["run_id"]),
+        f"{run.get('team_display_name') or run['team_id']} · {_week(run)}",
+        "This permanently deletes the run, its results, publications, decisions and activity. "
+        "If the week is published, it also leaves the portal. The weekly schedule may run the week again.",
+        token,
+    )
+
+
+def delete_failed_dialog(job: Mapping[str, Any], team_name: str, token: str) -> str:
+    """Delete a run that failed before storing results, so its week can run afresh."""
+    return _delete_dialog(
+        str(job["run_id"]),
+        f"{team_name} · {_job_week(job)}",
+        "This permanently deletes the failed run: its submissions, saved analysis and model "
+        "review record. Nothing was published. When you run the week again, it uses the current "
+        "model settings.",
+        token,
+        unstored=True,
+    )
+
+
+def _delete_dialog(
+    run_id: str, context: str, explanation: str, token: str, *, unstored: bool = False
+) -> str:
+    # The server refuses an unstored confirmation once results are stored: it did not say so.
+    marker = '<input type="hidden" name="unstored" value="1">' if unstored else ""
     content = (
-        f'<div class="abi-context"><strong>{h(run.get("team_display_name") or run["team_id"])} · {h(_week(run))}</strong>'
+        f'{marker}<div class="abi-context"><strong>{h(context)}</strong>'
         f'<span class="abi-mono">Run {h(run_id[:16])}</span></div>'
-        "<p>This permanently deletes the run, its results, publications, decisions and activity. "
-        "If the week is published, it also leaves the portal. The weekly schedule may run the week again.</p>"
+        f"<p>{h(explanation)}</p>"
         '<label class="abi-check"><input type="checkbox" name="confirm_delete" value="1" required>'
         "<span>I understand and want to permanently delete this run</span></label>"
     )

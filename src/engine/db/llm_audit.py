@@ -19,6 +19,14 @@ from ..llm.response import response_json_schema
 from .repositories import RunIsPublished
 
 
+class ReviewSettingsChanged(ValueError):
+    """The scope was first assessed under other prompt, model or batch settings.
+
+    A scope's batches depend on those settings, so one audit trail never mixes two. A run
+    is assessed again under new settings only after deleting it.
+    """
+
+
 class SqlLlmJournal:
     def __init__(self, db: Database, scope_id: str, *, kind: str = "run") -> None:
         self.db = db
@@ -94,8 +102,13 @@ class SqlLlmJournal:
                     prior["settings_hash"],
                     prior["scope_kind"],
                 ) != (prompt_version, model_version, settings_hash, self.kind):
-                    raise ValueError(
-                        "review settings changed for the same scope; use a new version/trial"
+                    raise ReviewSettingsChanged(
+                        "the model settings (such as LLM_MAX_BATCH_SIZE) changed since "
+                        "this run was first sent to the model; to assess it with the current "
+                        "settings, delete the run in the console (run the week from New runs "
+                        "first if the console shows no failed run for it), then run it again"
+                        if self.kind == "run"
+                        else "review settings changed for the same scope; use a new version/trial"
                     )
             else:
                 self.db.execute(
