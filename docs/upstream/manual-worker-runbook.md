@@ -18,8 +18,25 @@ SELECT job_id, team_id, run_id, status, submitted_at, started_at,
 FROM run_jobs WHERE active_slot = 1;
 ```
 
+Since 2026-10-26 a New run submitted while another run is in progress waits as a queued row
+outside any backfill, so a stopped or stalled worker also shows as aging queued rows. When an
+operator reports that a New run never started, check those too:
+
+```sql
+SELECT job_id, team_id, run_id, run_at, submitted_at,
+       DATEDIFF(SECOND, submitted_at, SYSUTCDATETIME()) AS waiting_seconds
+FROM run_jobs WHERE status = 'queued' AND backfill_id IS NULL
+ORDER BY submitted_at;
+```
+
+Queued rows that age while no row holds `active_slot = 1` point to a worker that is not
+claiming work; rows that age behind a long running job are waiting their turn.
+
 Inspect the run-worker container's restart count and recent run.job_submitted,
-run.job_started, run.job_finished and run.job_failed events.
+run.job_started, run.job_finished and run.job_failed events. run.job_cancelled records a
+queued New run removed from the team page, and run.job_skipped (a warning) records a claimed
+job that was not run because its week was published while it waited; its error summary
+tells the operator to withdraw the week to run it again.
 Check ES/SQL/model availability and positive finite ES_REQUEST_TIMEOUT_MS, LLM_TIMEOUT_MS
 and SQL_REQUEST_TIMEOUT_MS settings. SQL's millisecond value is converted to whole seconds:
 use at least 1000 so it does not become the driver's unlimited zero timeout. Defaults are
