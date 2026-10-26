@@ -35,7 +35,9 @@ schedule holds the execution lock without a job row, and a weekly invocation cov
 enrolled team can hold it for a long time. While it claims nothing, a running worker logs
 `worker.idle` every 15 minutes with the reason. "Jobs wait for the execution lock (a CLI run,
 report, weekly job or deletion)" means the rows are waiting their turn; find the lock's holder
-before acting. No recent `worker.idle` event means the worker is stopped or stalled. Rows that
+before acting. "Backfill weeks wait while the weekly job runs" also means waiting their turn,
+for queued New runs as well: a weekly invocation that waited for a backfill week holds
+`alerts-bi-backfill-yield` until its whole run finishes. No recent `worker.idle` event means the worker is stopped or stalled. Rows that
 age behind a long running job are also waiting their turn.
 
 Inspect the run-worker container's restart count and recent run.job_submitted,

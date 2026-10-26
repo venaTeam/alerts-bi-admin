@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "d0af05fd93df7f0d68bee5055524081b0a17d98f",
+  "revision": "d90b4228dcd4e4260331781b3aa14eb7ba88d279",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
     "docs/upstream/alerts_bi_design.md": "09eec547cc4cb41698054d836abc8aa9283e09c661e8983e1aba4fbfd80a8706",
@@ -10,7 +10,7 @@
     "docs/upstream/backfill.md": "c11f8ea21762290b9670ffce1cdcccfda6d600337e999148727f243e87144bc3",
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",
-    "docs/upstream/manual-worker-runbook.md": "b09fb0081b64310b8971acbdb6304fd86341e6963cb63a08e8a9bb9f98e886d3",
+    "docs/upstream/manual-worker-runbook.md": "e732b0c78d178c38da77992bf1ed811cadca2cfb01d62c53e7dd6b3651d5b924",
     "docs/upstream/mockups/team-operators/admin.css": "e273cbaf11014053223fd31e8dd7b6c7d9100fb1a558abada61c1f16817a7468",
     "docs/upstream/mockups/team-operators/admin.html": "7005bc38d13065be6ca8d5b8f6771769338f76fa7ad2f0f392ff48b67c22b75b",
     "docs/upstream/mockups/team-operators/mock-data.js": "89f90a84da45c0141076bf821537ca8fdf3805e3aa23b0ad56ad7560dcd9e804",
