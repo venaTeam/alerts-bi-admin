@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import pytest
 from alerts_bi_operations.report.render import build_run_outputs
+from alerts_bi_operations.review.publication import publish_run, unpublish_run
 from alerts_bi_shared.db.connection import connect
 from fastapi.testclient import TestClient
 from src.app import build_admin
@@ -251,11 +252,8 @@ def present(run_id: str) -> bool:
         )
 
 
-def test_a_failed_run_that_stored_nothing_is_deleted_to_run_with_new_model_settings(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The model audit refuses a changed batch size under the same run id until deletion."""
-    first = submit(client, "settings-first").json()
+def fail_after_review(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the next job up to its model review, then fail it before it stores anything."""
 
     def fail_before_storing(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("injected failure after the model review")
@@ -263,6 +261,14 @@ def test_a_failed_run_that_stored_nothing_is_deleted_to_run_with_new_model_setti
     with monkeypatch.context() as patched:
         patched.setattr(service, "persist_run", fail_before_storing)
         assert jobs.work_once(ApiSettings(CONFIG, database=DB))
+
+
+def test_a_failed_run_that_stored_nothing_is_deleted_to_run_with_new_model_settings(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The model audit refuses a changed batch size under the same run id until deletion."""
+    first = submit(client, "settings-first").json()
+    fail_after_review(monkeypatch)
     assert client.get(first["status_url"]).json()["status"] == "failed"
     assert not present(first["run_id"])
 
@@ -315,10 +321,40 @@ def test_a_failed_rerun_of_a_stored_week_offers_deleting_the_stored_run(
     page = client.get(f"/teams/checkout-api?job_id={rerun['job_id']}").text
     # The stored run's own dialog: its results go too.
     assert 'data-dialog="delete-run">Delete run' in page and "its results, publications" in page
+    # Once the stored run is published, a failed attempt no longer offers deleting it.
+    with connect(CONFIG.sql, DB) as db:
+        publish_run(db, first["run_id"])
+    assert 'id="delete-run"' not in client.get(f"/teams/checkout-api?job_id={rerun['job_id']}").text
+    with connect(CONFIG.sql, DB) as db:
+        unpublish_run(db, first["run_id"], reason="test cleanup")
     assert delete(client, first["run_id"]).status_code == 303 and not present(first["run_id"])
     again = submit(client, "stored-again").json()
     assert jobs.work_once(ApiSettings(smaller, database=DB))
     assert client.get(again["status_url"]).json()["status"] == "completed"
+
+
+def test_a_stale_failed_attempt_never_deletes_a_later_result(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = submit(client, "stale-first").json()
+    fail_after_review(monkeypatch)
+    stale = client.get(f"/teams/checkout-api?job_id={first['job_id']}").text
+    assert 'name="unstored" value="1"' in stale
+    later = submit(client, "stale-later").json()
+    assert jobs.work_once(ApiSettings(CONFIG, database=DB))
+    assert client.get(later["status_url"]).json()["status"] == "completed"
+    # The failed attempt is older than the stored result, so its page offers no deletion...
+    page = client.get(f"/teams/checkout-api?job_id={first['job_id']}").text
+    assert "The run of" in page and 'id="delete-run"' not in page
+    # ...and a confirmation shown while nothing was stored refuses to delete what is now.
+    token = client.get("/csrf").json()["token"]
+    refused = client.post(
+        f"/runs/{first['run_id']}/delete",
+        data={"csrf": token, "confirm_delete": "1", "unstored": "1"},
+    )
+    assert refused.status_code == 303 and "error=" in refused.headers["location"]
+    assert f"run_id={first['run_id']}" in refused.headers["location"]
+    assert present(first["run_id"])
 
 
 def test_refused_deletion_of_a_run_that_stored_nothing_returns_to_its_submission(

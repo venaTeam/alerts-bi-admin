@@ -421,29 +421,20 @@ def build_admin(settings: AdminSettings) -> FastAPI:
             runnable = set(pages.runnable_weeks(calendar, now))
             if selected_job is not None:
                 view = "job"
-                failed_job = selected_job["status"] == "failed"
+                delete = ""
+                if selected_job["status"] == "failed":
+                    preselect = pages.as_utc(selected_job["run_at"])
+                    delete = failed_job_deletion(
+                        db, selected_job, names.get(team_id) or team_id, token
+                    )
                 content = pages.job_panel(
                     selected_job,
                     token=token,
                     can_run=team_id in names,
                     runnable=pages.as_utc(selected_job["run_at"]) in runnable,
-                    deletable=failed_job,
+                    deletable=bool(delete),
                 )
-                if failed_job:
-                    preselect = pages.as_utc(selected_job["run_at"])
-                    # Deleting is how a week runs again under changed model settings. A rerun
-                    # of a stored week deletes its stored results too, so it gets their dialog.
-                    job_run_id = str(selected_job["run_id"])
-                    stored = db.query_one(
-                        "SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": job_run_id}
-                    )
-                    dialogs += (
-                        pages.delete_dialog(run_row(db, job_run_id), token)
-                        if stored
-                        else pages.delete_failed_dialog(
-                            selected_job, names.get(team_id) or team_id, token
-                        )
-                    )
+                dialogs += delete
             elif selected is None:
                 view = "empty"
                 content = pages.empty_team_panel(
@@ -665,6 +656,27 @@ def build_admin(settings: AdminSettings) -> FastAPI:
 
     def team_path(team_id: str, run_id: str) -> str:
         return pages.team_url(team_id, run_id)
+
+    def failed_job_deletion(db: Database, job: dict[str, Any], team_name: str, token: str) -> str:
+        """The delete dialog a failed submission's page offers, or "" when it offers none.
+
+        Deleting is how a week runs again under changed model settings. A run that never stored
+        results gets its own dialog. A stored run is offered, with its own dialog, only when this
+        attempt reran it and it is unpublished: a stale failed attempt never deletes a later or
+        published result. The attempt reran it when the stored run started before the attempt
+        did; nothing else can run the same id while an attempt holds the execution lock, so a
+        run stored while the attempt waited in the queue still counts.
+        """
+        run_id = str(job["run_id"])
+        if db.query_one("SELECT 1 AS present FROM runs WHERE run_id=:id", {"id": run_id}) is None:
+            return pages.delete_failed_dialog(job, team_name, token)
+        run = run_row(db, run_id)
+        attempt_started = job.get("started_at") or job["submitted_at"]
+        if run.get("publication_id") is not None or pages.as_utc(run["started_at"]) >= pages.as_utc(
+            attempt_started
+        ):
+            return ""
+        return pages.delete_dialog(run, token)
 
     def deletion_page(db: Database, run_id: str) -> str:
         """Where a refused deletion returns: the stored run, or a never-stored run's failure."""
@@ -1100,7 +1112,12 @@ def build_admin(settings: AdminSettings) -> FastAPI:
                     with database() as db:
                         page = deletion_page(db, run_id)
                         try:
-                            team_id = delete_run(db, run_id, shared_lock=shared_lock)
+                            team_id = delete_run(
+                                db,
+                                run_id,
+                                shared_lock=shared_lock,
+                                unstored_only=fields.get("unstored") == "1",
+                            )
                         except DeletionRefused as exc:
                             return back(page, str(exc), True)
                     log.info(

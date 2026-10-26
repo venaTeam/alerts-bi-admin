@@ -1412,12 +1412,17 @@ def delete_failed_dialog(job: Mapping[str, Any], team_name: str, token: str) -> 
         "review record. Nothing was published. When you run the week again, it uses the current "
         "model settings.",
         token,
+        unstored=True,
     )
 
 
-def _delete_dialog(run_id: str, context: str, explanation: str, token: str) -> str:
+def _delete_dialog(
+    run_id: str, context: str, explanation: str, token: str, *, unstored: bool = False
+) -> str:
+    # The server refuses an unstored confirmation once results are stored: it did not say so.
+    marker = '<input type="hidden" name="unstored" value="1">' if unstored else ""
     content = (
-        f'<div class="abi-context"><strong>{h(context)}</strong>'
+        f'{marker}<div class="abi-context"><strong>{h(context)}</strong>'
         f'<span class="abi-mono">Run {h(run_id[:16])}</span></div>'
         f"<p>{h(explanation)}</p>"
         '<label class="abi-check"><input type="checkbox" name="confirm_delete" value="1" required>'

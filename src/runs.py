@@ -19,8 +19,13 @@ class DeletionRefused(ValueError):
     """The run is missing or currently in use."""
 
 
-def delete_run(db: Database, run_id: str, *, shared_lock: bool = True) -> str:
+def delete_run(
+    db: Database, run_id: str, *, shared_lock: bool = True, unstored_only: bool = False
+) -> str:
     """Delete in one SQL transaction; return the team for the post-delete redirect.
+
+    ``unstored_only`` comes from the confirmation for a run that never stored results. It
+    refuses once the run has stored results, which that confirmation did not describe.
 
     The caller holds the HTTP run gate and normally the weekly schedule lock. The job worker
     holds that lock for a whole run, so without it (``shared_lock=False``) deletion goes
@@ -42,6 +47,14 @@ def delete_run(db: Database, run_id: str, *, shared_lock: bool = True) -> str:
             is None
         ):
             raise DeletionRefused("Apply database migration 009_run_deletion before deleting runs.")
+        # A run that never stored results is named by its latest submission. Read it before any
+        # lock: scanning run_jobs while holding locks and then waiting for the team's queue lock
+        # would invert the order submissions take them in. The run id fixes the team.
+        submitted = db.query_one(
+            "SELECT TOP 1 team_id FROM run_jobs WHERE run_id=:run_id "
+            "ORDER BY submitted_at DESC, job_id DESC",
+            params,
+        )
         active = db.query(
             "SELECT run_id FROM run_jobs WITH (UPDLOCK, HOLDLOCK) WHERE active_slot=1"
         )
@@ -61,13 +74,12 @@ def delete_run(db: Database, run_id: str, *, shared_lock: bool = True) -> str:
             "SELECT team_id, status FROM runs WITH (UPDLOCK, HOLDLOCK) WHERE run_id=:run_id",
             params,
         )
-        if run is None:
-            # Never stored: the run's latest submission names the team.
-            run = db.query_one(
-                "SELECT TOP 1 team_id FROM run_jobs WITH (UPDLOCK, HOLDLOCK) "
-                "WHERE run_id=:run_id ORDER BY submitted_at DESC, job_id DESC",
-                params,
+        if run is not None and unstored_only:
+            raise DeletionRefused(
+                "This run has stored results now. Open it to review them before deleting."
             )
+        if run is None:
+            run = submitted
         if run is None:
             raise DeletionRefused("No such run.")
         if run.get("status") == "running":

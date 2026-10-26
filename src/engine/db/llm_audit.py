@@ -104,8 +104,9 @@ class SqlLlmJournal:
                 ) != (prompt_version, model_version, settings_hash, self.kind):
                     raise ReviewSettingsChanged(
                         "the prompt or model settings (such as LLM_MAX_BATCH_SIZE) changed since "
-                        "this run was first sent to the model; delete the run to assess it again "
-                        "with the current settings"
+                        "this run was first sent to the model; to assess it with the current "
+                        "settings, delete the run in the console (run the week from New runs "
+                        "first if the console shows no failed run for it), then run it again"
                         if self.kind == "run"
                         else "review settings changed for the same scope; use a new version/trial"
                     )

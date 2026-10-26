@@ -499,6 +499,10 @@ def test_a_failed_run_that_stored_nothing_can_be_deleted_from_its_submission() -
     assert "Checkout API · " in dialog and "model review record" in dialog
     assert "current model settings" in dialog and "publications" not in dialog
     assert 'name="confirm_delete" value="1" required' in dialog
+    # Only this confirmation is refused once the run stores results.
+    assert 'name="unstored" value="1"' in dialog
+    stored = run(status="completed")
+    assert 'name="unstored"' not in pages.delete_dialog(stored, "token")
     # The team page's submissions list leads to that failed submission, not to waiting ones.
     listed = pages.jobs_panel([{**job, "team_id": "checkout-api"}])
     assert f'href="/teams/checkout-api?tab=overview&amp;job_id={"a" * 32}">Open</a>' in listed
