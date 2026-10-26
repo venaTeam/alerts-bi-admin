@@ -69,6 +69,8 @@ the publication gap override and rejects forged overrides. Permanent run deletio
 SQL run-owned rows transactionally (including decisions in a scoped deletion allowance, with
 migration 009 and a checked parent foreign key). Since 2026-10-17 runs write no report files to clean. Shared caches remain. Active work on
 the run itself is refused; since 2026-10-20 a worker job for another run does not block it.
+Since 2026-10-26 a run that failed before storing results can be deleted too, so its week can
+run again after a model setting such as `LLM_MAX_BATCH_SIZE` changes.
 Scheduler enrollment remains. See design section 7.12 and decision 004 for scope,
 failure handling and the explicit exception to retained audit history.
 

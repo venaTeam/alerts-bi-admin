@@ -1446,6 +1446,23 @@ something without a job record (a CLI run or report, the weekly schedule) holds 
 deletion still returns 409, so a CLI rerun or report of the same run keeps blocking its
 deletion as the 2026-10-13 clarification requires.
 
+**Amended 2026-10-26: a failed run that never stored results can be deleted.** A run's model
+audit (section 7.13) records its prompt version, model version and settings, including the
+batch cap, under the run id, and refuses a later attempt whose settings differ. The run id
+does not include those settings, so after an operator changes `LLM_MAX_BATCH_SIZE` (or the
+deployment, output cap or prompt version), every further attempt of a week already sent to
+the model fails. A stored run could already be deleted; a run that failed before storing
+results has no `runs` row, so it could not, and its week could only run again under the old
+settings. Delete run now also accepts such a run, named by its latest submission. The same
+transaction, locks and refusals apply, and it removes the run's submissions, analysis
+checkpoint and run-scoped model audit; shared prompt artifacts and caches remain. The console
+offers it on the failed submission's page, which the team page's run submissions and a
+multi-week run's failed week now link to (Open). That page also offers deleting a stored run
+whose rerun failed, with the stored run's own confirmation. A run that fails on changed
+settings tells the operator so: "The model settings changed since this week was first sent to
+the model. Delete this run, then run the week again." The per-run settings check itself is
+unchanged: one audit trail never mixes two batch layouts.
+
 ### 7.13 LLM review quality, evaluation and durable audit
 
 **Implementation approved 2026-09-24** following the review in `llm_review_upgrade_plan.md`.
