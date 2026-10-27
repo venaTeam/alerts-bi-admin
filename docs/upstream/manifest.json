@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "72c1d4719efed4188e96875cdcc1c9fbbf2e2859",
+  "revision": "d1697e03399faffa230aaa19fe15e0ad51eeab7e",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
     "docs/upstream/alerts_bi_design.md": "851ff05262558e0ef744c739848d076eec74110afba547d5d3bba8b2f4206116",
@@ -28,7 +28,7 @@
     "docs/upstream/team_alert_status.md": "8a11d1d1cbb398549803458b4faaffba96374d2b88e61e88a8f2c05d045371b2",
     "docs/upstream/unified-console-deployment.md": "214a67db380ac8ae06134a8eaaacf971952b5df5c2e198302720b2838d77121b",
     "docs/upstream/what_is_an_incorrect_alert_EN.md": "c6bd1aa5170657f66e271eb4898e59d3a72a5de628a084449e75929185ff95ec",
-    "docs/upstream/contracts/console-http.json": "f23df793b7d8471ce24b22f60c465379e06e6d972a9fc90d5e45af8a5e355974",
+    "docs/upstream/contracts/console-http.json": "020084eff85e93ba604c3e9026314e7a161c6f773988eb7fb370d21e84770375",
     "docs/upstream/contracts/console-openapi.json": "98f90126ccb42c8300d7e245b713e62be16b9700e851878238f72525d9aa6fbc",
     "docs/upstream/contracts/migrations.json": "fdd15c9fdba7c65fd1df679865544e72d4b13bb625d77fbe6634a4e97af0b62d",
     "docs/upstream/contracts/outputs.json": "1f652c38199a27d7a564e137a331655ed3134f69c08b8d415e947773cb799cd2",
