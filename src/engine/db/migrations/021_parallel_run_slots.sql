@@ -5,8 +5,8 @@
 -- weeks of one team never run at once. Queued, completed, failed and cancelled jobs still hold
 -- none. Revisions 001-020 are unchanged.
 --
--- No row changes: before this revision at most one job held a slot. An older image that uses
--- only slot 1 runs unchanged against this schema, so it can remain installed on rollback.
+-- No row changes: before this revision at most one job held a slot. Roll forward only, like
+-- every revision: WORKER_CONCURRENCY=1 returns the worker to one job at a time on this schema.
 ALTER TABLE run_jobs DROP CONSTRAINT ck_run_jobs_state;
 ALTER TABLE run_jobs ADD CONSTRAINT ck_run_jobs_state CHECK (
     (status IN ('pending', 'running') AND active_slot IS NOT NULL AND active_slot >= 1)

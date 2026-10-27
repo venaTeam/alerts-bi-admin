@@ -58,6 +58,36 @@ class RunIsPublished(ValueError):
 PERSIST_LOCK_RESOURCE: Final = "alerts-bi-persist"
 #: Storing takes seconds; a wait this long means the other run is stuck, so fail and retry.
 PERSIST_LOCK_TIMEOUT_MS: Final = 10 * 60 * 1000
+#: One lock request waits at most this long. The driver aborts any statement, lock waits
+#: included, after SQL_REQUEST_TIMEOUT_MS (at least 1000), so the wait is many short requests.
+PERSIST_LOCK_ATTEMPT_MS: Final = 500
+
+
+def _lock_persistence(db: Database) -> None:
+    """Hold the storage lock until this transaction ends, waiting up to the timeout above."""
+    deadline = time.monotonic() + PERSIST_LOCK_TIMEOUT_MS / 1000
+    while True:
+        remaining_ms = int((deadline - time.monotonic()) * 1000)
+        row = db.query_one(
+            "SET NOCOUNT ON; DECLARE @result INT; "
+            "EXEC @result = sp_getapplock @Resource=:resource, @LockMode='Exclusive', "
+            "@LockOwner='Transaction', @LockTimeout=:timeout; SELECT @result AS result",
+            {
+                "resource": PERSIST_LOCK_RESOURCE,
+                "timeout": max(0, min(PERSIST_LOCK_ATTEMPT_MS, remaining_ms)),
+            },
+        )
+        result = None if row is None else int(row["result"])
+        if result is not None and result >= 0:
+            return
+        if result != -1:
+            # Not a timeout: cancelled, chosen as a deadlock victim, or a parameter error.
+            raise RuntimeError(f"the storage lock was refused ({result}); this run was not stored")
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "another run kept storing its results longer than this run could wait; "
+                "this run was not stored"
+            )
 
 
 def verdict_key(application: str, key_field: str) -> str:
@@ -293,16 +323,7 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
     clock = time.monotonic()
 
     with db.transaction():
-        locked = db.query_one(
-            "SET NOCOUNT ON; DECLARE @result INT; "
-            "EXEC @result = sp_getapplock @Resource=:resource, @LockMode='Exclusive', "
-            "@LockOwner='Transaction', @LockTimeout=:timeout; SELECT @result AS result",
-            {"resource": PERSIST_LOCK_RESOURCE, "timeout": PERSIST_LOCK_TIMEOUT_MS},
-        )
-        if locked is None or int(locked["result"]) < 0:
-            raise RuntimeError(
-                "another run kept storing its results for 10 minutes; this run was not stored"
-            )
+        _lock_persistence(db)
         # A published week is what readers are looking at; replacing its rows underneath
         # them would change a review nobody re-published (design section 7.10).
         if db.query_one(

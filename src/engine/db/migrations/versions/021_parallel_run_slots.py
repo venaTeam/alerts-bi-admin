@@ -14,5 +14,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise NotImplementedError(
-        "Numbered slots can remain installed on application rollback; an older image uses slot 1"
+        "Roll forward instead: WORKER_CONCURRENCY=1 runs one job at a time on this schema"
     )

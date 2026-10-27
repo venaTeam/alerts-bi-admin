@@ -495,14 +495,17 @@ def work_once(settings: ApiSettings) -> bool:
             raise
 
 
-def work_parallel(settings: ApiSettings, slots: int, *, poll_seconds: float = 2) -> bool:
+def work_parallel(
+    settings: ApiSettings, slots: int, *, poll_seconds: float = 2, refill: bool = True
+) -> bool:
     """Run up to ``slots`` jobs at once, one per team, until none is left to claim.
 
     This session holds the execution locks while any job runs, so CLI runs, reports, the
     weekly schedule and synchronous runs still find the worker busy, and recovery still
     happens only before the first claim. Each job runs on a connection of its own. A job that
     ends in an infrastructure error stops further claims; the others finish, then the error
-    exits the worker for its supervisor to restart. Returns whether any job ran.
+    exits the worker for its supervisor to restart. Without ``refill`` (``--once``) only the
+    first claims run and freed slots stay empty. Returns whether any job ran.
     """
     with connect(settings.config.sql, settings.target_database) as db:
         if not _has_work(db):
@@ -510,44 +513,52 @@ def work_parallel(settings: ApiSettings, slots: int, *, poll_seconds: float = 2)
         try:
             with execution_lock(db, settings):
                 _recover_orphans(db)
-                return _run_slots(settings, db, slots, poll_seconds)
+                return _run_slots(settings, db, slots, poll_seconds, refill=refill)
         except HTTPException as exc:
             if exc.status_code == 409:
                 return False
             raise
 
 
-def _run_slots(settings: ApiSettings, db: Database, slots: int, poll_seconds: float) -> bool:
-    running: dict[Future[None], int] = {}
+def _run_slots(
+    settings: ApiSettings, db: Database, slots: int, poll_seconds: float, *, refill: bool = True
+) -> bool:
+    running: dict[Future[None], tuple[int, dict[str, Any]]] = {}
     failure: BaseException | None = None
+    claiming = True
     worked = False
     with ThreadPoolExecutor(max_workers=slots, thread_name_prefix="run-job") as pool:
         while True:
-            free = [slot for slot in range(1, slots + 1) if slot not in running.values()]
-            while failure is None and free:
+            taken = {slot for slot, _job in running.values()}
+            free = [slot for slot in range(1, slots + 1) if slot not in taken]
+            while claiming and failure is None and free:
                 job = _claim_next(db, free[0])
                 if job is None:
                     break
                 slot = int(job["active_slot"])
-                running[pool.submit(_run_on_own_connection, settings, job)] = slot
+                running[pool.submit(_run_on_own_connection, settings, job)] = (slot, job)
                 free.remove(slot)
                 worked = True
+            claiming = refill
             if not running:
                 break
             # Wake on a finished job, or after a poll to start work submitted meanwhile.
             done, _ = wait(running, timeout=poll_seconds, return_when=FIRST_COMPLETED)
             for future in done:
-                del running[future]
+                slot, job = running.pop(future)
                 error = future.exception()
                 if error is not None and failure is None:
                     failure = error
-                    log.error(
-                        "worker.stopping",
-                        "A job stopped on an error the worker cannot recover from; starting "
-                        "no more jobs and exiting when the {running} still running finish",
-                        running=len(running),
-                        exc=error,
-                    )
+                    with _job_context(job):
+                        log.error(
+                            "worker.stopping",
+                            "The job in slot {slot} stopped on an error the worker cannot "
+                            "recover from; starting no more jobs and exiting when the "
+                            "{running} still running finish",
+                            slot=slot,
+                            running=len(running),
+                            exc=error,
+                        )
     if failure is not None:
         raise failure
     return worked
@@ -679,7 +690,8 @@ def run_worker(
     """The supervisor restarts a worker after infrastructure errors; jobs stay durable.
 
     With ``concurrency`` 1 each pass runs one job on the lock-owning session, as before
-    parallel slots existed; above 1 a pass runs jobs side by side until none is left.
+    parallel slots existed; above 1 a pass runs jobs side by side until none is left. With
+    ``once`` above 1, the pass runs only the jobs it claims first, up to one per slot.
     """
     check_concurrency(settings, concurrency)
     _log_worker_started(settings, poll_seconds, concurrency)
@@ -688,7 +700,7 @@ def run_worker(
         worked = (
             work_once(settings)
             if concurrency == 1
-            else work_parallel(settings, concurrency, poll_seconds=poll_seconds)
+            else work_parallel(settings, concurrency, poll_seconds=poll_seconds, refill=not once)
         )
         if once:
             return

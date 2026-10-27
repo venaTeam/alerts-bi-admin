@@ -132,7 +132,7 @@ These are the only inputs. "Upgrade" says where the running deployment already h
 | `ADMIN_ROUTE_HOST` | values.env | no | Empty generates a host. Upgrade: `oc get route alerts-bi-admin -n "$NS" -o jsonpath='{.spec.host}'` |
 | `ADMIN_ROUTE_TIMEOUT` | values.env | no | Upgrade: the Route's `haproxy.router.openshift.io/timeout` annotation, if set |
 | `WEEKLY_SCHEDULE` | values.env | no | Upgrade: the schedule of the weekly CronJob in use today (section 4), `oc get cronjob <name> -n "$NS" -o jsonpath='{.spec.schedule} {.spec.timeZone}{"\n"}'`. Convert it to UTC if its time zone is not UTC |
-| `UI_*`, `ANALYSIS_*` sizing | values.env | no | Upgrade: when the running containers have larger memory limits (`oc get deployment alerts-bi-admin -n "$NS" -o jsonpath='{range .spec.template.spec.containers[*]}{.name} {.resources}{"\n"}{end}'`), use those |
+| `UI_*`, `ANALYSIS_*`, `WORKER_MEMORY_*` sizing | values.env | no | Upgrade: when the running containers have larger memory limits (`oc get deployment alerts-bi-admin -n "$NS" -o jsonpath='{range .spec.template.spec.containers[*]}{.name} {.resources}{"\n"}{end}'`), use those |
 | `SQL_HOST`, `SQL_PORT`, `SQL_DATABASE` | config.env | yes | The database owner. Upgrade: [exported](#71-record-the-running-state) |
 | `SQL_USER`, `SQL_PASSWORD` | secrets.env | yes | The database owner; see the login requirements above |
 | `ES_URL`, `ES_V1_INDEX`, `ES_V2_INDEX` | config.env | yes | The Elasticsearch owner: URL and the v1/v2 source indices, aliases or patterns |
@@ -613,11 +613,13 @@ Restart the portal too after an SQL change (portal runbook).
 **Run several jobs at once.** `WORKER_CONCURRENCY` in `config.env` (1 to 8, default 1) is how
 many manual runs and backfill weeks the run worker executes at the same time, never two for one
 team. Each extra job adds an Elasticsearch scan, model requests and a week of alerts in memory,
-so raise it one step at a time: set `ANALYSIS_MEMORY_LIMIT` in `values.env` to about the
-current limit times the new value, run 7.6 to render it, and apply the configuration change
-below. Watch the next jobs' `run.job_finished` times and Elasticsearch and model errors before
-the next step. The worker logs `worker.started ... up to N jobs at once, one per team`; it
-refuses to start above 1 without migration `021_parallel_run_slots`. Set it back to 1 to undo.
+so raise it one step at a time: set `WORKER_MEMORY_LIMIT` in `values.env` (the run-worker
+container only) to about the single-job limit times the new value, run 7.6 to render it, and
+apply the configuration change below. Watch the next jobs' `run.job_finished` times and
+Elasticsearch and model errors before the next step. The worker logs `worker.started ... up to
+N jobs at once, one per team`; it refuses to start above 1 without migration
+`021_parallel_run_slots`. Set it back to 1 to undo; that needs no schema change. Returning to
+an image without 021 is a database restore ([section 12](#12-rollback)), like any migration.
 
 **Registry change.** Increment `registry_version` in `teams.json`. Validate it with the running
 image before installing it, then install and restart:

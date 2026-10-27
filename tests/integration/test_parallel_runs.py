@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime
-from threading import Barrier, Event, Lock
+from threading import Barrier, Event, Lock, Timer
 from typing import Any
 
 import pytest
@@ -221,4 +223,34 @@ def test_runs_store_their_results_one_at_a_time(monkeypatch: pytest.MonkeyPatch)
     with connect(CONFIG.sql, DB) as db:
         assert db.query_one("SELECT run_id FROM runs WHERE run_id=:id", {"id": run_id}) is None
         persist_run(db, PersistencePayload(run=sample_run(run_id=run_id)))
+        assert db.query_one("SELECT run_id FROM runs WHERE run_id=:id", {"id": run_id})
+
+
+@pytest.mark.usefixtures("settings")
+def test_waiting_for_the_storage_lock_outlasts_the_sql_request_timeout() -> None:
+    """The driver aborts any statement after SQL_REQUEST_TIMEOUT_MS; the lock wait must not."""
+    run_id = "f" * 64
+    held, release = Event(), Event()
+
+    def hold() -> None:
+        with connect(CONFIG.sql, DB) as holder:
+            holder.query_one(
+                "SET NOCOUNT ON; DECLARE @result INT; EXEC @result = sp_getapplock "
+                "@Resource='alerts-bi-persist', @LockMode='Exclusive', "
+                "@LockOwner='Transaction', @LockTimeout=0; SELECT @result AS result"
+            )
+            held.set()
+            assert release.wait(30)
+            holder.rollback()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        holding = executor.submit(hold)
+        assert held.wait(10)
+        Timer(2.5, release.set).start()
+        clock = time.monotonic()
+        with connect(replace(CONFIG.sql, request_timeout_ms=1000), DB) as db:
+            persist_run(db, PersistencePayload(run=sample_run(run_id=run_id)))
+        assert time.monotonic() - clock >= 2
+        holding.result(timeout=30)
+    with connect(CONFIG.sql, DB) as db:
         assert db.query_one("SELECT run_id FROM runs WHERE run_id=:id", {"id": run_id})

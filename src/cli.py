@@ -35,7 +35,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument(
         "--once",
         action="store_true",
-        help="process at most one job (with --concurrency above 1, one pass) and exit",
+        help="process at most one job (with --concurrency above 1, one per slot) and exit",
     )
     worker.add_argument(
         "--concurrency",
