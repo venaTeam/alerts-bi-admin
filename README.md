@@ -370,6 +370,9 @@ Elasticsearch scan and model calls overlap.
 at once, for every run whatever started it (design "Parallel model requests within a run").
 Each batch keeps its three attempts and retry waits, the audit journal is still written one
 record at a time on the run's connection, and results are combined in batch order, so a run
-stores the same rows at any value. Each running job sends up to this many requests, so the
+stores the same rows at any value. When a run fails, its other batches start no further attempt
+and its audit journal accepts no further write once one write fails (a lost connection would
+otherwise continue on a fresh session without the run's locks); requests already sent finish
+and are recorded, and a retry resumes from the journal. Each running job sends up to this many requests, so the
 endpoint can see `WORKER_CONCURRENCY` times `LLM_CONCURRENCY`. It is not one of a run's
 recorded model settings: changing it never refuses a week already sent to the model.

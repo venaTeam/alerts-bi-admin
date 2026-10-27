@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextvars
 import json
 import random
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -227,6 +228,7 @@ def _assess_alerts(
         max_batch_size=max_batch_size or 200,
     )
 
+    stop = threading.Event()
     assess = partial(
         _assess_batch,
         batch_count=len(batches),
@@ -239,6 +241,7 @@ def _assess_alerts(
         clock=clock,
         factored=factored,
         sleep=sleep,
+        stopping=stop.is_set,
     )
     finished: list[_BatchOutcome | None] = [None] * len(batches)
     if concurrency == 1 or len(batches) < 2:
@@ -260,8 +263,10 @@ def _assess_alerts(
                     finished[futures[future]] = ended = future.result()
                     progress.record(ended.attempts, succeeded=ended.verdicts is not None)
             except BaseException:
-                # Start no further batch; leaving the block waits for those in flight, so
-                # their audit records are complete before the error propagates.
+                # Start no further batch and no further attempt of one in flight; leaving
+                # the block waits for each request already sent, so its audit record is
+                # complete before the error propagates.
+                stop.set()
                 for future in futures:
                     future.cancel()
                 raise
@@ -322,6 +327,14 @@ def _assess_alerts(
     return result
 
 
+class _Stopping(Exception):
+    """The run is failing: a request thread starts no further attempt of its batch.
+
+    An attempt already sent finishes and is recorded; the batch resumes from the audit
+    journal when the run is retried.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class _BatchOutcome:
     """How one batch ended, kept until every batch of the run has."""
@@ -347,6 +360,7 @@ def _assess_batch(
     clock: Callable[[], datetime],
     factored: bool,
     sleep: Callable[[float], None],
+    stopping: Callable[[], bool],
 ) -> _BatchOutcome:
     """Build, send and log one batch; runs on a request thread when batches overlap."""
     request = build_request(batch, RULESET_VERSION, prompt_version)
@@ -377,6 +391,7 @@ def _assess_batch(
             clock=clock,
             sleep=sleep,
             position=(position, batch_count),
+            stopping=stopping,
         )
         _log_group(batch, (position, batch_count), attempts, verdicts)
     return _BatchOutcome(batch, attempts, verdicts, failure_reason, classified_at)
@@ -535,6 +550,7 @@ def _attempt_batch(
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
     position: tuple[int, int] = (1, 1),
+    stopping: Callable[[], bool] = lambda: False,
 ) -> tuple[list[Verdict] | None, str, datetime]:
     """Run one batch through at most three attempts.
 
@@ -550,7 +566,8 @@ def _attempt_batch(
     completed_at = now
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        started = time.monotonic()
+        if stopping():
+            raise _Stopping("another batch of this run failed; no further attempt starts")
         status = "succeeded"
         reason: str | None = None
         verdicts: list[Verdict] | None = None
@@ -561,6 +578,9 @@ def _attempt_batch(
         created_at = saved["created_at"] if saved else clock()
         if journal is not None and saved is None:
             journal.start(cycle, attempt, created_at)
+        # After the audit writes, so a wait for another request thread's write is not
+        # counted as the request's latency.
+        started = time.monotonic()
 
         try:
             if saved is not None:

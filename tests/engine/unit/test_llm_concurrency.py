@@ -102,7 +102,8 @@ def comparable(result: AssessmentResult) -> dict[str, Any]:
 
 def test_requests_overlap_up_to_the_setting_and_never_beyond() -> None:
     rows = alerts(6)
-    client = Tracking(delay=dict.fromkeys(batch_ids(rows), 0.05))
+    # Long enough that a slow runner still starts the third thread before the first answers.
+    client = Tracking(delay=dict.fromkeys(batch_ids(rows), 0.2))
 
     result = assess(rows, client, concurrency=3)
 
@@ -194,6 +195,34 @@ def test_a_failure_outside_the_retry_policy_stops_the_run() -> None:
         assess(rows, client, concurrency=2)
     assert client.in_flight == 0, "requests in flight finished before the error propagated"
     assert len(client.answered) < len(ids) - 1, "queued batches were not started"
+
+
+def test_once_the_run_fails_a_batch_in_flight_starts_no_further_attempt() -> None:
+    rows = alerts(2)
+    ids = batch_ids(rows)
+    first_failed = threading.Event()
+    crashed = threading.Event()
+
+    class Crashing(Tracking):
+        def complete(self, **kwargs: Any) -> str | Completion:
+            if kwargs["batch_id"] == ids[0]:
+                first_failed.wait(5)
+                crashed.set()
+                raise RuntimeError("endpoint client bug")
+            return super().complete(**kwargs)
+
+    inner = FakeLlmClient(model_version=MODEL_VERSION)
+    inner.on(ids[1], 1, ScriptedResult("transport_error"))
+    client = Crashing(inner)
+
+    def wait_for_the_crash(_seconds: float) -> None:
+        first_failed.set()
+        crashed.wait(5)
+        time.sleep(0.3)  # the run notices the crash while this batch waits to retry
+
+    with pytest.raises(RuntimeError, match="endpoint client bug"):
+        assess(rows, client, concurrency=2, sleep=wait_for_the_crash)
+    assert [call.attempt for call in inner.calls if call.batch_id == ids[1]] == [1]
 
 
 def test_concurrency_below_one_is_refused() -> None:
