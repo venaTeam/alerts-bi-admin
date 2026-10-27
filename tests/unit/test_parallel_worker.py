@@ -283,3 +283,37 @@ def test_parallel_slots_need_migration_021(
     else:
         jobs.check_concurrency(settings, 3)  # type: ignore[arg-type]
     assert asked == [{"version": "021_parallel_run_slots"}]
+
+
+@pytest.mark.usefixtures("console_log")
+def test_a_lost_worker_session_stops_claims_at_once(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A retry would run on a fresh session that holds none of the worker's locks."""
+    claims = _Claims("checkout-api")
+    calls = 0
+    lost = Event()
+    finished: list[str] = []
+
+    def claim(db: Any, slot: int) -> dict[str, Any] | None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return claims(db, slot)
+        lost.set()
+        raise DBAPIError("SELECT", {}, Exception("DBPROCESS is dead"), connection_invalidated=True)
+
+    def run(_settings: Any, job: dict[str, Any]) -> None:
+        assert lost.wait(10)
+        finished.append(job["team_id"])
+
+    monkeypatch.setattr(jobs, "_claim_next", claim)
+    monkeypatch.setattr(jobs, "_run_on_own_connection", run)
+
+    with pytest.raises(DBAPIError):
+        jobs._run_slots(SimpleNamespace(), _Db(), 2, 0.05)  # type: ignore[arg-type]
+
+    assert calls == 2 and finished == ["checkout-api"]
+    err = capsys.readouterr().err
+    assert _events(err, "worker.claim_failed") == []
+    assert "SQL session was lost" in _events(err, "worker.stopping")[0]

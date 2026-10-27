@@ -92,7 +92,8 @@ at once is a setting whose default keeps today's behavior. Approved behavior:
   same way meanwhile. Ordinary analysis failures still fail only their own job. A claim that
   fails (a deadlock with a deletion of another run, say: the worker's session takes the lower
   deadlock priority, so the deletion wins) is logged as `worker.claim_failed` and retried at the
-  next poll; three failures in a row stop the worker in the same way.
+  next poll; three failures in a row stop the worker in the same way, and so does one that
+  lost the worker's SQL session, because that session held the execution lock.
 * **Migration `021_parallel_run_slots`.** It relaxes the job-state constraint from slot 1 to
   any slot from 1, keeps one job per slot number and adds a filtered unique index of one active
   job per team. It changes no rows. Like every migration it is roll-forward only: an image
