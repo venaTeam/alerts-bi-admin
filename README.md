@@ -362,6 +362,7 @@ the database restore in `deploy/openshift/README.md` section 12. `WORKER_CONCURR
 never two for one team; above 1 the worker refuses to start without 021, and the run-worker
 container's memory is `WORKER_MEMORY_*` in `values.env`. While any job runs the worker keeps
 the shared execution lock, so CLI runs, reports, the weekly schedule and synchronous
-`POST /runs` wait as before. Jobs store their results one at a time (`alerts-bi-persist` SQL
+`POST /runs` refuse as before (a weekly invocation waits, up to three hours, only while a
+backfill is in progress). Jobs store their results one at a time (`alerts-bi-persist` SQL
 lock, taken in short requests so a wait outlasts `SQL_REQUEST_TIMEOUT_MS`); only the
 Elasticsearch scan and model calls overlap.
