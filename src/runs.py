@@ -28,11 +28,11 @@ def delete_run(
     refuses once the run has stored results, which that confirmation did not describe.
 
     The caller holds the HTTP run gate and normally the weekly schedule lock. The job worker
-    holds that lock for a whole run, so without it (``shared_lock=False``) deletion goes
-    ahead only beside a job holding the active slot for another run: while a job holds the
-    slot, CLI runs and reports, the weekly schedule and synchronous HTTP runs refuse to
-    start, so the lock's holder is the worker, and locking the job's row keeps it there
-    until this transaction ends. The audit lock also excludes an active model review from a
+    holds that lock while any job runs, so without it (``shared_lock=False``) deletion goes
+    ahead only beside jobs holding active slots for other runs: while a job holds a slot,
+    CLI runs and reports, the weekly schedule and synchronous HTTP runs refuse to start, so
+    the lock's holder is the worker, and locking the jobs' rows keeps it there until this
+    transaction ends. The audit lock also excludes an active model review from a
     separate CLI process. Run-row locks serialize publication and deletion. Shared prompt
     artifacts, verdicts and panel parses survive.
     """
@@ -56,7 +56,7 @@ def delete_run(
             params,
         )
         active = db.query(
-            "SELECT run_id FROM run_jobs WITH (UPDLOCK, HOLDLOCK) WHERE active_slot=1"
+            "SELECT run_id FROM run_jobs WITH (UPDLOCK, HOLDLOCK) WHERE active_slot IS NOT NULL"
         )
         if not shared_lock and not active:
             raise WeeklyBusy("another run, report, weekly schedule or deletion is in progress")

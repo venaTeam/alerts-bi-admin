@@ -68,10 +68,10 @@ def test_020_adds_operator_columns_and_keeps_every_review(monkeypatch: pytest.Mo
         before = _reviews(db)
 
     applied, _already = migrations.migrate(CONFIG.sql, DB)
-    assert applied == ["020_portal_review_operators"]
+    assert applied == ["020_portal_review_operators", "021_parallel_run_slots"]
 
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "020_portal_review_operators"
+        assert migrations.current_revision(db) == "021_parallel_run_slots"
         check_schema(db)
         after = _reviews(db)
         # Every earlier column keeps its value and position; the two new ones come last.

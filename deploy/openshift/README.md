@@ -543,7 +543,7 @@ oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly --dry
 oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly-status
 ```
 
-Expect every migration `applied` (the last one `020_portal_review_operators`), the registry valid
+Expect every migration `applied` (the last one `021_parallel_run_slots`), the registry valid
 with the expected teams, the due weeks listed without anything being run, and each enrolled
 team's latest published week.
 
@@ -609,6 +609,15 @@ oc rollout status deployment/alerts-bi-admin -n "$NS" --timeout=60m
 ```
 
 Restart the portal too after an SQL change (portal runbook).
+
+**Run several jobs at once.** `WORKER_CONCURRENCY` in `config.env` (1 to 8, default 1) is how
+many manual runs and backfill weeks the run worker executes at the same time, never two for one
+team. Each extra job adds an Elasticsearch scan, model requests and a week of alerts in memory,
+so raise it one step at a time: set `ANALYSIS_MEMORY_LIMIT` in `values.env` to about the
+current limit times the new value, run 7.6 to render it, and apply the configuration change
+below. Watch the next jobs' `run.job_finished` times and Elasticsearch and model errors before
+the next step. The worker logs `worker.started ... up to N jobs at once, one per team`; it
+refuses to start above 1 without migration `021_parallel_run_slots`. Set it back to 1 to undo.
 
 **Registry change.** Increment `registry_version` in `teams.json`. Validate it with the running
 image before installing it, then install and restart:

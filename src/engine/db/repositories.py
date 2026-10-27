@@ -52,6 +52,14 @@ class RunIsPublished(ValueError):
     """A run readers can currently see may not be re-persisted underneath them."""
 
 
+#: Runs store one at a time, even when the worker runs several (design "Parallel runs across
+#: teams"). The durable inserts below check for a row and then insert it, and replacing a
+#: big run can escalate to table locks; two runs storing at once could collide or deadlock.
+PERSIST_LOCK_RESOURCE: Final = "alerts-bi-persist"
+#: Storing takes seconds; a wait this long means the other run is stuck, so fail and retry.
+PERSIST_LOCK_TIMEOUT_MS: Final = 10 * 60 * 1000
+
+
 def verdict_key(application: str, key_field: str) -> str:
     """Map key for a durable verdict lookup.
 
@@ -285,6 +293,16 @@ def persist_run(db: Database, payload: PersistencePayload) -> None:
     clock = time.monotonic()
 
     with db.transaction():
+        locked = db.query_one(
+            "SET NOCOUNT ON; DECLARE @result INT; "
+            "EXEC @result = sp_getapplock @Resource=:resource, @LockMode='Exclusive', "
+            "@LockOwner='Transaction', @LockTimeout=:timeout; SELECT @result AS result",
+            {"resource": PERSIST_LOCK_RESOURCE, "timeout": PERSIST_LOCK_TIMEOUT_MS},
+        )
+        if locked is None or int(locked["result"]) < 0:
+            raise RuntimeError(
+                "another run kept storing its results for 10 minutes; this run was not stored"
+            )
         # A published week is what readers are looking at; replacing its rows underneath
         # them would change a review nobody re-published (design section 7.10).
         if db.query_one(
