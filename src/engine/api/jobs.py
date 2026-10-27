@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
-from contextlib import contextmanager, nullcontext
+from contextlib import contextmanager, nullcontext, suppress
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -26,6 +26,7 @@ from alerts_bi_shared.logging_setup import log, log_context
 from alerts_bi_shared.ui.explain import format_week
 from alerts_bi_shared.versions import APP_VERSION
 from fastapi import HTTPException
+from sqlalchemy.exc import DBAPIError
 
 from ..config import ApiSettings
 from ..db.llm_audit import ReviewSettingsChanged
@@ -523,8 +524,12 @@ def work_parallel(
 def _run_slots(
     settings: ApiSettings, db: Database, slots: int, poll_seconds: float, *, refill: bool = True
 ) -> bool:
+    # A deletion beside running jobs locks their rows and can deadlock with a claim. Let the
+    # claim lose: the operator's deletion goes through and the claim is retried at the next poll.
+    db.execute("SET DEADLOCK_PRIORITY LOW")
     running: dict[Future[None], tuple[int, dict[str, Any]]] = {}
     failure: BaseException | None = None
+    failed_claims = 0
     claiming = True
     worked = False
     with ThreadPoolExecutor(max_workers=slots, thread_name_prefix="run-job") as pool:
@@ -532,7 +537,13 @@ def _run_slots(
             taken = {slot for slot, _job in running.values()}
             free = [slot for slot in range(1, slots + 1) if slot not in taken]
             while claiming and failure is None and free:
-                job = _claim_next(db, free[0])
+                try:
+                    job = _claim_next(db, free[0])
+                except DBAPIError as exc:
+                    failed_claims += 1
+                    failure = _claim_failed(db, exc, failed_claims, len(running), poll_seconds)
+                    break
+                failed_claims = 0
                 if job is None:
                     break
                 slot = int(job["active_slot"])
@@ -547,9 +558,11 @@ def _run_slots(
             for future in done:
                 slot, job = running.pop(future)
                 error = future.exception()
-                if error is not None and failure is None:
-                    failure = error
-                    with _job_context(job):
+                if error is None:
+                    continue
+                with _job_context(job):
+                    if failure is None:
+                        failure = error
                         log.error(
                             "worker.stopping",
                             "The job in slot {slot} stopped on an error the worker cannot "
@@ -559,9 +572,49 @@ def _run_slots(
                             running=len(running),
                             exc=error,
                         )
+                    else:
+                        # Each lost job is recovered as interrupted; name every one of them.
+                        log.error(
+                            "worker.job_lost",
+                            "The job in slot {slot} also stopped on an error the worker "
+                            "cannot recover from while the worker was stopping",
+                            slot=slot,
+                            exc=error,
+                        )
     if failure is not None:
         raise failure
     return worked
+
+
+#: Claims that fail in a row before the worker stops; a deadlock with a deletion fails one.
+CLAIM_ATTEMPTS = 3
+
+
+def _claim_failed(
+    db: Database, exc: DBAPIError, attempts: int, running: int, poll_seconds: float
+) -> DBAPIError | None:
+    """Log a failed claim; return it as the worker's failure once it has failed too often."""
+    # A rollback fails only when the connection itself is gone; the next claim fails the same way.
+    with suppress(Exception):
+        db.rollback()
+    if attempts < CLAIM_ATTEMPTS:
+        log.warn(
+            "worker.claim_failed",
+            "Claiming the next job failed; trying again in {poll:dur}",
+            poll=poll_seconds,
+            attempts=attempts,
+            exc=exc,
+        )
+        return None
+    log.error(
+        "worker.stopping",
+        "Claiming the next job failed {attempts} times in a row; starting no more jobs and "
+        "exiting when the {running} still running finish",
+        attempts=attempts,
+        running=running,
+        exc=exc,
+    )
+    return exc
 
 
 def _run_on_own_connection(settings: ApiSettings, job: dict[str, Any]) -> None:

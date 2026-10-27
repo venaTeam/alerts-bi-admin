@@ -613,13 +613,23 @@ Restart the portal too after an SQL change (portal runbook).
 **Run several jobs at once.** `WORKER_CONCURRENCY` in `config.env` (1 to 8, default 1) is how
 many manual runs and backfill weeks the run worker executes at the same time, never two for one
 team. Each extra job adds an Elasticsearch scan, model requests and a week of alerts in memory,
-so raise it one step at a time: set `WORKER_MEMORY_LIMIT` in `values.env` (the run-worker
-container only) to about the single-job limit times the new value, run 7.6 to render it, and
-apply the configuration change below. Watch the next jobs' `run.job_finished` times and
-Elasticsearch and model errors before the next step. The worker logs `worker.started ... up to
-N jobs at once, one per team`; it refuses to start above 1 without migration
-`021_parallel_run_slots`. Set it back to 1 to undo; that needs no schema change. Returning to
-an image without 021 is a database restore ([section 12](#12-rollback)), like any migration.
+so raise it one step at a time, each step with one pod restart:
+
+1. Wait until the 7.2 query shows no `pending` or `running` rows. A restart interrupts running
+   jobs, which then show as failed and must be run again.
+2. Set `WORKER_CONCURRENCY` in `config.env` and apply it with the `alerts-bi-config` command
+   from 7.5 (a ConfigMap change alone restarts nothing).
+3. Set `WORKER_MEMORY_LIMIT` in `values.env` (the run-worker container only) to about the
+   single-job limit times the new value, and run 7.6. Its rollout restarts the pod with both
+   values. If the limit did not change, restart the pod instead, as in the configuration change
+   above.
+4. Check `oc logs -n "$NS" deploy/alerts-bi-admin -c run-worker | grep worker.started` shows
+   `up to N jobs at once, one per team`, then watch the next jobs' `run.job_finished` times and
+   Elasticsearch and model errors before the next step.
+
+The worker refuses to start above 1 without migration `021_parallel_run_slots`. Undo with the
+same steps and `WORKER_CONCURRENCY=1`; that needs no schema change. Returning to an image
+without 021 is a database restore ([section 12](#12-rollback)), like any migration.
 
 **Registry change.** Increment `registry_version` in `teams.json`. Validate it with the running
 image before installing it, then install and restart:
