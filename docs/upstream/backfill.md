@@ -77,7 +77,11 @@ orphaned running jobs, then a pending job, then queued manual jobs by submission
 backfill weeks by backfill submission time and oldest week first. A claimed week becomes running
 and takes the active slot. Execution, the refusal of changed registry/model inputs, interruption
 recovery and completion are unchanged (since 2026-10-17 recovery regenerates no CSV files);
-completion never publishes.
+completion never publishes. (Amended 2026-10-27, design "Parallel runs across teams": with
+`WORKER_CONCURRENCY` above 1 the worker fills each free slot in this order, skipping jobs whose
+team already has one running, so a team's weeks still run one at a time, oldest first, while
+other teams' work runs beside them. A weekly invocation waiting for a backfill week keeps the
+worker off further backfill weeks and starts when no job is left running.)
 
 Manual submissions are unchanged when no backfill is in progress, including the 409 while busy.
 While a backfill has queued, pending or running weeks, a manual submission that finds the slot or

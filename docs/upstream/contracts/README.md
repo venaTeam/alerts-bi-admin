@@ -89,3 +89,10 @@ a second job for a week the team already has queued, pending or running, and let
 `POST /run-jobs/{job_id}/cancel` remove a queued manual job. console-http.json records the rule
 and console-openapi.json the new 409 description of `POST /run-jobs`. Routes, job states,
 migrations, views, CSV outputs and shared/operations interfaces are unchanged.
+
+The 2026-10-27 parallel-runs amendment (design "Parallel runs across teams") appends migration
+021_parallel_run_slots without modifying 001–020. It relaxes `ck_run_jobs_state` from slot 1 to
+any slot from 1 and adds the filtered unique index `ux_run_jobs_team_active` (one active job per
+team); no row, view, column or CSV output changes. console-http.json records the worker's
+`WORKER_CONCURRENCY` (1 to 8, default 1) and the `alerts-bi-persist` storage lock. Routes, job
+states, payloads, portal views and shared/operations interfaces are unchanged.
