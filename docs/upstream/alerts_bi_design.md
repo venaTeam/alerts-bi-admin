@@ -12,7 +12,9 @@ at once is a setting whose default keeps today's behavior. Approved behavior:
   --concurrency`) is how many jobs the worker runs at once, from 1 to 8; another value stops
   the worker at startup. With 1 the worker behaves exactly as before. Each further job adds an
   Elasticsearch scan, model requests and a week of alerts in the worker's memory, so the
-  deployment raises it one step at a time together with the worker's memory limit.
+  deployment raises it one step at a time together with the run-worker container's own
+  memory limit (`WORKER_MEMORY_LIMIT`, separate from the weekly job's and admin jobs'
+  `ANALYSIS_MEMORY_*`).
 * **Different teams side by side, one week per team.** A job holds a numbered slot from 1 to
   the setting while it is pending or running. A team holds at most one slot: a queued job
   whose team has a job running waits for it, and the next queued job of another team starts
@@ -33,17 +35,19 @@ at once is a setting whose default keeps today's behavior. Approved behavior:
   when the worker has no job left running.
 * **Results are stored one at a time.** Only the Elasticsearch scan, analysis and model calls
   overlap. Storing a run (persistence) takes the transaction-scoped SQL lock
-  `alerts-bi-persist`, waiting up to 10 minutes, because the shared verdict and panel-parse
+  `alerts-bi-persist`, waiting up to 10 minutes in short requests (the SQL driver ends any
+  statement after `SQL_REQUEST_TIMEOUT_MS`), because the shared verdict and panel-parse
   caches are written when absent and two big replacements could block each other. A run that
   cannot take it in time fails with its analysis checkpoint kept, and can be retried.
 * **An infrastructure error drains the worker.** When a job ends in an error the worker cannot
   record (a lost SQL connection, say), the worker starts no further jobs, lets the others
-  finish, then exits for its supervisor to restart, logging `worker.stopping`. Ordinary
+  finish, then exits for its supervisor to restart, logging `worker.stopping` with the failed
+  job's team, run, job and slot. Ordinary
   analysis failures still fail only their own job.
 * **Migration `021_parallel_run_slots`.** It relaxes the job-state constraint from slot 1 to
   any slot from 1, keeps one job per slot number and adds a filtered unique index of one active
-  job per team. It changes no rows; an image without it still uses only slot 1 and runs
-  against it, so it remains installed on rollback. A worker set above 1 refuses to start
+  job per team. It changes no rows. Like every migration it is roll-forward only: an image
+  without it stops in its migrate init container. A worker set above 1 refuses to start
   without it, and console readiness requires it.
 
 The console's queued run says "A team runs one week at a time, and only a set number of teams
@@ -55,9 +59,12 @@ time across all teams" below, "The worker polls SQL and claims at most one submi
 [async-runs.md](async-runs.md), and "The single worker claims work" in
 [backfill.md](backfill.md), which keep their other rules. [Decision 011](../decisions/011-parallel-runs-across-teams.md) records it.
 
-Rollback: set `WORKER_CONCURRENCY=1` and restart the pod, after its running jobs finish (a
-restart interrupts them and they are recovered as failed, as on any restart). An earlier image
-needs no schema change. No deployment is authorized by this amendment.
+Rollback: set `WORKER_CONCURRENCY=1` on this image and restart the pod, after its running jobs
+finish (a restart interrupts them and they are recovered as failed, as on any restart); that
+needs no schema change. Returning to an image without migration 021 needs the database restore
+of the deployment runbook's rollback section, as for any applied migration. `run-worker --once`
+with the setting above 1 runs only the jobs it claims first, at most one per slot. No
+deployment is authorized by this amendment.
 
 ## New runs queue while another run is in progress — accepted 2026-10-26
 

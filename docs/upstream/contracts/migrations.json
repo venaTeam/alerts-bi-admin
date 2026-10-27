@@ -1,5 +1,5 @@
 {
-  "source_commit": "736b7e8fe031db6cb9019831bcab345be2468fc1",
+  "source_commit": "11c3bf37afd6fcbf83dc818f2018981a82bdb570",
   "schema_head": "021_parallel_run_slots",
   "files": {
     "001_initial_schema.sql": "7c4f43ce0aa698bcf82b1694143fe9dd5f68a35430c1a8461c7296f958dde41a",
@@ -42,8 +42,8 @@
     "versions/019_erase_operator_names.py": "80f42190fc4f1bb9edf914c797697ddd24a546a1ac4d4c2177c301bc38308515",
     "020_portal_review_operators.sql": "e94f16d06bd9949326291d99809f5f727dffe7228aa0aab75064b6d5733adb5f",
     "versions/020_portal_review_operators.py": "f451b99f1f5fe16460a69e5000d0223c34125e4d58d22e0ddbb4fa419b39c93d",
-    "021_parallel_run_slots.sql": "9139118fc1b6eba61fc742fdcae7534d6f7ee86e210850c759e000feb5e5119e",
-    "versions/021_parallel_run_slots.py": "39eb5bb80d7d84b988099c5bc9ca16bf013da665649c06b3b777e931bb845524"
+    "021_parallel_run_slots.sql": "49483ee4216f9fef632b88a363e3f3bed9575c8b894056793d2b64e2beb8ef3b",
+    "versions/021_parallel_run_slots.py": "aafd2bea68b96eb45771ba04181ddc32990aaa4a3802d6e76e7c2df215119bdd"
   },
   "amended": "2026-10-27"
 }

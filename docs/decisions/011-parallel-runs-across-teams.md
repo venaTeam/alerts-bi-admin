@@ -19,5 +19,7 @@ recovery relies on one worker owning the execution lock) and parallel weeks of o
 
 Admin owns the worker, migration 021, the storage lock and the deployment setting. Portal
 views, shared/operations interfaces, CSV outputs and deterministic identifiers are unchanged.
-Merge design, then admin; deploy only with separate authorization. Rolling back needs no schema
-change: set the setting to 1, or deploy an earlier image, after the running jobs finish.
+Merge design, then admin; deploy only with separate authorization. Rolling the feature back
+needs no schema change: set the setting to 1 on this image after the running jobs finish.
+Migration 021 is roll-forward only, like every migration, so returning to an earlier image
+needs the database restore of the deployment runbook.
