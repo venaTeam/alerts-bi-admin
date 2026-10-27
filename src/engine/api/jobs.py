@@ -593,10 +593,22 @@ CLAIM_ATTEMPTS = 3
 def _claim_failed(
     db: Database, exc: DBAPIError, attempts: int, running: int, poll_seconds: float
 ) -> DBAPIError | None:
-    """Log a failed claim; return it as the worker's failure once it has failed too often."""
-    # A rollback fails only when the connection itself is gone; the next claim fails the same way.
+    """Log a failed claim; return it as the worker's failure once it has failed too often.
+
+    A lost connection fails at once: the session held the execution lock, and SQLAlchemy would
+    run the next claim on a fresh session that holds none of the worker's locks.
+    """
     with suppress(Exception):
         db.rollback()
+    if exc.connection_invalidated:
+        log.error(
+            "worker.stopping",
+            "The worker's SQL session was lost, and with it the execution lock; starting no "
+            "more jobs and exiting when the {running} still running finish",
+            running=running,
+            exc=exc,
+        )
+        return exc
     if attempts < CLAIM_ATTEMPTS:
         log.warn(
             "worker.claim_failed",
