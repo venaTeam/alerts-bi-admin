@@ -42,8 +42,11 @@ at once is a setting whose default keeps today's behavior. Approved behavior:
 * **An infrastructure error drains the worker.** When a job ends in an error the worker cannot
   record (a lost SQL connection, say), the worker starts no further jobs, lets the others
   finish, then exits for its supervisor to restart, logging `worker.stopping` with the failed
-  job's team, run, job and slot. Ordinary
-  analysis failures still fail only their own job.
+  job's team, run, job and slot, and `worker.job_lost` for each further job that fails the
+  same way meanwhile. Ordinary analysis failures still fail only their own job. A claim that
+  fails (a deadlock with a deletion of another run, say: the worker's session takes the lower
+  deadlock priority, so the deletion wins) is logged as `worker.claim_failed` and retried at the
+  next poll; three failures in a row stop the worker in the same way.
 * **Migration `021_parallel_run_slots`.** It relaxes the job-state constraint from slot 1 to
   any slot from 1, keeps one job per slot number and adds a filtered unique index of one active
   job per team. It changes no rows. Like every migration it is roll-forward only: an image

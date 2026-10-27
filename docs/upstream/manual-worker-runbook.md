@@ -55,7 +55,10 @@ job that was not run because its week was published while it waited; its error s
 tells the operator to withdraw the week to run it again. worker.stopping (an error) means a job
 hit an error the worker could not record, such as a lost SQL connection: the worker starts no
 further job, lets the others finish and exits, and the container restarts; the job it names is
-then recovered as interrupted.
+then recovered as interrupted, and so is each job a worker.job_lost record names.
+worker.claim_failed (a warning) means claiming the next job failed, typically a deadlock with a
+deletion that the deletion won; the worker retries at its next poll, and three failures in a row
+log worker.stopping instead.
 Check ES/SQL/model availability and positive finite ES_REQUEST_TIMEOUT_MS, LLM_TIMEOUT_MS
 and SQL_REQUEST_TIMEOUT_MS settings. SQL's millisecond value is converted to whole seconds:
 use at least 1000 so it does not become the driver's unlimited zero timeout. Defaults are
