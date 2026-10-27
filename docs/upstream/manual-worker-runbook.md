@@ -58,7 +58,8 @@ further job, lets the others finish and exits, and the container restarts; the j
 then recovered as interrupted, and so is each job a worker.job_lost record names.
 worker.claim_failed (a warning) means claiming the next job failed, typically a deadlock with a
 deletion that the deletion won; the worker retries at its next poll, and three failures in a row
-log worker.stopping instead.
+log worker.stopping instead. A claim that lost the worker's own SQL session (a failover, say)
+logs worker.stopping at once: that session held the execution lock.
 Check ES/SQL/model availability and positive finite ES_REQUEST_TIMEOUT_MS, LLM_TIMEOUT_MS
 and SQL_REQUEST_TIMEOUT_MS settings. SQL's millisecond value is converted to whole seconds:
 use at least 1000 so it does not become the driver's unlimited zero timeout. Defaults are
