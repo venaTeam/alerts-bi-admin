@@ -16,14 +16,22 @@ from src.engine.api import jobs
 
 
 class _Db:
-    """The coordinator's connection: it only sets its deadlock priority and rolls back."""
+    """The coordinator's connection: deadlock priority, the lock check and rollbacks."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, lock_after: int | None = None) -> None:
         self.statements: list[str] = []
         self.rollbacks = 0
+        self.lock_checks = 0
+        self.lock_after = lock_after  # Checks that still find the lock; None means always.
 
     def execute(self, sql: str, *_args: Any) -> None:
         self.statements.append(sql)
+
+    def query_one(self, sql: str, params: dict[str, Any]) -> dict[str, str]:
+        assert "APPLOCK_MODE" in sql and params == {"resource": jobs.LOCK_RESOURCE}
+        self.lock_checks += 1
+        held = self.lock_after is None or self.lock_checks <= self.lock_after
+        return {"mode": "Exclusive" if held else "NoLock"}
 
     def rollback(self) -> None:
         self.rollbacks += 1
@@ -317,3 +325,25 @@ def test_a_lost_worker_session_stops_claims_at_once(
     err = capsys.readouterr().err
     assert _events(err, "worker.claim_failed") == []
     assert "SQL session was lost" in _events(err, "worker.stopping")[0]
+
+
+@pytest.mark.usefixtures("console_log")
+def test_a_session_that_no_longer_holds_the_lock_claims_nothing(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A rollback can lose the session unseen; SQLAlchemy then reconnects without the locks."""
+    claims = _Claims("checkout-api", "payments-core")
+    finished: list[str] = []
+
+    def run(_settings: Any, job: dict[str, Any]) -> None:
+        finished.append(job["team_id"])
+
+    monkeypatch.setattr(jobs, "_claim_next", claims)
+    monkeypatch.setattr(jobs, "_run_on_own_connection", run)
+
+    db = _Db(lock_after=1)  # The first fill holds the lock; the next check finds a new session.
+    with pytest.raises(RuntimeError, match="no longer holds the execution lock"):
+        jobs._run_slots(SimpleNamespace(), db, 1, 0.05)  # type: ignore[arg-type]
+
+    assert finished == ["checkout-api"] and claims.waiting == ["payments-core"]
+    assert "SQL session was lost" in _events(capsys.readouterr().err, "worker.stopping")[0]

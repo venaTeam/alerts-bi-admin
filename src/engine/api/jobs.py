@@ -249,7 +249,8 @@ def _admit(
         week=f"{run_at:%Y-%m-%d}",
         placement="next for the worker"
         if status == "pending"
-        else "queued behind the runs ahead of it, before any remaining backfill weeks",
+        else "queued behind the runs ahead of it; once its team has no run in progress it goes "
+        "before any remaining backfill weeks",
         llm=body.llm,
         status=status,
         job_id=job_id,
@@ -536,6 +537,8 @@ def _run_slots(
         while True:
             taken = {slot for slot, _job in running.values()}
             free = [slot for slot in range(1, slots + 1) if slot not in taken]
+            if claiming and failure is None and free and not _holds_execution_lock(db):
+                failure = _session_lost(len(running))
             while claiming and failure is None and free:
                 try:
                     job = _claim_next(db, free[0])
@@ -592,23 +595,16 @@ CLAIM_ATTEMPTS = 3
 
 def _claim_failed(
     db: Database, exc: DBAPIError, attempts: int, running: int, poll_seconds: float
-) -> DBAPIError | None:
+) -> BaseException | None:
     """Log a failed claim; return it as the worker's failure once it has failed too often.
 
-    A lost connection fails at once: the session held the execution lock, and SQLAlchemy would
-    run the next claim on a fresh session that holds none of the worker's locks.
+    A lost connection fails at once. Losing it in the rollback instead is caught before the
+    next claim, by :func:`_holds_execution_lock`.
     """
     with suppress(Exception):
         db.rollback()
     if exc.connection_invalidated:
-        log.error(
-            "worker.stopping",
-            "The worker's SQL session was lost, and with it the execution lock; starting no "
-            "more jobs and exiting when the {running} still running finish",
-            running=running,
-            exc=exc,
-        )
-        return exc
+        return _session_lost(running, exc)
     if attempts < CLAIM_ATTEMPTS:
         log.warn(
             "worker.claim_failed",
@@ -627,6 +623,35 @@ def _claim_failed(
         exc=exc,
     )
     return exc
+
+
+def _holds_execution_lock(db: Database) -> bool:
+    """Does this session still hold alerts-bi-manual-run?
+
+    After a lost connection SQLAlchemy runs the next statement on a fresh session, which holds
+    none of the worker's locks; claiming there would run jobs beside other writers.
+    """
+    try:
+        row = db.query_one(
+            "SELECT APPLOCK_MODE('public', :resource, 'Session') AS mode",
+            {"resource": LOCK_RESOURCE},
+        )
+    except DBAPIError:
+        return False
+    return row is not None and row["mode"] == "Exclusive"
+
+
+def _session_lost(running: int, exc: BaseException | None = None) -> BaseException:
+    """Log the stop for a lost worker session; return the failure the worker exits with."""
+    failure = exc or RuntimeError("the worker's SQL session no longer holds the execution lock")
+    log.error(
+        "worker.stopping",
+        "The worker's SQL session was lost, and with it the execution lock; starting no "
+        "more jobs and exiting when the {running} still running finish",
+        running=running,
+        exc=failure,
+    )
+    return failure
 
 
 def _run_on_own_connection(settings: ApiSettings, job: dict[str, Any]) -> None:
