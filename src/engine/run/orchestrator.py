@@ -243,6 +243,7 @@ def execute_run(
                 "model_deployment": config.llm.model,
                 "max_completion_tokens": config.llm.max_completion_tokens,
             },
+            concurrency=config.llm.concurrency,
         )
         outcomes = assessment.outcomes
         batch_attempts = assessment.batch_attempts

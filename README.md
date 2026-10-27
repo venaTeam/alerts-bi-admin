@@ -365,3 +365,11 @@ the shared execution lock, so CLI runs, reports, the weekly schedule and synchro
 `POST /runs` wait as before. Jobs store their results one at a time (`alerts-bi-persist` SQL
 lock, taken in short requests so a wait outlasts `SQL_REQUEST_TIMEOUT_MS`); only the
 Elasticsearch scan and model calls overlap.
+
+`LLM_CONCURRENCY` (1 to 8, default 1) is how many of one run's model batches wait on the model
+at once, for every run whatever started it (design "Parallel model requests within a run").
+Each batch keeps its three attempts and retry waits, the audit journal is still written one
+record at a time on the run's connection, and results are combined in batch order, so a run
+stores the same rows at any value. Each running job sends up to this many requests, so the
+endpoint can see `WORKER_CONCURRENCY` times `LLM_CONCURRENCY`. It is not one of a run's
+recorded model settings: changing it never refuses a week already sent to the model.

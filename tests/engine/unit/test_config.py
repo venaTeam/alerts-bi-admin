@@ -35,6 +35,7 @@ ENV_NAMES = [
     "LLM_MAX_COMPLETION_TOKENS",
     "LLM_TIMEOUT_MS",
     "LLM_MAX_BATCH_SIZE",
+    "LLM_CONCURRENCY",
     "LLM_LIVE_TEST",
 ]
 
@@ -183,6 +184,27 @@ def test_batch_size_may_never_be_raised_above_the_design_ceiling(
 def test_a_non_positive_batch_size_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LLM_MAX_BATCH_SIZE", "0")
     with pytest.raises(ValueError, match="positive integer"):
+        load_config()
+
+
+def test_model_requests_go_one_at_a_time_by_default() -> None:
+    assert load_config().llm.concurrency == 1
+
+
+@pytest.mark.parametrize("value", ["1", "4", "8"])
+def test_model_request_concurrency_accepts_one_to_eight(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("LLM_CONCURRENCY", value)
+    assert load_config().llm.concurrency == int(value)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "9"])
+def test_model_request_concurrency_outside_one_to_eight_fails_at_load(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("LLM_CONCURRENCY", value)
+    with pytest.raises(ValueError, match="LLM_CONCURRENCY must be between 1 and 8"):
         load_config()
 
 

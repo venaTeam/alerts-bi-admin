@@ -631,6 +631,22 @@ The worker refuses to start above 1 without migration `021_parallel_run_slots`. 
 same steps and `WORKER_CONCURRENCY=1`; that needs no schema change. Returning to an image
 without 021 is a database restore ([section 12](#12-rollback)), like any migration.
 
+**Send a run's model requests in parallel.** `LLM_CONCURRENCY` in `config.env` (1 to 8,
+default 1) is how many of one run's model batches wait on the model at once, in the run worker,
+the console's synchronous runs and the weekly job alike. A run stores the same results at any
+value. Each running job sends up to this many, so the endpoint can see up to
+`WORKER_CONCURRENCY` times `LLM_CONCURRENCY` requests at once. Raise it one step at a time:
+
+1. Wait until the 7.2 query shows no `pending` or `running` rows, as above.
+2. Set `LLM_CONCURRENCY` in `config.env`, apply it with the `alerts-bi-config` command from 7.5
+   and restart the pod as in the configuration change above. The weekly CronJob reads the
+   ConfigMap at its next start.
+3. Watch the next runs' `llm.done` records (`needed a retry` and `exhausted` counts) and the
+   model endpoint's timeouts and `429` responses before the next step.
+
+Undo with the same steps and `LLM_CONCURRENCY=1`. It is not one of a run's recorded model
+settings, so changing it never makes a week already sent to the model fail.
+
 **Registry change.** Increment `registry_version` in `teams.json`. Validate it with the running
 image before installing it, then install and restart:
 
