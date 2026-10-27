@@ -132,7 +132,7 @@ These are the only inputs. "Upgrade" says where the running deployment already h
 | `ADMIN_ROUTE_HOST` | values.env | no | Empty generates a host. Upgrade: `oc get route alerts-bi-admin -n "$NS" -o jsonpath='{.spec.host}'` |
 | `ADMIN_ROUTE_TIMEOUT` | values.env | no | Upgrade: the Route's `haproxy.router.openshift.io/timeout` annotation, if set |
 | `WEEKLY_SCHEDULE` | values.env | no | Upgrade: the schedule of the weekly CronJob in use today (section 4), `oc get cronjob <name> -n "$NS" -o jsonpath='{.spec.schedule} {.spec.timeZone}{"\n"}'`. Convert it to UTC if its time zone is not UTC |
-| `UI_*`, `ANALYSIS_*` sizing | values.env | no | Upgrade: when the running containers have larger memory limits (`oc get deployment alerts-bi-admin -n "$NS" -o jsonpath='{range .spec.template.spec.containers[*]}{.name} {.resources}{"\n"}{end}'`), use those |
+| `UI_*`, `ANALYSIS_*`, `WORKER_MEMORY_*` sizing | values.env | no | Upgrade: when the running containers have larger memory limits (`oc get deployment alerts-bi-admin -n "$NS" -o jsonpath='{range .spec.template.spec.containers[*]}{.name} {.resources}{"\n"}{end}'`), use those |
 | `SQL_HOST`, `SQL_PORT`, `SQL_DATABASE` | config.env | yes | The database owner. Upgrade: [exported](#71-record-the-running-state) |
 | `SQL_USER`, `SQL_PASSWORD` | secrets.env | yes | The database owner; see the login requirements above |
 | `ES_URL`, `ES_V1_INDEX`, `ES_V2_INDEX` | config.env | yes | The Elasticsearch owner: URL and the v1/v2 source indices, aliases or patterns |
@@ -543,7 +543,7 @@ oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly --dry
 oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly-status
 ```
 
-Expect every migration `applied` (the last one `020_portal_review_operators`), the registry valid
+Expect every migration `applied` (the last one `021_parallel_run_slots`), the registry valid
 with the expected teams, the due weeks listed without anything being run, and each enrolled
 team's latest published week.
 
@@ -609,6 +609,27 @@ oc rollout status deployment/alerts-bi-admin -n "$NS" --timeout=60m
 ```
 
 Restart the portal too after an SQL change (portal runbook).
+
+**Run several jobs at once.** `WORKER_CONCURRENCY` in `config.env` (1 to 8, default 1) is how
+many manual runs and backfill weeks the run worker executes at the same time, never two for one
+team. Each extra job adds an Elasticsearch scan, model requests and a week of alerts in memory,
+so raise it one step at a time, each step with one pod restart:
+
+1. Wait until the 7.2 query shows no `pending` or `running` rows. A restart interrupts running
+   jobs, which then show as failed and must be run again.
+2. Set `WORKER_CONCURRENCY` in `config.env` and apply it with the `alerts-bi-config` command
+   from 7.5 (a ConfigMap change alone restarts nothing).
+3. Set `WORKER_MEMORY_LIMIT` in `values.env` (the run-worker container only) to about the
+   single-job limit times the new value, and run 7.6. Its rollout restarts the pod with both
+   values. If the limit did not change, restart the pod instead, as in the configuration change
+   above.
+4. Check `oc logs -n "$NS" deploy/alerts-bi-admin -c run-worker | grep worker.started` shows
+   `up to N jobs at once, one per team`, then watch the next jobs' `run.job_finished` times and
+   Elasticsearch and model errors before the next step.
+
+The worker refuses to start above 1 without migration `021_parallel_run_slots`. Undo with the
+same steps and `WORKER_CONCURRENCY=1`; that needs no schema change. Returning to an image
+without 021 is a database restore ([section 12](#12-rollback)), like any migration.
 
 **Registry change.** Increment `registry_version` in `teams.json`. Validate it with the running
 image before installing it, then install and restart:

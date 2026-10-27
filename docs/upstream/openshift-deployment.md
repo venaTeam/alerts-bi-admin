@@ -55,6 +55,7 @@ on the retired runs package/image/repository. Apply migrations before consumers.
 | ES_URL, ES_V1_INDEX, ES_V2_INDEX, ES_USERNAME, ES_PASSWORD, ES_CA_CERT, ES_REQUEST_TIMEOUT_MS, ES_PAGE_SIZE, ES_PIT_KEEP_ALIVE, ES_SEARCH_RETRIES, ES_SEARCH_RETRY_BACKOFF_MS | Admin, run worker and weekly execution only |
 | LLM_ENABLED, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_MODEL_REVISION, LLM_TIMEOUT_MS, LLM_MAX_BATCH_SIZE, LLM_MAX_COMPLETION_TOKENS | Admin, run worker and weekly execution only; unchanged model configuration |
 | SSL_CERT_FILE | Optional; set to the mounted CA bundle when the model endpoint uses a private CA (the model client honours it). Never set but empty |
+| WORKER_CONCURRENCY | Run worker only: jobs it runs at once, 1 to 8, never two for one team; default 1 (design "Parallel runs across teams", 2026-10-27). Raise it one step at a time with the run-worker container's `WORKER_MEMORY_LIMIT`; above 1 needs migration 021 |
 | LOG_LEVEL | debug, info, warn or error; default info |
 | LOG_FORMAT | console (default) for people reading `oc logs`, or json for a log collector that parses each line (design "Console log format", 2026-10-20) |
 | LOG_FORWARD_URL | Optional; unset sends nothing. `http://alerts-bi-logs:9880` once the log collector is deployed (design "Log shipping to Elasticsearch", 2026-10-20) |
@@ -192,7 +193,8 @@ the former proxy's objects (the `oauth-proxy` container, the `alerts-bi-admin-ac
 RoleBinding, the `alerts-bi-admin-tls` Secret, `COOKIE_SECRET`, the ServiceAccount's OAuth
 redirect annotation and the Route allowlist annotations), because `oc apply` would keep them.
 
-Keep one UI worker, one replica and one dedicated manual worker. Browser submissions and status
+Keep one UI worker, one replica and one dedicated manual worker (since 2026-10-27 that one
+worker may run up to `WORKER_CONCURRENCY` jobs at once on threads). Browser submissions and status
 checks return promptly; analysis duration is independent of the Route timeout. The
 compatibility POST /runs is still synchronous and retains its existing timeout considerations.
 
@@ -203,6 +205,9 @@ pages offline; the runbook checks `/healthz` through the Route. The worker has n
 Containers run with the restricted security context (no privilege escalation, all capabilities
 dropped, RuntimeDefault seccomp) and memory limits; the analysis containers' 2 GiB default limit
 leaves headroom over the 233 MiB peak measured for 1.2 million events and 20,000 identities.
+Since 2026-10-27 the run-worker container has its own `WORKER_MEMORY_REQUEST` and
+`WORKER_MEMORY_LIMIT` (same defaults), raised with `WORKER_CONCURRENCY`; the weekly job and admin
+jobs keep `ANALYSIS_MEMORY_*`.
 Keep resource limits appropriate to the existing deployment: an upgrade keeps larger running
 limits. The portal Route keeps both the `ip_allowlist` and the older `ip_whitelist` annotation,
 so every 4.x router applies its client allowlist.

@@ -165,7 +165,9 @@ Pending/running jobs retain their execution reservation after worker exit. CLI/w
 runs, reports and acceptance verification refuse until the worker completes or reconciles
 the job; use the updated image for every run writer. The verification command also holds
 the shared SQL lock through persistence and exports.
-`run-worker --once` processes at most one job and exits. The team page polls while visible;
+`run-worker --once` processes at most one job and exits (with a concurrency above 1, at most one
+per slot: it starts the jobs it can claim at once, one per team, starts no more as they finish,
+and exits when they have). The team page polls while visible;
 you can leave and return later. Failures and worker interruptions remain visible and need a
 new submission to retry. Analysis completion never publishes a review.
 
@@ -350,3 +352,16 @@ Migration `020_portal_review_operators` adds `v1_operators` and `v2_operator` to
 `portal_reviews` view from each run's frozen registry entry, so the portal can list the
 operators a published week ran with. It changes no rows. Deploy admin before the portal: a
 portal built for 020 stays not ready until the migration is applied.
+
+Migration `021_parallel_run_slots` numbers the run worker's slots and lets a team hold at most
+one (design "Parallel runs across teams"). It changes no rows. Like every migration it is
+roll-forward only: an image without it stops in its migrate init container, so undo the
+feature with `WORKER_CONCURRENCY=1` on this image, and go back to an earlier image only through
+the database restore in `deploy/openshift/README.md` section 12. `WORKER_CONCURRENCY` (or
+`run-worker --concurrency`, 1 to 8, default 1) sets how many jobs the worker runs at once,
+never two for one team; above 1 the worker refuses to start without 021, and the run-worker
+container's memory is `WORKER_MEMORY_*` in `values.env`. While any job runs the worker keeps
+the shared execution lock, so CLI runs, reports, the weekly schedule and synchronous
+`POST /runs` wait as before. Jobs store their results one at a time (`alerts-bi-persist` SQL
+lock, taken in short requests so a wait outlasts `SQL_REQUEST_TIMEOUT_MS`); only the
+Elasticsearch scan and model calls overlap.

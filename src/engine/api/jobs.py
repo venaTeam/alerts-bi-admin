@@ -3,15 +3,17 @@
 The session lock lives on the execution connection, surviving journal/persistence commits.
 A new worker can recover running jobs only after the previous session released its lock.
 Queued jobs (backfill weeks, and manual runs accepted while another run is in progress or an
-older manual run is queued) hold no slot; the worker claims them one at a time after pending
-work (docs/backfill.md).
+older manual run is queued) hold no slot; the worker claims them after pending work
+(docs/backfill.md). With WORKER_CONCURRENCY above 1 it runs up to that many jobs at once, one
+per team, each on a connection of its own (design "Parallel runs across teams").
 """
 
 from __future__ import annotations
 
 import time
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager, nullcontext
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
+from contextlib import contextmanager, nullcontext, suppress
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -24,6 +26,7 @@ from alerts_bi_shared.logging_setup import log, log_context
 from alerts_bi_shared.ui.explain import format_week
 from alerts_bi_shared.versions import APP_VERSION
 from fastapi import HTTPException
+from sqlalchemy.exc import DBAPIError
 
 from ..config import ApiSettings
 from ..db.llm_audit import ReviewSettingsChanged
@@ -43,6 +46,11 @@ QUEUE_LOCK_PREFIX = "alerts-bi-queue:"
 PUBLISHED_WHILE_WAITING = (
     "Not run: this week was published while the run waited. Withdraw it to run it again."
 )
+#: Most jobs one worker runs at once. Each adds an Elasticsearch scan, model calls and a
+#: week of alerts in memory, so a typo such as 30 is refused rather than obeyed.
+MAX_CONCURRENCY = 8
+#: Numbered slots and one active job per team; without it the database allows one slot.
+PARALLEL_MIGRATION = "021_parallel_run_slots"
 
 
 class ExecutionBusy(HTTPException):
@@ -124,7 +132,7 @@ NO_REQUESTER = ""
 
 
 def refuse_active_job(db: Database) -> None:
-    if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1"):
+    if db.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot IS NOT NULL"):
         raise ExecutionBusy("A run is already pending or running. Try again after it finishes.")
 
 
@@ -241,7 +249,8 @@ def _admit(
         week=f"{run_at:%Y-%m-%d}",
         placement="next for the worker"
         if status == "pending"
-        else "queued behind the runs ahead of it, before any remaining backfill weeks",
+        else "queued behind the runs ahead of it; once its team has no run in progress it goes "
+        "before any remaining backfill weeks",
         llm=body.llm,
         status=status,
         job_id=job_id,
@@ -357,10 +366,10 @@ def _may_claim_backfill(db: Database) -> bool:
 
 
 def _active_or_queued_manual(db: Database) -> bool:
-    """Does a job hold the active slot, or a manual run wait in the queue?"""
+    """Does a job hold an active slot, or a manual run wait in the queue?"""
     return (
         db.query_one(
-            "SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1 "
+            "SELECT TOP 1 job_id FROM run_jobs WHERE active_slot IS NOT NULL "
             "OR (status='queued' AND backfill_id IS NULL)"
         )
         is not None
@@ -376,12 +385,17 @@ def _has_work(db: Database) -> bool:
     return queued is not None and _may_claim_backfill(db)
 
 
-def claim_queued(db: Database, started: datetime) -> dict[str, Any] | None:
-    """Claim the next queued job: manual runs first, then backfill weeks oldest first."""
+def claim_queued(db: Database, started: datetime, slot: int = 1) -> dict[str, Any] | None:
+    """Claim the next queued job: manual runs first, then backfill weeks oldest first.
+
+    A team runs one job at a time, so a queued job waits while its team holds a slot.
+    """
     candidates = db.query(
         "SELECT TOP 5 j.job_id FROM run_jobs j "
         "LEFT JOIN run_backfills b ON b.backfill_id=j.backfill_id "
         "WHERE j.status='queued' AND (j.backfill_id IS NULL OR :backfill=1) "
+        "AND NOT EXISTS (SELECT 1 FROM run_jobs a WHERE a.team_id=j.team_id "
+        "AND a.active_slot IS NOT NULL) "
         # Manual runs keep submission order; backfill weeks go by backfill, then oldest week.
         "ORDER BY CASE WHEN j.backfill_id IS NULL THEN 0 ELSE 1 END, "
         "CASE WHEN j.backfill_id IS NULL THEN j.submitted_at END, b.submitted_at, "
@@ -391,14 +405,74 @@ def claim_queued(db: Database, started: datetime) -> dict[str, Any] | None:
     for candidate in candidates:
         # A cancellation may have committed since the read; claim only a still-queued row.
         claimed = db.query(
-            "UPDATE run_jobs SET status='running',active_slot=1,started_at=:at "
+            "UPDATE run_jobs SET status='running',active_slot=:slot,started_at=:at "
             "OUTPUT inserted.job_id WHERE job_id=:id AND status='queued'",
-            {"id": candidate["job_id"], "at": started},
+            {"id": candidate["job_id"], "at": started, "slot": slot},
         )
         db.commit()
         if claimed:
             return get_job(db, str(candidate["job_id"]))
     return None
+
+
+def _recover_orphans(db: Database) -> None:
+    """Finish jobs left running by an interrupted worker; call only under the execution lock."""
+    for orphan in db.query("SELECT * FROM run_jobs WHERE status='running'"):
+        # A result this attempt committed is complete: its CSVs render from SQL.
+        completed = committed_result(db, orphan)
+        finish_job(
+            db,
+            str(orphan["job_id"]),
+            "completed" if completed else "failed",
+            None
+            if completed
+            else "Worker interrupted. Retry this week."
+            if orphan.get("backfill_id")
+            else "Worker interrupted. Start a new run to retry.",
+        )
+        log.warn(
+            "run.job_recovered",
+            "Found a job still running from an interrupted worker (started "
+            "{started:utc}); {outcome}",
+            started=orphan["started_at"],
+            outcome="its result was stored, so it is marked completed"
+            if completed
+            else "no result was stored, so it is marked failed",
+            team_id=orphan["team_id"],
+            run_id=orphan["run_id"],
+            job_id=orphan["job_id"],
+            backfill_id=orphan.get("backfill_id"),
+        )
+
+
+def _claim_next(db: Database, slot: int) -> dict[str, Any] | None:
+    """The pending job (which already holds slot 1), else the next queued job in ``slot``."""
+    started = datetime.now(UTC).replace(tzinfo=None)
+    started = started.replace(microsecond=started.microsecond // 1000 * 1000)
+    job = db.query_one("SELECT TOP 1 * FROM run_jobs WHERE status='pending' ORDER BY submitted_at")
+    if job is not None:
+        db.execute(
+            "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
+            {"id": job["job_id"], "at": started},
+        )
+        db.commit()
+    else:
+        job = claim_queued(db, started, slot)
+        if job is None:
+            return None
+    job["started_at"] = started
+    return job
+
+
+@contextmanager
+def _job_context(job: Mapping[str, Any]) -> Iterator[None]:
+    with log_context(
+        team_id=job["team_id"],
+        run_id=job["run_id"],
+        job_id=job["job_id"],
+        backfill_id=job.get("backfill_id"),
+    ):
+        yield
 
 
 def work_once(settings: ApiSettings) -> bool:
@@ -410,60 +484,179 @@ def work_once(settings: ApiSettings) -> bool:
             return False
         try:
             with execution_lock(db, settings):
-                for orphan in db.query("SELECT * FROM run_jobs WHERE status='running'"):
-                    # A result this attempt committed is complete: its CSVs render from SQL.
-                    completed = committed_result(db, orphan)
-                    finish_job(
-                        db,
-                        str(orphan["job_id"]),
-                        "completed" if completed else "failed",
-                        None
-                        if completed
-                        else "Worker interrupted. Retry this week."
-                        if orphan.get("backfill_id")
-                        else "Worker interrupted. Start a new run to retry.",
-                    )
-                    log.warn(
-                        "run.job_recovered",
-                        "Found a job still running from an interrupted worker (started "
-                        "{started:utc}); {outcome}",
-                        started=orphan["started_at"],
-                        outcome="its result was stored, so it is marked completed"
-                        if completed
-                        else "no result was stored, so it is marked failed",
-                        team_id=orphan["team_id"],
-                        run_id=orphan["run_id"],
-                        job_id=orphan["job_id"],
-                        backfill_id=orphan.get("backfill_id"),
-                    )
-                started = datetime.now(UTC).replace(tzinfo=None)
-                started = started.replace(microsecond=started.microsecond // 1000 * 1000)
-                job = db.query_one(
-                    "SELECT TOP 1 * FROM run_jobs WHERE status='pending' ORDER BY submitted_at"
-                )
-                if job is not None:
-                    db.execute(
-                        "UPDATE run_jobs SET status='running',started_at=:at WHERE job_id=:id",
-                        {"id": job["job_id"], "at": started},
-                    )
-                    db.commit()
-                else:
-                    job = claim_queued(db, started)
-                    if job is None:
-                        return False
-                job["started_at"] = started
-                with log_context(
-                    team_id=job["team_id"],
-                    run_id=job["run_id"],
-                    job_id=job["job_id"],
-                    backfill_id=job.get("backfill_id"),
-                ):
+                _recover_orphans(db)
+                job = _claim_next(db, 1)
+                if job is None:
+                    return False
+                with _job_context(job):
                     _run_job(settings, db, job)
                 return True
         except HTTPException as exc:
             if exc.status_code == 409:
                 return False
             raise
+
+
+def work_parallel(
+    settings: ApiSettings, slots: int, *, poll_seconds: float = 2, refill: bool = True
+) -> bool:
+    """Run up to ``slots`` jobs at once, one per team, until none is left to claim.
+
+    This session holds the execution locks while any job runs, so CLI runs, reports, the
+    weekly schedule and synchronous runs still find the worker busy, and recovery still
+    happens only before the first claim. Each job runs on a connection of its own. A job that
+    ends in an infrastructure error stops further claims; the others finish, then the error
+    exits the worker for its supervisor to restart. Without ``refill`` (``--once``) only the
+    first claims run and freed slots stay empty. Returns whether any job ran.
+    """
+    with connect(settings.config.sql, settings.target_database) as db:
+        if not _has_work(db):
+            return False
+        try:
+            with execution_lock(db, settings):
+                _recover_orphans(db)
+                return _run_slots(settings, db, slots, poll_seconds, refill=refill)
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                return False
+            raise
+
+
+def _run_slots(
+    settings: ApiSettings, db: Database, slots: int, poll_seconds: float, *, refill: bool = True
+) -> bool:
+    # A deletion beside running jobs locks their rows and can deadlock with a claim. Let the
+    # claim lose: the operator's deletion goes through and the claim is retried at the next poll.
+    db.execute("SET DEADLOCK_PRIORITY LOW")
+    running: dict[Future[None], tuple[int, dict[str, Any]]] = {}
+    failure: BaseException | None = None
+    failed_claims = 0
+    claiming = True
+    worked = False
+    with ThreadPoolExecutor(max_workers=slots, thread_name_prefix="run-job") as pool:
+        while True:
+            taken = {slot for slot, _job in running.values()}
+            free = [slot for slot in range(1, slots + 1) if slot not in taken]
+            if claiming and failure is None and free and not _holds_execution_lock(db):
+                failure = _session_lost(len(running))
+            while claiming and failure is None and free:
+                try:
+                    job = _claim_next(db, free[0])
+                except DBAPIError as exc:
+                    failed_claims += 1
+                    failure = _claim_failed(db, exc, failed_claims, len(running), poll_seconds)
+                    break
+                failed_claims = 0
+                if job is None:
+                    break
+                slot = int(job["active_slot"])
+                running[pool.submit(_run_on_own_connection, settings, job)] = (slot, job)
+                free.remove(slot)
+                worked = True
+            claiming = refill
+            if not running:
+                break
+            # Wake on a finished job, or after a poll to start work submitted meanwhile.
+            done, _ = wait(running, timeout=poll_seconds, return_when=FIRST_COMPLETED)
+            for future in done:
+                slot, job = running.pop(future)
+                error = future.exception()
+                if error is None:
+                    continue
+                with _job_context(job):
+                    if failure is None:
+                        failure = error
+                        log.error(
+                            "worker.stopping",
+                            "The job in slot {slot} stopped on an error the worker cannot "
+                            "recover from; starting no more jobs and exiting when the "
+                            "{running} still running finish",
+                            slot=slot,
+                            running=len(running),
+                            exc=error,
+                        )
+                    else:
+                        # Each lost job is recovered as interrupted; name every one of them.
+                        log.error(
+                            "worker.job_lost",
+                            "The job in slot {slot} also stopped on an error the worker "
+                            "cannot recover from while the worker was stopping",
+                            slot=slot,
+                            exc=error,
+                        )
+    if failure is not None:
+        raise failure
+    return worked
+
+
+#: Claims that fail in a row before the worker stops; a deadlock with a deletion fails one.
+CLAIM_ATTEMPTS = 3
+
+
+def _claim_failed(
+    db: Database, exc: DBAPIError, attempts: int, running: int, poll_seconds: float
+) -> BaseException | None:
+    """Log a failed claim; return it as the worker's failure once it has failed too often.
+
+    A lost connection fails at once. Losing it in the rollback instead is caught before the
+    next claim, by :func:`_holds_execution_lock`.
+    """
+    with suppress(Exception):
+        db.rollback()
+    if exc.connection_invalidated:
+        return _session_lost(running, exc)
+    if attempts < CLAIM_ATTEMPTS:
+        log.warn(
+            "worker.claim_failed",
+            "Claiming the next job failed; trying again in {poll:dur}",
+            poll=poll_seconds,
+            attempts=attempts,
+            exc=exc,
+        )
+        return None
+    log.error(
+        "worker.stopping",
+        "Claiming the next job failed {attempts} times in a row; starting no more jobs and "
+        "exiting when the {running} still running finish",
+        attempts=attempts,
+        running=running,
+        exc=exc,
+    )
+    return exc
+
+
+def _holds_execution_lock(db: Database) -> bool:
+    """Does this session still hold alerts-bi-manual-run?
+
+    After a lost connection SQLAlchemy runs the next statement on a fresh session, which holds
+    none of the worker's locks; claiming there would run jobs beside other writers.
+    """
+    try:
+        row = db.query_one(
+            "SELECT APPLOCK_MODE('public', :resource, 'Session') AS mode",
+            {"resource": LOCK_RESOURCE},
+        )
+    except DBAPIError:
+        return False
+    return row is not None and row["mode"] == "Exclusive"
+
+
+def _session_lost(running: int, exc: BaseException | None = None) -> BaseException:
+    """Log the stop for a lost worker session; return the failure the worker exits with."""
+    failure = exc or RuntimeError("the worker's SQL session no longer holds the execution lock")
+    log.error(
+        "worker.stopping",
+        "The worker's SQL session was lost, and with it the execution lock; starting no "
+        "more jobs and exiting when the {running} still running finish",
+        running=running,
+        exc=failure,
+    )
+    return failure
+
+
+def _run_on_own_connection(settings: ApiSettings, job: dict[str, Any]) -> None:
+    with connect(settings.config.sql, settings.target_database) as db, _job_context(job):
+        _run_job(settings, db, job)
 
 
 def _run_job(settings: ApiSettings, db: Database, job: dict[str, Any]) -> None:
@@ -496,6 +689,7 @@ def _run_job(settings: ApiSettings, db: Database, job: dict[str, Any]) -> None:
         week=f"{job['run_at']:%Y-%m-%d}",
         queued=queued,
         llm=job["llm_mode"],
+        slot=job.get("active_slot"),
     )
     clock = time.monotonic()
     try:
@@ -579,14 +773,25 @@ def run_worker(
     settings: ApiSettings,
     *,
     once: bool = False,
+    concurrency: int = 1,
     poll_seconds: float = 2,
     heartbeat_seconds: float = IDLE_HEARTBEAT_SECONDS,
 ) -> None:
-    """The supervisor restarts a worker after infrastructure errors; jobs stay durable."""
-    _log_worker_started(settings, poll_seconds)
+    """The supervisor restarts a worker after infrastructure errors; jobs stay durable.
+
+    With ``concurrency`` 1 each pass runs one job on the lock-owning session, as before
+    parallel slots existed; above 1 a pass runs jobs side by side until none is left. With
+    ``once`` above 1, the pass runs only the jobs it claims first, up to one per slot.
+    """
+    check_concurrency(settings, concurrency)
+    _log_worker_started(settings, poll_seconds, concurrency)
     idle_since = last_heartbeat = time.monotonic()
     while True:
-        worked = work_once(settings)
+        worked = (
+            work_once(settings)
+            if concurrency == 1
+            else work_parallel(settings, concurrency, poll_seconds=poll_seconds, refill=not once)
+        )
         if once:
             return
         now = time.monotonic()
@@ -599,7 +804,27 @@ def run_worker(
         time.sleep(poll_seconds)
 
 
-def _log_worker_started(settings: ApiSettings, poll_seconds: float) -> None:
+def check_concurrency(settings: ApiSettings, concurrency: int) -> None:
+    """Refuse a WORKER_CONCURRENCY outside 1..8, or above 1 before migration 021."""
+    if not 1 <= concurrency <= MAX_CONCURRENCY:
+        raise ValueError(
+            f"WORKER_CONCURRENCY must be between 1 and {MAX_CONCURRENCY}, got {concurrency}"
+        )
+    if concurrency == 1:
+        return
+    with connect(settings.config.sql, settings.target_database) as db:
+        applied = db.query_one(
+            "SELECT 1 AS ready FROM schema_migrations WHERE version=:version",
+            {"version": PARALLEL_MIGRATION},
+        )
+    if applied is None:
+        raise ValueError(
+            f"WORKER_CONCURRENCY={concurrency} needs database migration {PARALLEL_MIGRATION}; "
+            "run `alerts-bi-admin db setup`, or set WORKER_CONCURRENCY=1"
+        )
+
+
+def _log_worker_started(settings: ApiSettings, poll_seconds: float, concurrency: int) -> None:
     config = settings.config
     try:
         registry = (
@@ -612,10 +837,14 @@ def _log_worker_started(settings: ApiSettings, poll_seconds: float) -> None:
         registry_version = None
     log.info(
         "worker.started",
-        "Run worker {version} ready, polling {database} every {poll:dur}",
+        "Run worker {version} ready, polling {database} every {poll:dur}; {jobs}",
         version=APP_VERSION,
         database=settings.target_database,
         poll=poll_seconds,
+        jobs="one job at a time"
+        if concurrency == 1
+        else f"up to {concurrency} jobs at once, one per team",
+        concurrency=concurrency,
         sql=f"{config.sql.host}:{config.sql.port}",
         es=_host_and_port(config.es.url),
         indexes=[config.es.v1_index, config.es.v2_index],

@@ -123,10 +123,11 @@ def test_016_upgrades_a_populated_database_and_readiness_requires_it(
         "018_alert_identity_hash",
         "019_erase_operator_names",
         "020_portal_review_operators",
+        "021_parallel_run_slots",
     ]
 
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "020_portal_review_operators"
+        assert migrations.current_revision(db) == "021_parallel_run_slots"
         assert _counts(db) == before
         check_schema(db)
         stored = db.query(
@@ -208,7 +209,8 @@ def test_a_failed_016_rolls_back_completely_and_a_retry_applies_it(
         "018_alert_identity_hash",
         "019_erase_operator_names",
         "020_portal_review_operators",
+        "021_parallel_run_slots",
     ]
     with connect(CONFIG.sql, DB) as db:
-        assert migrations.current_revision(db) == "020_portal_review_operators"
+        assert migrations.current_revision(db) == "021_parallel_run_slots"
         assert _counts(db) == before

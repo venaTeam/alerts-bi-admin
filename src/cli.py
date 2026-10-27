@@ -32,7 +32,16 @@ def build_parser() -> argparse.ArgumentParser:
     worker = subparsers.add_parser("run-worker", help="execute durable manual run submissions")
     worker.add_argument("--database", help="ADMIN_DATABASE, else SQL_DATABASE")
     worker.add_argument("--registry", help="ADMIN_REGISTRY_PATH, else the packaged registry")
-    worker.add_argument("--once", action="store_true", help="process at most one job and exit")
+    worker.add_argument(
+        "--once",
+        action="store_true",
+        help="process at most one job (with --concurrency above 1, one per slot) and exit",
+    )
+    worker.add_argument(
+        "--concurrency",
+        type=int,
+        help="jobs run at once, one per team, 1 to 8; WORKER_CONCURRENCY, else 1",
+    )
     publish = subparsers.add_parser(
         "publish", help="publish a completed run as its team's weekly review"
     )
@@ -291,7 +300,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run-worker":
         from dataclasses import replace
 
-        from alerts_bi_shared.config.env import read_str
+        from alerts_bi_shared.config.env import read_int, read_str
 
         from .engine.api.jobs import run_worker
         from .engine.config import ApiSettings
@@ -304,6 +313,9 @@ def main(argv: list[str] | None = None) -> int:
                 registry_path=args.registry or read_str("ADMIN_REGISTRY_PATH") or None,
             ),
             once=args.once,
+            concurrency=args.concurrency
+            if args.concurrency is not None
+            else read_int("WORKER_CONCURRENCY", 1),
         )
         return 0
     handlers = {

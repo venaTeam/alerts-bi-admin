@@ -108,8 +108,8 @@ objects:
                 - {name: registry, mountPath: /etc/alerts-bi, readOnly: true}
                 - {name: ca-bundle, mountPath: /etc/alerts-bi-ca, readOnly: true}
               resources:
-                requests: {cpu: "${ANALYSIS_CPU_REQUEST}", memory: "${ANALYSIS_MEMORY_REQUEST}"}
-                limits: {memory: "${ANALYSIS_MEMORY_LIMIT}"}
+                requests: {cpu: "${ANALYSIS_CPU_REQUEST}", memory: "${WORKER_MEMORY_REQUEST}"}
+                limits: {memory: "${WORKER_MEMORY_LIMIT}"}
               securityContext:
                 allowPrivilegeEscalation: false
                 capabilities: {drop: [ALL]}
@@ -227,8 +227,14 @@ parameters:
     description: CPU request of the run-worker container, the weekly job and one-off admin jobs.
     value: 250m
   - name: ANALYSIS_MEMORY_REQUEST
-    description: Memory request of the run-worker container, the weekly job and one-off admin jobs.
+    description: Memory request of the weekly job and one-off admin jobs.
     value: 512Mi
   - name: ANALYSIS_MEMORY_LIMIT
-    description: Memory limit of the run-worker container, the weekly job and one-off admin jobs (233 MiB peak measured for 1.2 million events / 20,000 identities).
+    description: Memory limit of the weekly job and one-off admin jobs (233 MiB peak measured for 1.2 million events / 20,000 identities).
+    value: 2Gi
+  - name: WORKER_MEMORY_REQUEST
+    description: Memory request of the run-worker container.
+    value: 512Mi
+  - name: WORKER_MEMORY_LIMIT
+    description: Memory limit of the run-worker container. Each job it runs at once (WORKER_CONCURRENCY) holds a week of alerts, so raise it with that setting.
     value: 2Gi

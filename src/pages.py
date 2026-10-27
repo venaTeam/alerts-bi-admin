@@ -1000,7 +1000,8 @@ def job_panel(
     if status == "queued":
         heading = f"{week} is queued"
         intro = (
-            "Runs go one at a time across all teams, so this one waits for the runs ahead of it."
+            "A team runs one week at a time, and only a set number of teams run at once, so "
+            "this one waits for the runs ahead of it."
         )
         progress = ""
     else:

@@ -63,12 +63,12 @@
   },
   "run_scope": "An explicitly selected run must belong to the selected team",
   "payload_baseline": "console-openapi.json",
-  "schema_head": "020_portal_review_operators",
+  "schema_head": "021_parallel_run_slots",
   "manual_window": "Monday 00:00 UTC to the selected Monday 00:00 UTC; omitted API/CLI run_at selects the latest completed week",
   "admin_gap_override": false,
-  "execution_lock": "Database SQL session lock alerts-bi-weekly shared by manual HTTP/API and CLI runs, standalone CLI reports, weekly scheduling and deletion; held across scan, persistence and report writing, including model-off runs; standalone reports hold it before run-id/team lookup through the final file write; durable manual jobs also use this full-lifecycle lock",
+  "execution_lock": "Database SQL session lock alerts-bi-weekly shared by manual HTTP/API and CLI runs, standalone CLI reports, weekly scheduling and deletion; held across scan, persistence and report writing, including model-off runs; standalone reports hold it before run-id/team lookup through the final file write; durable manual jobs also use this full-lifecycle lock; since 2026-10-27 a worker running several jobs holds it while any of them runs, and each run stores its results under the transaction lock alerts-bi-persist, one at a time",
   "deletion": "Same-site CSRF and confirm_delete=1; removes the run and run-owned records; shared caches remain",
-  "deployment": "One UI replica/application worker, one dedicated manual run-worker; login proxy is the only service port",
+  "deployment": "One UI replica/application worker, one dedicated manual run-worker running up to WORKER_CONCURRENCY jobs at once (1 to 8, default 1), never two for one team; login proxy is the only service port",
   "workspace_navigation": [
     "teams",
     "schedule",
@@ -99,7 +99,7 @@
       "status_url",
       "result_url"
     ],
-    "concurrency": "One active job; SQL session lock and active slot constraint; since 2026-10-26 a busy submission is accepted as queued whether or not a backfill is in progress (queued and cancelled jobs hold no slot); a submission also queues while an older manual job is queued; a submission for a week the team already has queued, pending or running returns 409; a claimed job whose run is published fails without running; POST /run-jobs/{job_id}/cancel removes a queued manual job"
+    "concurrency": "One active job per team, and up to WORKER_CONCURRENCY active jobs in all (1 to 8, default 1, since 2026-10-27; before, one active job); SQL session lock, numbered active slots and one active slot per team (migration 021); since 2026-10-26 a busy submission is accepted as queued whether or not a backfill is in progress (queued and cancelled jobs hold no slot); a submission also queues while an older manual job is queued; a submission for a week the team already has queued, pending or running returns 409; a claimed job whose run is published fails without running; POST /run-jobs/{job_id}/cancel removes a queued manual job"
   },
   "exports": [
     "daily_metrics.csv",
@@ -114,8 +114,8 @@
     "locked_weeks": "Weeks with a current publication for the team, or a queued, pending or running job for the team",
     "model_mode": "live, fake or off for every week; live by default",
     "admission": "Browser form with same-site CSRF and a per-form submission key unique across all clients; one run_backfills row and one queued run_jobs row per week in one transaction; no execution lock; every run job insert and run deletion take the team's transaction-scoped queue lock alerts-bi-queue:{team_id}",
-    "claim_order": "Orphan reconciliation, pending job, queued manual jobs by submission, then backfill weeks by backfill submission and oldest week first",
-    "manual_priority": "A manual submission that finds the slot or execution lock busy is accepted as queued (during a backfill since 2026-10-14, at any time since 2026-10-26) and runs before the next backfill week",
+    "claim_order": "Orphan reconciliation, pending job, queued manual jobs by submission, then backfill weeks by backfill submission and oldest week first; since 2026-10-27 each free slot takes the first job in this order whose team holds no slot",
+    "manual_priority": "A manual submission that finds the slot or execution lock busy is accepted as queued (during a backfill since 2026-10-14, at any time since 2026-10-26) and runs before the next backfill week (since 2026-10-27, the next one whose team holds no slot: a free slot may start another team's backfill week while this run waits for its own team's running job)",
     "weekly_priority": "A weekly invocation blocked during a backfill holds SQL session lock alerts-bi-backfill-yield and waits up to three hours, polling every 30 seconds",
     "status_route": "GET /backfills/{backfill_id} returns BackfillOut"
   }

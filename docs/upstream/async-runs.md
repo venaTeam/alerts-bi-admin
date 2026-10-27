@@ -57,12 +57,17 @@ SQL/ES/model settings as the UI (no writable output since 2026-10-17). No broker
 Migration 011_run_job_keys adds a binary SHA-256 identity for the exact ASCII submission key,
 backfills existing keys and replaces text-based uniqueness. It preserves case and trailing
 spaces independently of database collation; raw keys remain in the private job audit.
-The worker polls SQL and claims at most one submission. States are pending, running, completed
+The worker polls SQL and claims at most one submission. (Amended 2026-10-27, design "Parallel
+runs across teams": with `WORKER_CONCURRENCY` above 1 it runs up to that many, one per team,
+each on its own SQL connection.) States are pending, running, completed
 and failed. Completion never publishes a review. Portal views and shared 0.1.3 are unchanged. Operations 0.2.0 removes the public HTML renderer.
 
 A SQL session application lock (`alerts-bi-manual-run`) serializes admission, execution and
 recovery. The execution connection owns that lock across LLM-journal and persistence commits.
-An active-slot constraint also prevents more than one pending/running job. The idle worker
+An active-slot constraint also prevents more than one pending/running job. (Amended
+2026-10-27: migration 021 numbers the slots from 1 and allows one active job per team; the
+worker's session keeps these locks while any of its jobs runs, and each job stores its results
+under the `alerts-bi-persist` transaction lock, one run at a time.) The idle worker
 checks that slot without taking execution locks, then rechecks/claims under the locks.
 Submission deliberately refuses active manual/CLI/report/weekly operations with 409; it
 does not create a queue behind them. (Amended 2026-10-26: it now accepts the job as `queued`

@@ -1,8 +1,81 @@
 # Alerts BI — Design Document
 
+## Parallel runs across teams — accepted 2026-10-27
+
+Until now the run worker executed one job at a time across all teams, so a long run or a
+multi-week backfill for one team held every other team's New run in the queue. On 2026-10-27
+the product owner asked for parallel runs in the worker and chose two rules: jobs of
+different teams may run at the same time, but never two of one team; and the number of jobs
+at once is a setting whose default keeps today's behavior. Approved behavior:
+
+* **A setting, default 1.** `WORKER_CONCURRENCY` (or `alerts-bi-admin run-worker
+  --concurrency`) is how many jobs the worker runs at once, from 1 to 8; another value stops
+  the worker at startup. With 1 the worker behaves exactly as before. Each further job adds an
+  Elasticsearch scan, model requests and a week of alerts in the worker's memory, so the
+  deployment raises it one step at a time together with the run-worker container's own
+  memory limit (`WORKER_MEMORY_LIMIT`, separate from the weekly job's and admin jobs'
+  `ANALYSIS_MEMORY_*`).
+* **Different teams side by side, one week per team.** A job holds a numbered slot from 1 to
+  the setting while it is pending or running. A team holds at most one slot: a queued job
+  whose team has a job running waits for it, and the next queued job of another team starts
+  instead. The claim order is otherwise unchanged (pending, then queued manual jobs in
+  submission order, then backfill weeks by backfill and oldest week), so one team's backfill
+  still runs oldest week first, and other teams' New runs and backfills no longer wait for it
+  to finish. A slot that frees is filled at once, and new work submitted while jobs run starts
+  within one poll.
+* **The worker stays one process.** One worker in the one admin pod runs the jobs on threads,
+  each on its own SQL connection; the Deployment stays one replica with Recreate. The worker
+  holds the shared execution locks (`alerts-bi-weekly`, `alerts-bi-manual-run`) while any of
+  its jobs runs, and recovers interrupted jobs only before its first claim, so every slot a
+  stopped worker left `running` is reconciled as before. CLI runs and reports, the weekly
+  schedule, acceptance verification and synchronous `POST /runs` therefore still refuse while
+  any job runs, a busy submission is still queued, and deletion still goes ahead only beside
+  jobs for other runs, locking every active job's row (section 7.12). A weekly invocation
+  waiting for a backfill week still keeps the worker off further backfill weeks; it starts
+  when the worker has no job left running.
+* **Results are stored one at a time.** Only the Elasticsearch scan, analysis and model calls
+  overlap. Storing a run (persistence) takes the transaction-scoped SQL lock
+  `alerts-bi-persist`, waiting up to 10 minutes in short requests (the SQL driver ends any
+  statement after `SQL_REQUEST_TIMEOUT_MS`), because the shared verdict and panel-parse
+  caches are written when absent and two big replacements could block each other. A run that
+  cannot take it in time fails with its analysis checkpoint kept, and can be retried.
+* **An infrastructure error drains the worker.** When a job ends in an error the worker cannot
+  record (a lost SQL connection, say), the worker starts no further jobs, lets the others
+  finish, then exits for its supervisor to restart, logging `worker.stopping` with the failed
+  job's team, run, job and slot, and `worker.job_lost` for each further job that fails the
+  same way meanwhile. Ordinary analysis failures still fail only their own job. A claim that
+  fails (a deadlock with a deletion of another run, say: the worker's session takes the lower
+  deadlock priority, so the deletion wins) is logged as `worker.claim_failed` and retried at the
+  next poll; three failures in a row stop the worker in the same way, and so does one that
+  lost the worker's SQL session, because that session held the execution lock.
+* **Migration `021_parallel_run_slots`.** It relaxes the job-state constraint from slot 1 to
+  any slot from 1, keeps one job per slot number and adds a filtered unique index of one active
+  job per team. It changes no rows. Like every migration it is roll-forward only: an image
+  without it stops in its migrate init container. A worker set above 1 refuses to start
+  without it, and console readiness requires it.
+
+The console's queued run says "A team runs one week at a time, and only a set number of teams
+run at once, so this one waits for the runs ahead of it." instead of "Runs go one at a time
+across all teams". Job states, routes, the queue, cancel and retry rules, CSV outputs, portal
+views and the shared/operations libraries are unchanged. This supersedes "Runs execute one at a
+time across all teams" below, "The worker polls SQL and claims at most one submission" and
+"An active-slot constraint also prevents more than one pending/running job" in
+[async-runs.md](async-runs.md), and "The single worker claims work" in
+[backfill.md](backfill.md), which keep their other rules, and qualifies "before the next
+backfill week" there and in the [runtime flow](alerts_bi_flow.md) with "once its own team has no
+run in progress". [Decision 011](../decisions/011-parallel-runs-across-teams.md) records it.
+
+Rollback: set `WORKER_CONCURRENCY=1` on this image and restart the pod, after its running jobs
+finish (a restart interrupts them and they are recovered as failed, as on any restart); that
+needs no schema change. Returning to an image without migration 021 needs the database restore
+of the deployment runbook's rollback section, as for any applied migration. `run-worker --once`
+with the setting above 1 runs only the jobs it claims first, at most one per slot. No
+deployment is authorized by this amendment.
+
 ## New runs queue while another run is in progress — accepted 2026-10-26
 
-Runs execute one at a time across all teams. Until now a New run submitted while another run
+Runs execute one at a time across all teams (superseded 2026-10-27 by "Parallel runs across
+teams": different teams may run at once, one week per team). Until now a New run submitted while another run
 was in progress was refused with 409 unless a backfill was running, so an operator had to wait
 for an unrelated team's run to finish and submit again. On 2026-10-26 the product owner asked
 that such a run wait its turn instead, and approved these rules:
@@ -1503,7 +1576,9 @@ only be the worker, and deletion locks that job's row so the worker cannot finis
 the lock on until the deletion commits. When the lock is taken and no job holds the slot,
 something without a job record (a CLI run or report, the weekly schedule) holds it, and
 deletion still returns 409, so a CLI rerun or report of the same run keeps blocking its
-deletion as the 2026-10-13 clarification requires.
+deletion as the 2026-10-13 clarification requires. (Amended 2026-10-27, "Parallel runs across
+teams": the worker may hold several slots and keeps the lock while any of its jobs runs;
+deletion locks every active job's row, and refuses only when one of them is the run's own.)
 
 **Amended 2026-10-26: a failed run that never stored results can be deleted.** A run's model
 audit (section 7.13) records its prompt version, model version and settings, including the

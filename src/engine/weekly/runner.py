@@ -144,7 +144,9 @@ def schedule_lock(
                 and lock.query_one(
                     "SELECT 1 AS present WHERE OBJECT_ID('run_jobs', 'U') IS NOT NULL"
                 )
-                and lock.query_one("SELECT TOP 1 job_id FROM run_jobs WHERE active_slot=1")
+                and lock.query_one(
+                    "SELECT TOP 1 job_id FROM run_jobs WHERE active_slot IS NOT NULL"
+                )
             ):
                 raise WeeklyBusy(
                     "a manual job is pending or running; let the worker complete or reconcile it first"
