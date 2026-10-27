@@ -85,7 +85,9 @@ worker off further backfill weeks and starts when no job is left running.)
 
 Manual submissions are unchanged when no backfill is in progress, including the 409 while busy.
 While a backfill has queued, pending or running weeks, a manual submission that finds the slot or
-execution lock busy is accepted as `queued` and runs before the next backfill week. The JSON
+execution lock busy is accepted as `queued` and runs before the next backfill week (since
+2026-10-27, once its own team has no run in progress; another team's week may take a free slot
+first). The JSON
 status reports `queued` until the worker claims it.
 
 **Amended 2026-10-26** (design "New runs queue while another run is in progress"): a manual
