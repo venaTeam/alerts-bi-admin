@@ -61,7 +61,9 @@ views and the shared/operations libraries are unchanged. This supersedes "Runs e
 time across all teams" below, "The worker polls SQL and claims at most one submission" and
 "An active-slot constraint also prevents more than one pending/running job" in
 [async-runs.md](async-runs.md), and "The single worker claims work" in
-[backfill.md](backfill.md), which keep their other rules. [Decision 011](../decisions/011-parallel-runs-across-teams.md) records it.
+[backfill.md](backfill.md), which keep their other rules, and qualifies "before the next
+backfill week" there and in the [runtime flow](alerts_bi_flow.md) with "once its own team has no
+run in progress". [Decision 011](../decisions/011-parallel-runs-across-teams.md) records it.
 
 Rollback: set `WORKER_CONCURRENCY=1` on this image and restart the pod, after its running jobs
 finish (a restart interrupts them and they are recovered as failed, as on any restart); that

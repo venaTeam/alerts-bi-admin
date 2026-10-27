@@ -1,9 +1,20 @@
 # Alerts BI — Runtime Flow
 
+## Parallel runs across teams — accepted 2026-10-27
+
+With `WORKER_CONCURRENCY` above 1 (default 1) the run worker runs up to that many jobs at once,
+for different teams, never two weeks of one team. Each free slot takes the first queued job in
+the usual order (pending, New runs by submission, backfill weeks) whose team has no run in
+progress, so a team's weeks still run one at a time, oldest first, while other teams' work runs
+beside them. CLI runs, reports, the weekly schedule and synchronous `POST /runs` still wait for
+the worker, and runs store their results one at a time. See design section "Parallel runs across
+teams".
+
 ## New runs queue while another run is in progress — accepted 2026-10-26
 
 A New run submitted while any run is in progress is accepted as queued instead of refused, and
-the worker runs it when the runs ahead of it finish, before the next backfill week. A second
+the worker runs it when the runs ahead of it finish, before the next backfill week (since
+2026-10-27, once its own team has no run in progress). A second
 submission for a week the team already has queued, pending or running is refused, and a new
 submission waits behind New runs already queued. A queued run can be removed from the team page
 until it starts; one whose week was published while it waited is marked failed without running.
