@@ -5,9 +5,10 @@
 With `WORKER_CONCURRENCY` above 1 (default 1) the run worker runs up to that many jobs at once,
 for different teams, never two weeks of one team. Each free slot takes the first queued job in
 the usual order (pending, New runs by submission, backfill weeks) whose team has no run in
-progress, so a team's weeks still run one at a time, oldest first, while other teams' work runs
-beside them. CLI runs, reports, the weekly schedule and synchronous `POST /runs` still wait for
-the worker, and runs store their results one at a time. See design section "Parallel runs across
+progress, so a team's jobs still run one at a time (backfill weeks oldest first) while other
+teams' work runs beside them. CLI runs, reports, the weekly schedule and synchronous
+`POST /runs` still refuse while any job runs (a weekly invocation waits only during a
+backfill), and runs store their results one at a time. See design section "Parallel runs across
 teams".
 
 ## New runs queue while another run is in progress — accepted 2026-10-26
