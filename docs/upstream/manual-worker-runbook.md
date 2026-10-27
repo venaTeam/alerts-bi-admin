@@ -64,6 +64,9 @@ and SQL_REQUEST_TIMEOUT_MS settings. SQL's millisecond value is converted to who
 use at least 1000 so it does not become the driver's unlimited zero timeout. Defaults are
 60 seconds for SQL/ES and 120 seconds for model requests. A run can contain many requests and
 three model attempts per batch, so these are not a whole-job deadline or heartbeat.
+LLM_CONCURRENCY (1 to 8, default 1) is how many of one run's model requests wait at once;
+each running job sends up to that many. If model timeouts, `429` responses or retried and
+exhausted batches rise after raising it, lower it again and restart; no run needs deleting.
 
 ## Recover a hung or lost worker
 

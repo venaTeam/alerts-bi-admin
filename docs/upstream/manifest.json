@@ -1,23 +1,23 @@
 {
   "repository": "https://github.com/venaTeam/alerts-bi-design",
-  "revision": "ca677f183f95606056727621aa16cc7c0e795cac",
+  "revision": "d12fc5bdc47fdfeed27db8fabe53846c600476c2",
   "sha256": {
     "docs/upstream/Alerting_Guide_Appchi_EN.md": "d1974902e7c5f3e541a35cd0e4a5e6d477ebb50fc5b4e9ac5f0b0417bab86274",
-    "docs/upstream/alerts_bi_design.md": "677e36d19de420eba959f6bcd75116fb1e5e87703e59b4c4973c4fc1ea092d64",
-    "docs/upstream/alerts_bi_flow.md": "876b3c3b255d032694a9cde3fe75c7ead528fda6c3ea412846a7e7b6b08fa174",
+    "docs/upstream/alerts_bi_design.md": "1cdebc050d6ea8a604fdb567f5e437f2125cfa04af26ae2f138750407198fcb6",
+    "docs/upstream/alerts_bi_flow.md": "011519d9cea977a65fa4bc7a42d41b4b596930e83b948f438df12154f937697d",
     "docs/upstream/alerts_bi_implementation_plan.md": "7ff4b55614813cb1161c2e1d90c8c783b93c6a9c3f550fc30551edcc28059953",
     "docs/upstream/async-runs.md": "7ae6f8f932c764dff63086756512399e6c2213dd4596bb58f5c8366883d0c11b",
     "docs/upstream/backfill.md": "30ca662fe9f88798fda611456d7c61bf6a838b09d02f450feb5a5297a3e15a75",
     "docs/upstream/handoffs/2026-10-01-team-summary-release.md": "4467ee9e762a5736a66b301dc4c123f5e42cfa86e5e65c053baa5dd083449375",
     "docs/upstream/llm_review_upgrade_plan.md": "141b8aec0b1d2a03bc13700600ba8c121f84026d427718488f720e5f6e5935ea",
-    "docs/upstream/manual-worker-runbook.md": "f5123f1ef75a19f7e6680902f074178e74c6462b941668e318b9f727691a708c",
+    "docs/upstream/manual-worker-runbook.md": "1875e8f357ba5f13164ec4d4c98ab8e6f88dd88d8bb4facc8e2251bb935eb32c",
     "docs/upstream/mockups/team-operators/admin.css": "e273cbaf11014053223fd31e8dd7b6c7d9100fb1a558abada61c1f16817a7468",
     "docs/upstream/mockups/team-operators/admin.html": "7005bc38d13065be6ca8d5b8f6771769338f76fa7ad2f0f392ff48b67c22b75b",
     "docs/upstream/mockups/team-operators/mock-data.js": "89f90a84da45c0141076bf821537ca8fdf3805e3aa23b0ad56ad7560dcd9e804",
     "docs/upstream/mockups/team-operators/portal.css": "244be829231dcff4ca656c9ddd567a67cb612bd70da697914491f44a2204c141",
     "docs/upstream/mockups/team-operators/portal.html": "72cdb8c75878b9ca6cfabfe032928ce3f676d00350da9a14a211777973286a83",
     "docs/upstream/mockups/team-operators/README.md": "2158fafc4f11146489f9b5e78f62cc2cea7f8de862749100478b34f910435c94",
-    "docs/upstream/openshift-deployment.md": "71354edf5783bb5a945044628f8b7ed0b05008dae72c5cba223b1e790bb03fd8",
+    "docs/upstream/openshift-deployment.md": "6406b393f7e871b987cf254d8844a67e8a012256538837a4bdd08d045cf0cb53",
     "docs/upstream/outputs.md": "0f77e512be4a7172529d7a6dec0ba49b8641ef9912deadf709777c257a7c9a5e",
     "docs/upstream/read-path-performance.md": "6db0e7bf73a2eb57c4706f6597634d8a36ed3b1d841ca8ac38e7a7ebbc4c7e2d",
     "docs/upstream/repository-separation-plan.md": "fe214a73e2e619b6525f36c7c3bce50ebd5a784c41add6c266936e8bcde5bf5c",
@@ -46,6 +46,7 @@
     "docs/decisions/008-console-log-format.md": "77a19df9646fa10bb69cd4cf286e47df532cdc9d8fc8e6ee12af864b49469597",
     "docs/decisions/009-log-shipping.md": "1635c3787cb78a2fd1c48048ed1691e6856035ce320c4677398b826d6202f77a",
     "docs/decisions/010-log-data-streams.md": "f12a90e209838e7742bcab64fd686f460d2c5909091a4889eff03c5e8667c4fb",
-    "docs/decisions/011-parallel-runs-across-teams.md": "02e9eaed31c7581387b5b57820e7e6d3a5249a05538b85a1881578c9d3885805"
+    "docs/decisions/011-parallel-runs-across-teams.md": "02e9eaed31c7581387b5b57820e7e6d3a5249a05538b85a1881578c9d3885805",
+    "docs/decisions/012-parallel-model-requests.md": "df751554585bb39c1a4f3cbaf60f073a6a1c91a9f84916cf372a4f6321ac524a"
   }
 }
