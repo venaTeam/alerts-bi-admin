@@ -1,5 +1,51 @@
 # Alerts BI — Design Document
 
+## Parallel model requests within a run — accepted 2026-10-27
+
+Until now a run sent its model batches one at a time: each request, and each wait before a
+retry, held up every later batch of the run. On 2026-10-27 the product owner asked for
+parallel model requests within one run, alongside "Parallel runs across teams" below, and
+chose a per-run setting whose default keeps today's behavior. Approved behavior:
+
+* **A setting, default 1.** `LLM_CONCURRENCY` is how many of a run's batches may wait on the
+  model at once, from 1 to 8; another value stops any command that loads the model settings
+  at startup. With 1 a run behaves exactly as before. The setting applies to every run,
+  whatever started it: worker jobs, CLI runs, synchronous `POST /runs` and the weekly
+  schedule. The evaluation script (section 7.13, "Evaluation isolation") still sends one
+  batch at a time.
+* **Each batch is unchanged.** Grouping, the 200-alert ceiling, balanced partitions, the
+  request bytes, the three attempts with identical bytes, the wait before each retry
+  (lengthened by `Retry-After`) and the audit entry committed before every request all stay as
+  section 5.1 and section 7.13 describe. A batch that waits before a retry holds up only
+  itself. The audit journal is still written on the run's one audit connection, which keeps
+  the run's `llm-review` session lock; its writes are short and go one at a time, and only
+  the requests and retry waits overlap.
+* **Results are the same as with the setting at 1.** The run's verdicts, outcomes, stored
+  batch attempts and new cache rows are collected per batch and combined in batch order, so
+  what a run stores, its CSVs and its identifiers do not depend on which request answered
+  first. The per-group log record (`llm.group`) is still written when each batch finishes and
+  keeps its "Group N of M" numbering, so with the setting above 1 those records can appear
+  out of order; the progress and summary records count all batches as before.
+* **Load multiplies with parallel runs.** Each running run sends up to `LLM_CONCURRENCY`
+  requests at once, so with `WORKER_CONCURRENCY` jobs side by side the endpoint can see up to
+  their product (64 at the caps). Section 7.2's capacity measurement is still open: raise the
+  setting one step at a time while watching the endpoint's timeouts, `429` responses and the
+  runs' retried and exhausted batch counts. Each batch honours its own `Retry-After`; there is
+  no shared back-off across batches or runs.
+* **Not a model setting of the run.** The run's model audit records the settings that shape
+  its batches (section 7.12, "a failed run that never stored results can be deleted"), and
+  `LLM_CONCURRENCY` does not shape them, so it is not recorded there: changing it never
+  refuses a week already sent to the model, unlike `LLM_MAX_BATCH_SIZE`.
+* **Recovery is unchanged per batch.** A run interrupted with several requests in flight
+  leaves each of those attempts `started`; when the run is retried, each is reconciled as an
+  interrupted attempt that consumes one of its batch's three attempts, as section 7.13
+  already requires for one.
+
+No migration, route, job state, CSV output, portal view or shared/operations interface
+changes. [Decision 012](../decisions/012-parallel-model-requests.md) records it. Rollback: set
+`LLM_CONCURRENCY=1` and restart; that needs no schema change. No deployment is authorized by
+this amendment.
+
 ## Parallel runs across teams — accepted 2026-10-27
 
 Until now the run worker executed one job at a time across all teams, so a long run or a

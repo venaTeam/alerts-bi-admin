@@ -261,6 +261,8 @@ recorded failures; available model/token metadata is retained, with missing usag
 
 The tool makes at most three attempts in total: the initial request plus two retries. Each retry sends the identical batch as a group. Alerts are never retried individually. If the third attempt fails, the whole batch becomes `unassessed`.
 
+Since 2026-10-27 up to `LLM_CONCURRENCY` batches of one run (default 1) wait on the model at once; each keeps its own attempts and retry waits, and results are combined in batch order. See design section "Parallel model requests within a run".
+
 ### 6.4 Record outcomes
 
 Each successfully assessed alert receives one verdict:

@@ -8,13 +8,17 @@ non-zero value reads as a broken classifier.
 
 from __future__ import annotations
 
+import contextvars
 import json
 import random
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import partial
 from typing import Any, Final
 
 from alerts_bi_shared.hashing import compact_json
@@ -106,13 +110,19 @@ def assess_alerts(
     factored: bool = True,
     reverse_order: bool = False,
     sleep: Callable[[float], None] | None = None,
+    concurrency: int = 1,
 ) -> AssessmentResult:
     """Assess eligible identities; live requests require durable pre-call SQL audit.
 
     ``sleep`` waits between a failed live attempt and its retry. By default a client that
     needs the audit journal (a real endpoint) waits with ``time.sleep``; any other client
     never touches a network, so it does not wait.
+
+    ``concurrency`` is how many batches wait on the model at once (``LLM_CONCURRENCY``).
+    It changes no batch and no result, so it is not among the audited settings.
     """
+    if concurrency < 1:
+        raise ValueError("concurrency must be at least 1")
     if getattr(client, "requires_audit", False) and journal is None:
         raise ValueError("live LLM assessment requires a SQL audit journal")
     if (not factored or reverse_order) and journal is not None and journal.kind != "evaluation":
@@ -147,6 +157,7 @@ def assess_alerts(
             sleep=sleep
             if sleep is not None
             else (time.sleep if getattr(client, "requires_audit", False) else _no_sleep),
+            concurrency=concurrency,
         )
 
 
@@ -170,6 +181,7 @@ def _assess_alerts(
     factored: bool,
     reverse_order: bool,
     sleep: Callable[[float], None],
+    concurrency: int = 1,
 ) -> AssessmentResult:
     """Assess every eligible alert."""
     existing = existing_verdicts or {}
@@ -216,41 +228,55 @@ def _assess_alerts(
         max_batch_size=max_batch_size or 200,
     )
 
-    for position, batch in enumerate(batches, start=1):
-        request = build_request(batch, RULESET_VERSION, prompt_version)
-        if not factored:
-            # Evaluation-only representation trial. Every source field is retained.
-            request["shared_fields"] = {}
-            for item, alert in zip(request["alerts"], batch.alerts, strict=True):
-                item["fields"] = alert.source
-        # Losslessness is asserted before the first call, so a factoring bug fails loudly
-        # instead of quietly sending the model documents with fields missing.
-        assert_lossless(request, batch)
+    stop = threading.Event()
+    assess = partial(
+        _assess_batch,
+        batch_count=len(batches),
+        client=client,
+        system_prompt=system_prompt,
+        run_id=run_id,
+        prompt_version=prompt_version,
+        now=now,
+        journal=journal,
+        clock=clock,
+        factored=factored,
+        sleep=sleep,
+        stopping=stop.is_set,
+    )
+    finished: list[_BatchOutcome | None] = [None] * len(batches)
+    if concurrency == 1 or len(batches) < 2:
+        for index, batch in enumerate(batches):
+            finished[index] = ended = assess(index + 1, batch)
+            progress.record(ended.attempts, succeeded=ended.verdicts is not None)
+    else:
+        # Only the requests and retry waits overlap; the journal serves one thread at a
+        # time. Each task gets its own copy of the run's log context.
+        with ThreadPoolExecutor(
+            max_workers=min(concurrency, len(batches)), thread_name_prefix="llm-batch"
+        ) as pool:
+            futures = {
+                pool.submit(contextvars.copy_context().run, assess, index + 1, batch): index
+                for index, batch in enumerate(batches)
+            }
+            try:
+                for future in as_completed(futures):
+                    finished[futures[future]] = ended = future.result()
+                    progress.record(ended.attempts, succeeded=ended.verdicts is not None)
+            except BaseException:
+                # Start no further batch and no further attempt of one in flight; leaving
+                # the block waits for each request already sent, so its audit record is
+                # complete before the error propagates.
+                stop.set()
+                for future in futures:
+                    future.cancel()
+                raise
 
-        # Serialized ONCE and reused byte-for-byte on every retry.
-        request_text, request_hash = serialize_request(request)
-
-        with log_context(batch_id=batch.batch_id):
-            first_attempt = len(result.batch_attempts)
-            verdicts, failure_reason, classified_at = _attempt_batch(
-                batch=batch,
-                request_text=request_text,
-                request_hash=request_hash,
-                client=client,
-                system_prompt=system_prompt,
-                run_id=run_id,
-                now=now,
-                batch_attempts=result.batch_attempts,
-                journal=journal,
-                clock=clock,
-                sleep=sleep,
-                position=(position, len(batches)),
-            )
-            _log_group(
-                batch, (position, len(batches)), result.batch_attempts[first_attempt:], verdicts
-            )
-        progress.record(result.batch_attempts[first_attempt:], succeeded=verdicts is not None)
-
+    # Combined in batch order, so what the run stores does not depend on which request
+    # answered first.
+    for done in finished:
+        assert done is not None
+        batch, verdicts = done.batch, done.verdicts
+        result.batch_attempts.extend(done.attempts)
         if verdicts is not None:
             for index, verdict in enumerate(verdicts):
                 alert = batch.alerts[index]
@@ -278,7 +304,7 @@ def _assess_alerts(
                         # the model judged is stored here or the verdict is unauditable.
                         "representative_doc": compact_json(alert.source),
                         "doc_hash": alert.doc_hash,
-                        "classified_at": _naive(classified_at),
+                        "classified_at": _naive(done.classified_at),
                         "ruleset_version": RULESET_VERSION,
                         "first_run_id": run_id,
                     }
@@ -292,13 +318,83 @@ def _assess_alerts(
                     principle_id=None,
                     confidence=None,
                     justification=None,
-                    unassessed_reason=failure_reason,
+                    unassessed_reason=done.failure_reason,
                     reused=False,
                     alert=alert,
                 )
 
     progress.finish()
     return result
+
+
+class _Stopping(Exception):
+    """The run is failing: a request thread starts no further attempt of its batch.
+
+    An attempt already sent finishes and is recorded; the batch resumes from the audit
+    journal when the run is retried.
+    """
+
+
+@dataclass(frozen=True, slots=True)
+class _BatchOutcome:
+    """How one batch ended, kept until every batch of the run has."""
+
+    batch: Batch
+    attempts: list[dict[str, Any]]
+    verdicts: list[Verdict] | None
+    failure_reason: str
+    classified_at: datetime
+
+
+def _assess_batch(
+    position: int,
+    batch: Batch,
+    *,
+    batch_count: int,
+    client: LlmClient,
+    system_prompt: str,
+    run_id: str,
+    prompt_version: str,
+    now: datetime,
+    journal: SqlLlmJournal | None,
+    clock: Callable[[], datetime],
+    factored: bool,
+    sleep: Callable[[float], None],
+    stopping: Callable[[], bool],
+) -> _BatchOutcome:
+    """Build, send and log one batch; runs on a request thread when batches overlap."""
+    request = build_request(batch, RULESET_VERSION, prompt_version)
+    if not factored:
+        # Evaluation-only representation trial. Every source field is retained.
+        request["shared_fields"] = {}
+        for item, alert in zip(request["alerts"], batch.alerts, strict=True):
+            item["fields"] = alert.source
+    # Losslessness is asserted before the first call, so a factoring bug fails loudly
+    # instead of quietly sending the model documents with fields missing.
+    assert_lossless(request, batch)
+
+    # Serialized ONCE and reused byte-for-byte on every retry.
+    request_text, request_hash = serialize_request(request)
+
+    attempts: list[dict[str, Any]] = []
+    with log_context(batch_id=batch.batch_id):
+        verdicts, failure_reason, classified_at = _attempt_batch(
+            batch=batch,
+            request_text=request_text,
+            request_hash=request_hash,
+            client=client,
+            system_prompt=system_prompt,
+            run_id=run_id,
+            now=now,
+            batch_attempts=attempts,
+            journal=journal,
+            clock=clock,
+            sleep=sleep,
+            position=(position, batch_count),
+            stopping=stopping,
+        )
+        _log_group(batch, (position, batch_count), attempts, verdicts)
+    return _BatchOutcome(batch, attempts, verdicts, failure_reason, classified_at)
 
 
 def _log_group(
@@ -454,6 +550,7 @@ def _attempt_batch(
     clock: Callable[[], datetime],
     sleep: Callable[[float], None],
     position: tuple[int, int] = (1, 1),
+    stopping: Callable[[], bool] = lambda: False,
 ) -> tuple[list[Verdict] | None, str, datetime]:
     """Run one batch through at most three attempts.
 
@@ -469,7 +566,8 @@ def _attempt_batch(
     completed_at = now
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        started = time.monotonic()
+        if stopping():
+            raise _Stopping("another batch of this run failed; no further attempt starts")
         status = "succeeded"
         reason: str | None = None
         verdicts: list[Verdict] | None = None
@@ -480,6 +578,9 @@ def _attempt_batch(
         created_at = saved["created_at"] if saved else clock()
         if journal is not None and saved is None:
             journal.start(cycle, attempt, created_at)
+        # After the audit writes, so a wait for another request thread's write is not
+        # counted as the request's latency.
+        started = time.monotonic()
 
         try:
             if saved is not None:

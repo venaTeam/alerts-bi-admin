@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
@@ -95,6 +96,77 @@ def test_interrupted_call_consumes_an_attempt_on_recovery(db: Database) -> None:
     assert [a["status"] for a in result.batch_attempts] == ["interrupted", "succeeded"]
     assert [c.attempt for c in resumed.calls] == [2]
     assert len({a["request_payload"] for a in result.batch_attempts}) == 1
+
+
+def three_rules() -> list[Any]:
+    return [v1_row(key_field=f"k{n}", alert_rule_url=f"https://g/d/{n}") for n in range(3)]
+
+
+def assess_rules(
+    db: Database, scope: str, client: FakeLlmClient, concurrency: int
+) -> AssessmentResult:
+    return assess_alerts(
+        alerts=three_rules(),
+        client=client,
+        system_prompt="audit test prompt",
+        run_id=scope,
+        prompt_version="audit-test",
+        model_version=client.model_version,
+        now=datetime(2026, 8, 25, tzinfo=UTC),
+        journal=SqlLlmJournal(db, scope),
+        clock=lambda: datetime.now(UTC),
+        audit_settings={"model_deployment": "fake"},
+        concurrency=concurrency,
+    )
+
+
+def test_parallel_batches_share_the_journal_and_replay_at_another_concurrency(
+    db: Database,
+) -> None:
+    scope = "p" * 64
+    first_client = FakeLlmClient()
+    first = assess_rules(db, scope, first_client, 3)
+    batch_ids = [a["batch_id"] for a in first.batch_attempts]
+    assert len(set(batch_ids)) == 3 and len(first_client.calls) == 3
+    rows = db.query(
+        "SELECT a.status,COUNT(*) AS n FROM llm_review_batches b "
+        "JOIN llm_review_attempts a ON a.cycle_id=b.cycle_id WHERE b.scope_id=:scope "
+        "GROUP BY a.status",
+        {"scope": scope},
+    )
+    assert rows == [{"status": "succeeded", "n": 3}]
+
+    # The setting is not a recorded model setting: changing it replays, never refuses.
+    replay_client = FakeLlmClient()
+    replay = assess_rules(db, scope, replay_client, 1)
+    assert replay_client.calls == []
+    assert [a["batch_id"] for a in replay.batch_attempts] == batch_ids
+    assert replay.new_verdicts == first.new_verdicts
+
+
+def test_several_interrupted_requests_each_consume_an_attempt_on_recovery(
+    db: Database,
+) -> None:
+    class Crash(BaseException):
+        pass
+
+    # All three requests are in flight before any of them crashes.
+    in_flight = threading.Barrier(3, timeout=10)
+
+    def crash(_request: dict[str, Any]) -> dict[str, Any]:
+        in_flight.wait()
+        raise Crash()
+
+    scope = "q" * 64
+    with pytest.raises(Crash):
+        assess_rules(db, scope, FakeLlmClient(fallback=ScriptedResult("ok", build=crash)), 3)
+    resumed = FakeLlmClient()
+    result = assess_rules(db, scope, resumed, 3)
+    statuses: dict[str, list[str]] = {}
+    for attempt in result.batch_attempts:
+        statuses.setdefault(attempt["batch_id"], []).append(attempt["status"])
+    assert list(statuses.values()) == [["interrupted", "succeeded"]] * 3
+    assert sorted(c.attempt for c in resumed.calls) == [2, 2, 2]
 
 
 def test_exhaustion_starts_a_new_explicit_cycle_without_erasing_previous_attempts(

@@ -7,6 +7,7 @@ Successful responses are replayed locally, never requested again for the same ba
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime
@@ -27,11 +28,43 @@ class ReviewSettingsChanged(ValueError):
     """
 
 
+class JournalStopped(RuntimeError):
+    """An earlier audit write of this review failed, or the review ended: write nothing more.
+
+    After a lost connection SQLAlchemy runs the next statement on a fresh session, which
+    holds neither the review's session lock nor the worker's execution locks, so the other
+    request threads of the run must not carry on there.
+    """
+
+
 class SqlLlmJournal:
+    """One run's audit on its one connection, which also holds the session lock.
+
+    A run with ``LLM_CONCURRENCY`` above 1 writes batch records from several request
+    threads, so each batch method takes ``_lock``: the connection serves one at a time.
+    Once one of them fails, or the review's lock is released, every later one raises
+    :class:`JournalStopped`.
+    """
+
     def __init__(self, db: Database, scope_id: str, *, kind: str = "run") -> None:
         self.db = db
         self.scope_id = scope_id
         self.kind = kind
+        self._lock = threading.Lock()
+        self._stopped = False
+
+    @contextmanager
+    def _serial(self) -> Iterator[None]:
+        with self._lock:
+            if self._stopped:
+                raise JournalStopped(
+                    "an earlier audit write of this review failed or the review ended"
+                )
+            try:
+                yield
+            except BaseException:
+                self._stopped = True
+                raise
 
     @contextmanager
     def locked(self) -> Iterator[SqlLlmJournal]:
@@ -54,6 +87,10 @@ class SqlLlmJournal:
                 raise RunIsPublished("published runs cannot start another LLM assessment")
             yield self
         finally:
+            # Request threads can still be running after an interrupt: end their writes
+            # first, so none lands after the lock is released or is undone by this rollback.
+            with self._lock:
+                self._stopped = True
             self.db.rollback()
             self.db.execute(
                 "EXEC sys.sp_releaseapplock @Resource=:resource, @LockOwner='Session'",
@@ -126,7 +163,7 @@ class SqlLlmJournal:
                 )
 
     def prepare(self, batch_id: str, request_text: str, request_hash: str) -> str:
-        with self.db.transaction():
+        with self._serial(), self.db.transaction():
             latest = self.db.query_one(
                 "SELECT TOP 1 * FROM llm_review_batches "
                 "WHERE scope_id=:scope AND batch_id=:batch ORDER BY cycle_number DESC",
@@ -157,13 +194,14 @@ class SqlLlmJournal:
         return cycle
 
     def attempt(self, cycle: str, number: int) -> dict[str, Any] | None:
-        return self.db.query_one(
-            "SELECT * FROM llm_review_attempts WHERE cycle_id=:cycle AND attempt_number=:number",
-            {"cycle": cycle, "number": number},
-        )
+        with self._serial():
+            return self.db.query_one(
+                "SELECT * FROM llm_review_attempts WHERE cycle_id=:cycle AND attempt_number=:number",
+                {"cycle": cycle, "number": number},
+            )
 
     def start(self, cycle: str, number: int, created_at: datetime) -> None:
-        with self.db.transaction():
+        with self._serial(), self.db.transaction():
             self.db.execute(
                 "INSERT INTO llm_review_attempts "
                 "(cycle_id,attempt_number,status,created_at) VALUES (:cycle,:number,'started',:created)",
@@ -186,7 +224,7 @@ class SqlLlmJournal:
         completed = completed_at.replace(
             tzinfo=None, microsecond=completed_at.microsecond // 1000 * 1000
         )
-        with self.db.transaction():
+        with self._serial(), self.db.transaction():
             self.db.execute(
                 "UPDATE llm_review_attempts SET status=:status,response_text=:response,"
                 "failure_reason=:reason,metadata_json=:metadata,duration_ms=:duration,completed_at=:completed "
@@ -205,7 +243,7 @@ class SqlLlmJournal:
         return completed
 
     def complete_batch(self, cycle: str, *, succeeded: bool) -> None:
-        with self.db.transaction():
+        with self._serial(), self.db.transaction():
             self.db.execute(
                 "UPDATE llm_review_batches SET status=:status WHERE cycle_id=:cycle",
                 {"cycle": cycle, "status": "succeeded" if succeeded else "exhausted"},

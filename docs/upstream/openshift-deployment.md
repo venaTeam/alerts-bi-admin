@@ -55,6 +55,7 @@ on the retired runs package/image/repository. Apply migrations before consumers.
 | ES_URL, ES_V1_INDEX, ES_V2_INDEX, ES_USERNAME, ES_PASSWORD, ES_CA_CERT, ES_REQUEST_TIMEOUT_MS, ES_PAGE_SIZE, ES_PIT_KEEP_ALIVE, ES_SEARCH_RETRIES, ES_SEARCH_RETRY_BACKOFF_MS | Admin, run worker and weekly execution only |
 | LLM_ENABLED, LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_MODEL_REVISION, LLM_TIMEOUT_MS, LLM_MAX_BATCH_SIZE, LLM_MAX_COMPLETION_TOKENS | Admin, run worker and weekly execution only; unchanged model configuration |
 | SSL_CERT_FILE | Optional; set to the mounted CA bundle when the model endpoint uses a private CA (the model client honours it). Never set but empty |
+| LLM_CONCURRENCY | Admin, run worker and weekly execution: model requests one run sends at once, 1 to 8; default 1 (design "Parallel model requests within a run", 2026-10-27). Each running job sends up to this many, so the endpoint can see up to WORKER_CONCURRENCY times this; raise it one step at a time while watching the endpoint |
 | WORKER_CONCURRENCY | Run worker only: jobs it runs at once, 1 to 8, never two for one team; default 1 (design "Parallel runs across teams", 2026-10-27). Raise it one step at a time with the run-worker container's `WORKER_MEMORY_LIMIT`; above 1 needs migration 021 |
 | LOG_LEVEL | debug, info, warn or error; default info |
 | LOG_FORMAT | console (default) for people reading `oc logs`, or json for a log collector that parses each line (design "Console log format", 2026-10-20) |

@@ -11,10 +11,14 @@ from dataclasses import dataclass
 
 from alerts_bi_shared.config.env import read_bool, read_int, read_str
 
-__all__ = ["MAX_BATCH_SIZE_CEILING", "LlmConfig", "load_llm_config"]
+__all__ = ["MAX_BATCH_SIZE_CEILING", "MAX_CONCURRENCY", "LlmConfig", "load_llm_config"]
 
 #: Hard ceiling from design section 5.1. Configuration may lower it, never raise it.
 MAX_BATCH_SIZE_CEILING = 200
+
+#: Most batches of one run waiting on the model at once (design "Parallel model requests
+#: within a run", 2026-10-27).
+MAX_CONCURRENCY = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +32,8 @@ class LlmConfig:
     live_test: bool
     model_revision: str = ""
     max_completion_tokens: int | None = None
+    concurrency: int = 1
+    """Batches of one run sent at once. It shapes no batch, so the run audit omits it."""
 
 
 def load_llm_config() -> LlmConfig:
@@ -48,6 +54,11 @@ def load_llm_config() -> LlmConfig:
     revision = read_str("LLM_MODEL_REVISION")
     if len(revision) > 128:
         raise ValueError("LLM_MODEL_REVISION exceeds 128 characters")
+    concurrency = read_int("LLM_CONCURRENCY", 1)
+    if not 1 <= concurrency <= MAX_CONCURRENCY:
+        raise ValueError(
+            f"LLM_CONCURRENCY must be between 1 and {MAX_CONCURRENCY}, got {concurrency}"
+        )
     return LlmConfig(
         enabled=read_bool("LLM_ENABLED", False),
         base_url=read_str("LLM_BASE_URL"),
@@ -58,4 +69,5 @@ def load_llm_config() -> LlmConfig:
         live_test=read_bool("LLM_LIVE_TEST", False),
         model_revision=revision,
         max_completion_tokens=token_limit or None,
+        concurrency=concurrency,
     )
