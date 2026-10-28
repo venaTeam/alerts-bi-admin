@@ -1,5 +1,5 @@
 {
-  "source_commit": "5eb6ce4dd6dfe5e01f1875761ef82c517bba4b89",
+  "source_commit": "6f121df42540164729e856eda7a1eb537a8cdb94",
   "schema_head": "022_long_key_fields",
   "files": {
     "001_initial_schema.sql": "7c4f43ce0aa698bcf82b1694143fe9dd5f68a35430c1a8461c7296f958dde41a",
@@ -44,7 +44,7 @@
     "versions/020_portal_review_operators.py": "f451b99f1f5fe16460a69e5000d0223c34125e4d58d22e0ddbb4fa419b39c93d",
     "021_parallel_run_slots.sql": "49483ee4216f9fef632b88a363e3f3bed9575c8b894056793d2b64e2beb8ef3b",
     "versions/021_parallel_run_slots.py": "aafd2bea68b96eb45771ba04181ddc32990aaa4a3802d6e76e7c2df215119bdd",
-    "022_long_key_fields.sql": "0565c8be609716031d2ca15ebac0551c6f7551316b59164a5b01989f8add5eab",
+    "022_long_key_fields.sql": "b6272c9d152bdc1528d10ed3dad3ee203a171e0863004567d0ec39c7cb3e84d6",
     "versions/022_long_key_fields.py": "d7c6bfe477d2d0e49782c0a1f460bbed274c6c5151b32848c97f2bb7b8cc4b7d"
   },
   "amended": "2026-10-28"

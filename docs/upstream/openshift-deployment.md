@@ -180,8 +180,10 @@ maintenance-window and no-deadline rules to 022, sizing for one more rewrite of 
 as for 018. If 022 fails, it rolls back completely, earlier revisions remain committed, and
 initialization retries 022. It is roll-forward only: an image without it stops with `Can't
 locate revision identified by '022_long_key_fields'`, and the revision refuses to downgrade
-because longer keys may then be stored. Recovery follows 018. The portal release of the same
-change reads keys up to 800 characters and does not need 022; deploy it no later than admin.
+because longer keys may then be stored. Recovery follows 018. Keep the usual order, admin and
+then the portal of the same release, and deploy the portal right after admin: the earlier portal
+fails the fix tab of a published week that holds a key over 512 characters (HTTP 500) and refuses
+that alert's link (422). The new portal reads keys up to 800 characters and also works before 022.
 
 Keep one replica and Recreate: an upgrade terminates the old UI/worker before creating the
 new pod. A migration failure keeps the application containers unstarted and OpenShift retries

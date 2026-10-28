@@ -105,4 +105,5 @@ hashed primary keys with unchanged hashes and carries `key_field` as an included
 sql-views.json records `key_field` as nvarchar(800) in `portal_alerts`, `portal_alert_list`
 and `portal_decisions`; console-http.json follows the head. CSV outputs, console routes and
 shared/operations interfaces are unchanged. The portal accepts 800-character keys in its
-lookups and alert links and does not need the migration, so deploy it no later than admin.
+lookups and alert links. Deploy admin and then the portal of the same release right after it:
+the earlier portal fails on a published week that holds a longer key.

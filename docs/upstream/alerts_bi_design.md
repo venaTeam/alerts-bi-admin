@@ -23,14 +23,22 @@ open, for `key_field`. Approved behavior:
   limit for a nonclustered index entry, so an insert of a long identity would fail with error
   1946. Each keeps its other key columns in the same order and carries `key_field` as an
   included column, which has no size limit. Work lists still order by `key_field` where they
-  did and return the same rows in the same order. SQL Server now sorts the ties among the
-  remaining key columns itself, over the rows the page's count already reads.
+  did and return the same rows in the same order. A page can no longer stop after its rows in
+  index order: SQL Server reads and sorts every row of the run that passes the page's
+  filters. Measured on a local 50,000-identity run (SQL Server 2022, median of nine), the admin
+  events order took 20 → 111 ms for the first page, 41 → 175 ms for a cursor page and
+  165 → 882 ms for page 500 by number. The portal's order took 219 → 307 ms for a cursor page
+  and 531 → 742 ms for page 500, with its first page unchanged. Next and previous links use
+  cursors, but a page-number link deep into the largest runs can exceed the 750 ms findings
+  target in `read-path-performance.md`.
 * **Readers.** 022 refreshes `portal_alerts`, `portal_alert_list` and `portal_decisions`,
   which expose `key_field` as nvarchar(800); `contracts/sql-views.json` records the width. The
   admin decision history and the portal's work list, decision lookups and alert page accept
   and compare keys of 800 characters. With their former 512-character limits the portal
-  would have truncated a longer key in its lookups and refused it in an alert link. The
-  portal change does not need the migration: deploy it no later than admin.
+  would have truncated a longer key in its lookups and refused it in an alert link. Deploy
+  in the usual order, admin and then the portal of the same release, with the portal right
+  after admin: until it runs, the earlier portal fails the fix tab of a published week that
+  holds a longer key and refuses that alert's link. The new portal also works before 022.
 * **Paging cursors.** The shared seek cursors still accept text values of at most 512
   characters. When a page's first or last row has a longer key, that page's previous or next
   link falls back to its page number, which shows the same rows because a stored run does not
