@@ -15,7 +15,7 @@ def test_default_prompt_and_revision_graph_work_outside_the_checkout(
     assert build_prompt().system_prompt_hash == (
         "f9754a11f4e9e0ba438c1f2d9062fa9511d57dc67789346ff01fc4e18489b794"
     )
-    assert heads() == ["021_parallel_run_slots"]
+    assert heads() == ["022_long_key_fields"]
 
 
 @pytest.mark.parametrize(

@@ -75,6 +75,7 @@ def test_upgrade_preserves_rows_and_case_distinct_publications(
         "019_erase_operator_names",
         "020_portal_review_operators",
         "021_parallel_run_slots",
+        "022_long_key_fields",
     ]
     with connect(CONFIG.sql, DB) as db:
         check_schema(db)

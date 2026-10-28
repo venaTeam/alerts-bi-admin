@@ -215,7 +215,7 @@ def decision_history(
                run_id
         FROM finding_decisions d WHERE team_id = :team_id AND EXISTS (
           SELECT 1 FROM OPENJSON(:identities) WITH
-          (s NVARCHAR(2) '$[0]', a NVARCHAR(256) '$[1]', k NVARCHAR(512) '$[2]') i
+          (s NVARCHAR(2) '$[0]', a NVARCHAR(256) '$[1]', k NVARCHAR(800) '$[2]') i
           WHERE i.s=d.alert_schema AND i.a=d.application AND i.k=d.key_field)
         ORDER BY decided_at ASC, decision_id ASC
         """,

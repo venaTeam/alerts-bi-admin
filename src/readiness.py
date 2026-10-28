@@ -88,6 +88,7 @@ def check_schema(db: Database) -> None:
         "019_erase_operator_names",
         "020_portal_review_operators",
         "021_parallel_run_slots",
+        "022_long_key_fields",
     ):
         if (
             db.query_one(

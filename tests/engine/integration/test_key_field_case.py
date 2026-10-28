@@ -42,7 +42,7 @@ KEY_FIELD_TABLES = ("alert_findings", "llm_verdicts", "finding_decisions", "run_
 KEY_FIELD_VIEWS = ("portal_alerts", "portal_decisions", "portal_alert_list")
 # Every key and index that contains key_field, which 016 drops and recreates, with whether each
 # is the primary key. Migration 018 then keys alert_findings and llm_verdicts by identity_hash
-# instead of key_field.
+# instead of key_field, and 022 carries key_field in these three as an included column.
 REBUILT_KEYS = {
     ("finding_decisions", "ix_finding_decisions_identity"): False,
     ("run_alert_list", "ix_run_alert_list_order"): False,

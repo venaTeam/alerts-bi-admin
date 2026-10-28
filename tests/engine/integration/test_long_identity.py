@@ -3,7 +3,8 @@
 pk_alert_findings and pk_llm_verdicts were clustered keys over application and key_field,
 which can be far wider than SQL Server's 900-byte clustered key limit. A team with an
 identity whose application and key_field together exceeded 384 characters failed the whole
-run with error 1946 (migration 018).
+run with error 1946 (migration 018). key_field then held 512 characters; sending teams' keys
+reach 800, which migration 022 stores without exceeding any index key limit.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from src.engine.llm.fake import FakeLlmClient, scripted_verdicts
 from src.engine.run import orchestrator
 from src.engine.run.orchestrator import execute_run
 from src.engine.run.streaming import SchemaAccumulator
+from src.queries import decision_history
 
 from tests.engine.helpers.rows import v1_row
 from tests.engine.helpers.sql import sample_verdict
@@ -43,7 +45,7 @@ TEAM = "long-identity-team"
 # Both columns at their full width, with non-ASCII text: a lookup that hashed a differently
 # encoded parameter would miss the stored verdict.
 APPLICATION = ("long-app-é-" * 30)[:256]
-PREFIX = ("disk:nöde-1/" * 50)[:511]
+PREFIX = ("disk:nöde-1/" * 70)[:799]
 # The keys differ only in their last character, so nothing may compare a truncated prefix.
 KEYS = {PREFIX + "a", PREFIX + "b"}
 CLUSTERED_LIMIT = 900
@@ -225,6 +227,12 @@ def test_readers_and_decisions_reach_each_identity(db: Database) -> None:
         )
         assert [(row["key_field"], row["note"]) for row in decisions] == [
             (key, f"decided on the key ending {key[-1]}")
+        ]
+        # The console's history lookup passes identities as JSON, which must not truncate.
+        identity = ("v1", APPLICATION, key)
+        history = decision_history(db, [identity], TEAM)
+        assert [row["note"] for row in history[identity]] == [
+            f"decided on the key ending {key[-1]}"
         ]
 
 
