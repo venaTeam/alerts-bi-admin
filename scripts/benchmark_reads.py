@@ -307,7 +307,7 @@ def main() -> None:
             existing = {str(r["run_id"]) for r in db.query("SELECT run_id FROM runs")}
             columns = {
                 table: db.query(
-                    "SELECT c.name,t.name AS type FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.user_type_id WHERE c.object_id=OBJECT_ID(:table) AND c.is_identity=0 ORDER BY c.column_id",
+                    "SELECT c.name,t.name AS type FROM sys.columns c JOIN sys.types t ON t.user_type_id=c.user_type_id WHERE c.object_id=OBJECT_ID(:table) AND c.is_identity=0 AND c.is_computed=0 ORDER BY c.column_id",
                     {"table": table},
                 )
                 for table in TABLES
