@@ -317,7 +317,8 @@ recreates the two hashed primary keys with unchanged hashes, and carries `key_fi
 included column of the three indexes that held it in their keys. Identity, verdict reuse,
 decisions and work-list order are unchanged; admin readiness refuses an older schema. It rewrites
 `alert_findings` and `llm_verdicts` once more and refuses downgrade, so follow the migration
-gate in `deploy/openshift/README.md`. Deploy the portal of the same change no later than admin.
+gate in `deploy/openshift/README.md`. Deploy the portal of the same release right after admin:
+until then, the earlier portal fails on a published week that holds a key over 512 characters.
 
 ## No login and no operator names (2026-10-19)
 

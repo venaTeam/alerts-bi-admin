@@ -16,8 +16,8 @@
 -- for a nonclustered index entry, so an insert of a long identity would fail with error 1946.
 -- They keep their other key columns in order and carry key_field as an included column, which
 -- has no size limit. Work lists still order by key_field and return the same rows in the same
--- order; SQL Server sorts the ties among the remaining key columns instead of reading them in
--- index order.
+-- order, but a page no longer stops after its rows in index order: SQL Server reads and sorts
+-- every row of the run that passes the page's filters (design records the measured cost).
 --
 -- The three views that expose key_field are refreshed so readers see the new width;
 -- sp_refreshview keeps the reader grants. Applied revisions are not edited. The Alembic
