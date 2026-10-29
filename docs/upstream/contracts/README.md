@@ -96,3 +96,14 @@ any slot from 1 and adds the filtered unique index `ux_run_jobs_team_active` (on
 team); no row, view, column or CSV output changes. console-http.json records the worker's
 `WORKER_CONCURRENCY` (1 to 8, default 1) and the `alerts-bi-persist` storage lock. Routes, job
 states, payloads, portal views and shared/operations interfaces are unchanged.
+
+The 2026-10-28 long-key amendment (design "Key fields up to 800 characters") appends migration
+022_long_key_fields without modifying 001–021. It stores `key_field` as nvarchar(800) in
+`alert_findings`, `llm_verdicts`, `finding_decisions` and `run_alert_list`, recreates the two
+hashed primary keys with unchanged hashes and carries `key_field` as an included column of
+`ix_finding_decisions_identity`, `ix_run_alert_list_order` and `ix_run_alert_list_events`.
+sql-views.json records `key_field` as nvarchar(800) in `portal_alerts`, `portal_alert_list`
+and `portal_decisions`; console-http.json follows the head. CSV outputs, console routes and
+shared/operations interfaces are unchanged. The portal accepts 800-character keys in its
+lookups and alert links. Deploy admin and then the portal of the same release right after it:
+the earlier portal fails on a published week that holds a longer key.

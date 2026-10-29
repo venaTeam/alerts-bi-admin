@@ -399,8 +399,8 @@ Expect `succeeded=1`, a `revision:` line naming a migration listed below it, and
 ### 7.4 Migration gate
 
 Pending migrations can lock tables for a long time and cannot be undone except by restoring a
-backup. 015, 016, 017 and 018 rebuild the primary keys and indexes of the largest tables; while they
-run, portal pages and every query on those tables wait. 019 erases stored operator names for
+backup. 015, 016, 017, 018 and 022 rebuild the primary keys and indexes of the largest tables; while
+they run, portal pages and every query on those tables wait. 019 erases stored operator names for
 good (section 5). 020 only recreates the `portal_reviews` view: the portal image that reads its
 new operator columns is not ready until 020 is applied, so upgrade admin first. Before applying
 any pending migration,
@@ -409,7 +409,7 @@ the database owner must confirm all of the following to you in writing. You cann
 1. They will take a database backup in this window, after section 7.5 has stopped every
    writer and before the first pending migration, and confirm that it restores.
 2. The window is sized from a rehearsal on a restored copy of comparable size, including index
-   rebuilds and transaction-log space (015, 016 and 018 each rewrite `alert_findings` and
+   rebuilds and transaction-log space (015, 016, 018 and 022 each rewrite `alert_findings` and
    `llm_verdicts`; 017 changes eight team tables).
 3. The maintenance window lies outside `WEEKLY_SCHEDULE`, and portal readers have been told
    that pages may wait.
@@ -543,7 +543,7 @@ oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly --dry
 oc exec -n "$NS" deploy/alerts-bi-admin -c admin -- alerts-bi-admin weekly-status
 ```
 
-Expect every migration `applied` (the last one `021_parallel_run_slots`), the registry valid
+Expect every migration `applied` (the last one `022_long_key_fields`), the registry valid
 with the expected teams, the due weeks listed without anything being run, and each enrolled
 team's latest published week.
 

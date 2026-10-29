@@ -101,7 +101,7 @@ def verdict_key(application: str, key_field: str) -> str:
 
 
 def identity_hash_sql(application: str, key_field: str) -> str:
-    """SQL for the stored ``identity_hash`` of two NVARCHAR expressions (migration 018).
+    """SQL for the stored ``identity_hash`` of two NVARCHAR expressions (migrations 018, 022).
 
     This is the computed column's definition, so a lookup that compares against it seeks the
     primary key of ``alert_findings`` or ``llm_verdicts`` instead of scanning.

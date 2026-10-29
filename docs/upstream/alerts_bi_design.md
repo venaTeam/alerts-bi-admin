@@ -1,5 +1,54 @@
 # Alerts BI — Design Document
 
+## Key fields up to 800 characters — accepted 2026-10-28
+
+On 2026-10-28 the product owner reported that sending teams' `key_field` values can reach 800
+characters and asked for the database to hold them. Every stored `key_field` column was
+NVARCHAR(512), so a run with a longer key failed to persist and rolled back. This is the
+"values longer than their columns" item that "Fixed-width alert identity keys" below left
+open, for `key_field`. Approved behavior:
+
+* **Width.** Migration `022_long_key_fields`, which follows `021_parallel_run_slots`, stores
+  `key_field` as NVARCHAR(800) in `alert_findings`, `llm_verdicts`, `finding_decisions` and
+  `run_alert_list`, still `Latin1_General_100_BIN2` and NOT NULL. `application` stays
+  NVARCHAR(256). A key longer than 800 UTF-16 code units still fails the run when stored.
+* **Primary keys.** The computed `identity_hash` reads `key_field`, which blocks the column
+  change. 022 drops `pk_alert_findings`, `pk_llm_verdicts` and both hash columns, widens the
+  columns, and recreates the hash columns and keys with the 018 definitions. The hash covers
+  the value, not the declared width, so every stored identity keeps its hash. Identity,
+  verdict reuse and decisions are unchanged.
+* **Indexes.** `ix_finding_decisions_identity`, `ix_run_alert_list_order` and
+  `ix_run_alert_list_events` had `key_field` as a key column. At 800 characters beside a
+  256-character application an entry could reach 2,252 bytes, past SQL Server's 1,700-byte
+  limit for a nonclustered index entry, so an insert of a long identity would fail with error
+  1946. Each keeps its other key columns in the same order and carries `key_field` as an
+  included column, which has no size limit. Work lists still order by `key_field` where they
+  did and return the same rows in the same order. A page can no longer stop after its rows in
+  index order: SQL Server reads and sorts every row of the run that passes the page's
+  filters. Measured on a local 50,000-identity run (SQL Server 2022, median of nine), the admin
+  events order took 20 → 111 ms for the first page, 41 → 175 ms for a cursor page and
+  165 → 882 ms for page 500 by number. The portal's order took 219 → 307 ms for a cursor page
+  and 531 → 742 ms for page 500, with its first page unchanged. Next and previous links use
+  cursors, but a page-number link deep into the largest runs can exceed the 750 ms findings
+  target in `read-path-performance.md`.
+* **Readers.** 022 refreshes `portal_alerts`, `portal_alert_list` and `portal_decisions`,
+  which expose `key_field` as nvarchar(800); `contracts/sql-views.json` records the width. The
+  admin decision history and the portal's work list, decision lookups and alert page accept
+  and compare keys of 800 characters. With their former 512-character limits the portal
+  would have truncated a longer key in its lookups and refused it in an alert link. Deploy
+  in the usual order, admin and then the portal of the same release, with the portal right
+  after admin: until it runs, the earlier portal fails the fix tab of a published week that
+  holds a longer key and refuses that alert's link. The new portal also works before 022.
+* **Paging cursors.** The shared seek cursors still accept text values of at most 512
+  characters. When a page's first or last row has a longer key, that page's previous or next
+  link falls back to its page number, which shows the same rows because a stored run does not
+  change. The shared and operations libraries are unchanged.
+
+CSV outputs, console routes, ordering, the trailing-space limitation and every other
+interface are unchanged. 022 rewrites `alert_findings` and `llm_verdicts` once more, as 018
+did, and rebuilds the three indexes, so the migration gate in `openshift-deployment.md`
+applies. Its downgrade is refused: keys longer than 512 characters may then be stored.
+
 ## Parallel model requests within a run — accepted 2026-10-27
 
 Until now a run sent its model batches one at a time: each request, and each wait before a
@@ -436,7 +485,8 @@ downgrade is refused.
 
 Not covered: values longer than their columns (`application` over 256 or `key_field` over 512
 UTF-16 code units) still fail the run when stored. That has not been observed and needs a
-separate decision. The trailing-space limitation recorded below is unchanged.
+separate decision. The trailing-space limitation recorded below is unchanged. (On 2026-10-28
+"Key fields up to 800 characters" above widened `key_field` to 800.)
 
 ## Operator console redesign — accepted 2026-10-19
 

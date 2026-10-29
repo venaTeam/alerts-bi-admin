@@ -307,6 +307,19 @@ is unchanged, and admin readiness refuses an older schema. It refuses downgrade,
 without 018 cannot start its migration init container against a migrated database. Follow the
 migration gate (backup, sizing and maintenance window) in `deploy/openshift/README.md`.
 
+## Keys up to 800 characters (2026-10-28)
+
+Apply migration `022_long_key_fields` through `db setup` (design "Key fields up to 800
+characters"). Before it, a run whose `key_field` exceeds 512 characters fails with "String or
+binary data would be truncated" and persists nothing. The migration stores `key_field` as
+NVARCHAR(800) in `alert_findings`, `llm_verdicts`, `finding_decisions` and `run_alert_list`,
+recreates the two hashed primary keys with unchanged hashes, and carries `key_field` as an
+included column of the three indexes that held it in their keys. Identity, verdict reuse,
+decisions and work-list order are unchanged; admin readiness refuses an older schema. It rewrites
+`alert_findings` and `llm_verdicts` once more and refuses downgrade, so follow the migration
+gate in `deploy/openshift/README.md`. Deploy the portal of the same release right after admin:
+until then, the earlier portal fails on a published week that holds a key over 512 characters.
+
 ## No login and no operator names (2026-10-19)
 
 The console has no login and records no names (design "Admin console without login").
