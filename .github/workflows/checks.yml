@@ -69,3 +69,16 @@ jobs:
       - name: Remove disposable CI services
         if: always()
         run: docker compose down -v
+  change-note:
+    # Every pull request adds a complete change note (changes/README.md). GitHub-only: the
+    # private network imports merged code and does not port this check to GitLab CI.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python changes/notes.py check --base "origin/${{ github.base_ref }}"
